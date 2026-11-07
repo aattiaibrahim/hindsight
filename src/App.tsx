@@ -422,10 +422,12 @@ export default function App() {
         ))}
       </nav>
       <main className="main">
-        {(isList(view) || view === "studio") && (
+        {/* The last clip list stays loaded (hidden) behind Studio, Settings and
+            the other pages, so coming back to it is instant. */}
+        {(
           <Library
             key={listView}
-            active={view !== "studio"}
+            active={isList(view)}
             clips={
               listView === "local"
                 ? localClips
@@ -439,7 +441,7 @@ export default function App() {
             }
             mode={listView}
             onOpen={openInStudio}
-            onToast={(t, e) => toast(t, e)}
+            onToast={toast}
             onChanged={refresh}
             onDelete={requestDelete}
             hotkey={settings?.hotkey ?? "Alt+F10"}
@@ -458,7 +460,7 @@ export default function App() {
             update={update}
             onOpen={openInStudio}
             onDelete={requestDelete}
-            onToast={(t, e) => toast(t, e)}
+            onToast={toast}
             onChanged={refresh}
           />
         )}

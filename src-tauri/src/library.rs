@@ -1397,3 +1397,18 @@ mod library_merge_tests {
         let _ = fs::remove_dir_all(&d);
     }
 }
+#[cfg(test)]
+mod live_scan {
+    /// How long listing a real clips folder takes:
+    /// set REWIND_SCAN_DIR, then cargo test --lib live_scan_timing -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_scan_timing() {
+        let Ok(dir) = std::env::var("REWIND_SCAN_DIR") else { return };
+        for round in 0..3 {
+            let t = std::time::Instant::now();
+            let clips = super::scan(std::path::Path::new(&dir), &[]);
+            println!("round {round}: {} clips in {} ms", clips.len(), t.elapsed().as_millis());
+        }
+    }
+}

@@ -1,5 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ClipFile, codecLabel, errText, fmtDuration, fmtSize, Health, Probe, Upload, UploadProgress, VIDEO_EXTENSIONS } from "./api";
 import { useNearView, useThumb } from "./hooks";
 import { liveLink, progressText, ShareRequest, timeLeft } from "./Share";
@@ -22,6 +22,10 @@ type Sort = "new" | "old" | "big";
 /** where: "" any, "pc" on this PC, "nas" on the NAS; sources: "Hindsight", "Medal"…; from/to: YYYY-MM-DD; minMb: 0 = any */
 type Filters = { where: "" | "pc" | "nas"; sources: string[]; from: string; to: string; minMb: number };
 const NO_FILTERS: Filters = { where: "", sources: [], from: "", to: "", minMb: 0 };
+/** Cards built straight away (a couple of screens), then this many more at a time. */
+const FIRST_CARDS = 40;
+const MORE_CARDS = 80;
+
 const TITLES: Record<string, string> = { totrim: "To trim", clips: "Clips", local: "Local clips", synced: "Synced clips", damaged: "Damaged clips" };
 
 const remembered = <T extends string>(k: string, d: T): T => {
@@ -294,7 +298,14 @@ function gameKey(folder: string) {
   return folder.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
-export function Library({
+/**
+ * The clip lists. Redrawn only when something it shows changes (memo): the app
+ * gets a status update every second, and redrawing 500+ cards on each one kept
+ * the window busy.
+ */
+export const Library = memo(LibraryView);
+
+function LibraryView({
   clips,
   onOpen,
   onToast,
@@ -416,6 +427,37 @@ export function Library({
     }
     return out;
   }, [matching, folder, sort]);
+
+  // Build the first screenful of cards straight away and the rest in small
+  // batches after that, so the Clips tab shows at once even with hundreds of
+  // clips (building them all in one go took seconds). Coming back to a
+  // scrolled-down spot builds them all first, so the spot is still there.
+  const total = useMemo(() => groups.reduce((n, g) => n + g.items.length, 0), [groups]);
+  const [limit, setLimit] = useState(() => (memory.scroll > 0 ? Infinity : FIRST_CARDS));
+  const listKey = `${folder}|${query}|${sort}|${viewMode}|${JSON.stringify(filters)}`;
+  const lastKey = useRef(listKey);
+  useEffect(() => {
+    if (lastKey.current === listKey) return;
+    lastKey.current = listKey;
+    setLimit(FIRST_CARDS);
+  }, [listKey]);
+  useEffect(() => {
+    if (limit >= total) return;
+    const t = window.setTimeout(() => setLimit((l) => l + MORE_CARDS), 0);
+    return () => window.clearTimeout(t);
+  }, [limit, total]);
+  /** The days built so far: each with its whole group (for counts and "Select day") and the cards built. */
+  const shownGroups = useMemo(() => {
+    let left = limit;
+    const out: { g: (typeof groups)[number]; items: ClipFile[] }[] = [];
+    for (const g of groups) {
+      if (left <= 0) break;
+      const items = g.items.length <= left ? g.items : g.items.slice(0, left);
+      left -= items.length;
+      out.push({ g, items });
+    }
+    return out;
+  }, [groups, limit]);
 
   /** Folders view: one per game (same game, any spelling), biggest collections first. */
   const gameFolders = useMemo(() => {
@@ -569,8 +611,110 @@ export function Library({
 
   const selectedBytes = (clips ?? []).filter((c) => selected.has(c.path)).reduce((n, c) => n + c.size, 0);
 
+  // The cards themselves, built again only when something they show changes:
+  // showing or hiding the list (Settings and back) doesn't rebuild 500+ cards.
+  const cards = useMemo(
+    () => (
+clips === null ? null : clips.length === 0 && trimMode ? (
+        <div className="empty">
+          <strong>Nothing left to trim</strong>
+          <span>Every saved clip has been trimmed, or marked “Keep whole”. New clips show up here until you trim them.</span>
+        </div>
+      ) : clips.length === 0 && damagedMode ? (
+        <div className="empty">
+          <strong>No damaged clips</strong>
+          <span>Every clip checked so far plays properly. Anything that doesn't will show up here.</span>
+        </div>
+      ) : clips.length === 0 ? (
+        <div className="empty">
+          <strong>No clips yet</strong>
+          <span>
+            Play something and press <span className="kbd">{hotkey}</span> to save the last moments. Or open a video from
+            anywhere on your PC to edit it.
+          </span>
+          <button className="btn" onClick={openAny}>
+            Open any video…
+          </button>
+        </div>
+      ) : (atFolderRoot ? gameFolders.length === 0 : groups.length === 0) ? (
+        <div className="empty">
+          <strong>Nothing matches</strong>
+          {activeFilters > 0 && (
+            <button className="btn" onClick={() => setFilters(NO_FILTERS)}>
+              Clear filters
+            </button>
+          )}
+        </div>
+      ) : atFolderRoot ? (
+        <div className="folder-grid">
+          {gameFolders.map((f) => (
+            <FolderTile key={f.name} name={f.name} items={f.items} onOpen={() => setFolder(f.name)} />
+          ))}
+        </div>
+      ) : viewMode === "list" ? (
+        <div className="clip-rows">
+          {shownGroups.flatMap((s) => s.items).map((c) => (
+            <ClipRow key={c.path} clip={c} selected={selected.has(c.path)} onClick={clickCard(c.path)} damage={health?.[c.path]} nasOn={nasOn} copying={nas?.copying} />
+          ))}
+        </div>
+      ) : (
+        shownGroups.map(({ g, items: built }) => {
+          const allInDay = g.items.every((c) => selected.has(c.path));
+          return (
+            <section key={g.day} data-day={g.day} className="day">
+              <div className="day-head">
+                <h3>{g.day}</h3>
+                <span className="muted">
+                  {g.items.length} clip{g.items.length === 1 ? "" : "s"}
+                </span>
+                {selecting && (
+                  <button
+                    className="btn small"
+                    onClick={() =>
+                      setSelected((s) => {
+                        const n = new Set(s);
+                        g.items.forEach((c) => (allInDay ? n.delete(c.path) : n.add(c.path)));
+                        return n;
+                      })
+                    }
+                  >
+                    {allInDay ? "Unselect day" : "Select day"}
+                  </button>
+                )}
+              </div>
+              <div className="grid">
+                {built.map((c) => (
+                  <ClipCard
+                    nasOn={nasOn}
+                    copying={nas?.copying}
+                    key={c.path}
+                    clip={c}
+                    selected={selected.has(c.path)}
+                    onClick={clickCard(c.path)}
+                    onToggle={(e) => (e.shiftKey ? selectRange(c.path) : toggle(c.path))}
+                    onDelete={() => onDelete(selected.has(c.path) ? [...selected] : [c.path])}
+                    deleteCount={selected.has(c.path) ? selected.size : 1}
+                    onToast={onToast}
+                    upload={uploads?.[c.path]}
+                    link={liveLink(links?.[c.path])}
+                    damage={health?.[c.path]}
+                    onShare={() => onShare?.({ path: c.path })}
+                    returned={c.path === returnedTo}
+                    onKeepWhole={onKeepWhole ? () => onKeepWhole([c.path]) : undefined}
+                  />
+                ))}
+              </div>
+            </section>
+          );
+        })
+      )
+    ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [clips, trimMode, damagedMode, hotkey, atFolderRoot, gameFolders, groups.length, activeFilters, viewMode, shownGroups, selected, selecting, health, nasOn, nas?.copying, uploads, links, returnedTo, onKeepWhole, onDelete, onToast, onShare, onOpen, selectRange, toggle],
+  );
+
   return (
-    <div className="lib" hidden={!active}>
+    <div className={`lib ${active ? "" : "inactive"}`} aria-hidden={!active || undefined} inert={!active || undefined}>
       {previewing && selecting && (
         <DeletePreview
           clips={selectedClips}
@@ -735,99 +879,7 @@ export function Library({
         )
       )}
 
-      {clips === null ? null : clips.length === 0 && trimMode ? (
-        <div className="empty">
-          <strong>Nothing left to trim</strong>
-          <span>Every saved clip has been trimmed, or marked “Keep whole”. New clips show up here until you trim them.</span>
-        </div>
-      ) : clips.length === 0 && damagedMode ? (
-        <div className="empty">
-          <strong>No damaged clips</strong>
-          <span>Every clip checked so far plays properly. Anything that doesn't will show up here.</span>
-        </div>
-      ) : clips.length === 0 ? (
-        <div className="empty">
-          <strong>No clips yet</strong>
-          <span>
-            Play something and press <span className="kbd">{hotkey}</span> to save the last moments. Or open a video from
-            anywhere on your PC to edit it.
-          </span>
-          <button className="btn" onClick={openAny}>
-            Open any video…
-          </button>
-        </div>
-      ) : (atFolderRoot ? gameFolders.length === 0 : groups.length === 0) ? (
-        <div className="empty">
-          <strong>Nothing matches</strong>
-          {activeFilters > 0 && (
-            <button className="btn" onClick={() => setFilters(NO_FILTERS)}>
-              Clear filters
-            </button>
-          )}
-        </div>
-      ) : atFolderRoot ? (
-        <div className="folder-grid">
-          {gameFolders.map((f) => (
-            <FolderTile key={f.name} name={f.name} items={f.items} onOpen={() => setFolder(f.name)} />
-          ))}
-        </div>
-      ) : viewMode === "list" ? (
-        <div className="clip-rows">
-          {groups.flatMap((g) => g.items).map((c) => (
-            <ClipRow key={c.path} clip={c} selected={selected.has(c.path)} onClick={clickCard(c.path)} damage={health?.[c.path]} nasOn={nasOn} copying={nas?.copying} />
-          ))}
-        </div>
-      ) : (
-        groups.map((g) => {
-          const allInDay = g.items.every((c) => selected.has(c.path));
-          return (
-            <section key={g.day} data-day={g.day} className="day">
-              <div className="day-head">
-                <h3>{g.day}</h3>
-                <span className="muted">
-                  {g.items.length} clip{g.items.length === 1 ? "" : "s"}
-                </span>
-                {selecting && (
-                  <button
-                    className="btn small"
-                    onClick={() =>
-                      setSelected((s) => {
-                        const n = new Set(s);
-                        g.items.forEach((c) => (allInDay ? n.delete(c.path) : n.add(c.path)));
-                        return n;
-                      })
-                    }
-                  >
-                    {allInDay ? "Unselect day" : "Select day"}
-                  </button>
-                )}
-              </div>
-              <div className="grid">
-                {g.items.map((c) => (
-                  <ClipCard
-                    nasOn={nasOn}
-                    copying={nas?.copying}
-                    key={c.path}
-                    clip={c}
-                    selected={selected.has(c.path)}
-                    onClick={clickCard(c.path)}
-                    onToggle={(e) => (e.shiftKey ? selectRange(c.path) : toggle(c.path))}
-                    onDelete={() => onDelete(selected.has(c.path) ? [...selected] : [c.path])}
-                    deleteCount={selected.has(c.path) ? selected.size : 1}
-                    onToast={onToast}
-                    upload={uploads?.[c.path]}
-                    link={liveLink(links?.[c.path])}
-                    damage={health?.[c.path]}
-                    onShare={() => onShare?.({ path: c.path })}
-                    returned={c.path === returnedTo}
-                    onKeepWhole={onKeepWhole ? () => onKeepWhole([c.path]) : undefined}
-                  />
-                ))}
-              </div>
-            </section>
-          );
-        })
-      )}
+      {cards}
     </div>
     <Timeline scroller={scroller} days={days} />
     </div>

@@ -57,6 +57,15 @@ export function installDevMock() {
       size: (20 + (i * 7) % 90) << 20, modified: now - ago * day, external: false, location: "local", onNas: false, source: "",
     });
   }
+  // ?many=N: a library of N clips, to time the app with a real-sized library.
+  const many = Number(new URLSearchParams(location.search).get("many") || 0);
+  for (let i = 0; i < many; i++) {
+    const g = games[i % games.length];
+    clips.push({
+      path: `C:\\Users\\you\\Videos\\Hindsight\\${g}\\${g} big ${i}.mkv`, name: `${g} clip ${i + 1}`, folder: g,
+      size: (40 + (i * 13) % 400) << 20, modified: now - (i * 0.37 + 0.2) * day, external: false, location: "local", onNas: i % 2 === 0, source: "",
+    });
+  }
   clips.sort((a, b) => b.modified - a.modified); // newest first, like Hindsight's own list
   const bin: Clip[] = [];
   const uploads: Record<string, unknown[]> = {};
@@ -107,6 +116,10 @@ export function installDevMock() {
     }, 900);
   }  const emit = (event: string) =>
     (listeners.get(event) ?? []).forEach((id) => callbacks.get(id)?.({ event, id: 0, payload: null }));
+  // Like the real app: the buffer's status arrives every second.
+  setInterval(() => {
+    (listeners.get("engine-status") ?? []).forEach((id) => callbacks.get(id)?.({ event: "engine-status", id: 0, payload: { ...status } }));
+  }, 1000);
 
   const handlers: Record<string, (a: Record<string, unknown>) => unknown> = {
     get_settings: () => ({ ...settings }),

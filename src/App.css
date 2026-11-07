@@ -1160,7 +1160,10 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
 .thumb.has-nas .badge.br { right: 34px; }
 .lib .thumb { isolation: isolate; }
 .lib .thumb img { border-radius: inherit; }
-.lib[hidden] { display: none !important; }
+/* A clip list behind another page: not drawn, but its layout is kept, so
+   showing it again is instant (display: none would rebuild 500+ cards). */
+.main { position: relative; }
+.lib.inactive { content-visibility: hidden; position: absolute; inset: 0; pointer-events: none; }
 .studio-nas { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); white-space: nowrap; margin-right: 8px; }
 .studio-nas .nas-badge { filter: none; color: var(--text-2); --nas-bg: var(--bg); }
 .studio-nas.not-synced { color: #ff9a8a; }
