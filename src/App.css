@@ -636,7 +636,7 @@ input.switch:checked::after { transform: translateX(18px); }
   position: relative; width: 44px; height: 42px; padding: 0; display: grid; place-items: center; border-radius: var(--r-sm);
   color: var(--muted); background: transparent; border: 0;
 }
-.nav-item.nav-sub { height: 34px; }
+/* Local and Synced clips: the same size as every other icon, so the highlight only slides. */
 .nav-item:hover:not(.on) { color: var(--text); background: color-mix(in srgb, var(--text) 7%, transparent); }
 .nav-item.on { color: var(--text); background: var(--raised); box-shadow: none; font-weight: 600; }
 .nav-item::before { display: none; }
@@ -878,7 +878,7 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
 
 /* ================= Views, filters, cleanup (Local / Synced clips) ================= */
 /* Sidebar: "Local clips" / "Synced clips" sit under Clips, as smaller icons. */
-.nav-item.nav-sub { height: 34px; color: var(--muted); }
+.nav-item.nav-sub { color: var(--muted); }
 .nav-item.nav-sub.on { color: var(--text); }
 
 /* Gallery / Folders / List */

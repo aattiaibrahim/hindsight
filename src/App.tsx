@@ -399,7 +399,7 @@ export default function App() {
             aria-label={label}
             aria-current={navOn(id) ? "page" : undefined}
           >
-            <Icon name={id as IconName} size={sub ? 17 : 20} />
+            <Icon name={id as IconName} size={20} />
             <span className="nav-label" role="tooltip">
               {label}
             </span>
