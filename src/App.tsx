@@ -30,6 +30,7 @@ import { MontageView } from "./Montage";
 type View = "clips" | "local" | "synced" | "totrim" | "damaged" | "cleanup" | "montage" | "notifications" | "studio" | "performance" | "settings";
 /** The clip lists (Studio goes back to whichever you came from). */
 type ListView = "clips" | "local" | "synced" | "totrim" | "damaged";
+const LIST_VIEWS: ListView[] = ["clips", "local", "synced", "totrim", "damaged"];
 const isList = (v: View): v is ListView => v === "clips" || v === "local" || v === "synced" || v === "totrim" || v === "damaged";
 
 /** Files an edit made (trims, exports, repairs…), not clips waiting for one. */
@@ -319,6 +320,12 @@ export default function App() {
   const syncedClips = useMemo(() => (clips ? clips.filter((c) => c.onNas || c.location === "nas") : null), [clips]);
   // Which list Studio goes back to.
   const [listView, setListView] = useState<ListView>("clips");
+  // Lists opened so far (they stay loaded) and the save hotkey they show.
+  const [openedLists, setOpenedLists] = useState<Set<ListView>>(() => new Set(["clips"]));
+  useEffect(() => {
+    setOpenedLists((s) => (s.has(listView) ? s : new Set([...s, listView])));
+  }, [listView]);
+  const hotkey = settings?.hotkey ?? "Alt+F10";
   useEffect(() => {
     if (isList(view)) setListView(view);
     if ((view === "local" || view === "synced") && !syncing) setView("clips");
@@ -422,37 +429,27 @@ export default function App() {
         ))}
       </nav>
       <main className="main">
-        {/* The last clip list stays loaded (hidden) behind Studio, Settings and
-            the other pages, so coming back to it is instant. */}
-        {(
+        {/* Every clip list you've opened stays loaded (hidden) behind the others,
+            Studio and Settings, so switching back to it is instant. */}
+        {LIST_VIEWS.filter((v) => v === listView || openedLists.has(v)).map((v) => (
           <Library
-            key={listView}
-            active={isList(view)}
-            clips={
-              listView === "local"
-                ? localClips
-                : listView === "synced"
-                  ? syncedClips
-                  : listView === "damaged"
-                    ? damagedClips
-                    : listView === "totrim"
-                      ? trimClips
-                      : clips
-            }
-            mode={listView}
+            key={v}
+            active={isList(view) && listView === v}
+            clips={v === "local" ? localClips : v === "synced" ? syncedClips : v === "damaged" ? damagedClips : v === "totrim" ? trimClips : clips}
+            mode={v}
             onOpen={openInStudio}
             onToast={toast}
             onChanged={refresh}
             onDelete={requestDelete}
-            hotkey={settings?.hotkey ?? "Alt+F10"}
+            hotkey={hotkey}
             uploads={uploads.progress}
             links={uploads.history}
-            focusPath={studioPath}
+            focusPath={listView === v ? studioPath : null}
             onShare={requestShare}
             health={health}
-            onKeepWhole={listView === "totrim" ? keepClipsWhole : undefined}
+            onKeepWhole={v === "totrim" ? keepClipsWhole : undefined}
           />
-        )}
+        ))}
         {view === "cleanup" && settings && (
           <Cleanup
             clips={clips}

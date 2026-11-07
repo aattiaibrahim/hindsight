@@ -1221,3 +1221,8 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
 .with-icon { display: inline-flex; align-items: center; gap: 5px; }
 .game-icon.none { display: inline-grid; place-items: center; border-radius: 5px; background: var(--raised); color: var(--muted); flex-shrink: 0; }
 .check svg { display: block; }
+
+/* Gallery blocks: placeholders keep their height; a day cut into blocks reads as one. */
+.days-top { height: 0; margin-bottom: -22px; }
+.day-ph { flex-shrink: 0; }
+.day.day-more { margin-top: -16px; }

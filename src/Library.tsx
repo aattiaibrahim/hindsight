@@ -25,6 +25,13 @@ const NO_FILTERS: Filters = { where: "", sources: [], from: "", to: "", minMb: 0
 /** Cards built straight away (a couple of screens), then this many more at a time. */
 const FIRST_CARDS = 40;
 const MORE_CARDS = 80;
+/** Gallery: rows per block, how far past the screen blocks are built, and the sizes used to guess heights. */
+const BLOCK_ROWS = 5;
+const NEAR = 1400;
+const CARD_MIN = 210;
+const CARD_GAP = 6;
+const DAY_HEAD = 32;
+const PAGE_GAP = 22;
 
 const TITLES: Record<string, string> = { totrim: "To trim", clips: "Clips", local: "Local clips", synced: "Synced clips", damaged: "Damaged clips" };
 
@@ -428,10 +435,9 @@ function LibraryView({
     return out;
   }, [matching, folder, sort]);
 
-  // Build the first screenful of cards straight away and the rest in small
-  // batches after that, so the Clips tab shows at once even with hundreds of
-  // clips (building them all in one go took seconds). Coming back to a
-  // scrolled-down spot builds them all first, so the spot is still there.
+  // List view: build the first rows straight away and the rest in small
+  // batches, so it shows at once even with hundreds of clips. (The gallery is
+  // built only near the screen, below.)
   const total = useMemo(() => groups.reduce((n, g) => n + g.items.length, 0), [groups]);
   const [limit, setLimit] = useState(() => (memory.scroll > 0 ? Infinity : FIRST_CARDS));
   const listKey = `${folder}|${query}|${sort}|${viewMode}|${JSON.stringify(filters)}`;
@@ -459,6 +465,80 @@ function LibraryView({
     return out;
   }, [groups, limit]);
 
+  // Gallery: only the days near the screen are built. The others are empty
+  // placeholders of the right height, so the scrollbar, the date timeline and
+  // coming back to a spot halfway down all still work, but leaving and
+  // returning to the list (or switching lists) never builds 500+ cards at once.
+  // Big days (and "Biggest first") are cut into blocks of BLOCK cards.
+  const scroller = useRef<HTMLDivElement>(null);
+  const daysTop = useRef<HTMLDivElement>(null);
+  const [gridWidth, setGridWidth] = useState(0);
+  const measured = useRef(new Map<string, number>());
+  const [measureTick, setMeasureTick] = useState(0);
+  // How many cards fit in a row: blocks hold whole rows, so a cut never leaves a short row.
+  const cols = Math.max(1, Math.floor(((gridWidth || 1200) + CARD_GAP) / (CARD_MIN + CARD_GAP)));
+  const blocks = useMemo(() => {
+    const size = cols * BLOCK_ROWS;
+    const out: { key: string; g: (typeof groups)[number]; items: ClipFile[]; first: boolean }[] = [];
+    for (const g of groups) {
+      for (let i = 0; i < g.items.length; i += size) {
+        out.push({ key: `${g.day}#${size}#${i / size}`, g, items: g.items.slice(i, i + size), first: i === 0 });
+      }
+    }
+    return out;
+  }, [groups, cols]);
+  /** Each block's top and height, from its measured height or an estimate from the grid's width. */
+  const layout = useMemo(() => {
+    const W = gridWidth || 1200;
+    const cardH = ((W - CARD_GAP * (cols - 1)) / cols) * (9 / 16);
+    let y = 0;
+    return blocks.map((b, i) => {
+      const rows = Math.ceil(b.items.length / cols);
+      const guess = (b.first ? DAY_HEAD : 0) + rows * cardH + (rows - 1) * CARD_GAP;
+      const h = measured.current.get(`${b.key}|${b.items.length}|${Math.round(W)}`) ?? guess;
+      // The rest of a day sits a card gap below; the next day a page gap.
+      if (i > 0) y += b.first ? PAGE_GAP : CARD_GAP;
+      const top = y;
+      y += h;
+      return { top, h };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocks, gridWidth, cols, measureTick]);
+  /** Which blocks are built: those within a couple of screens of where you are. */
+  const rangeFor = useCallback(
+    (scrollTop: number, viewH: number) => {
+      const start = daysTop.current && scroller.current
+        ? daysTop.current.getBoundingClientRect().top - scroller.current.getBoundingClientRect().top + scroller.current.scrollTop
+        : 400;
+      const lo = scrollTop - start - NEAR;
+      const hi = scrollTop - start + viewH + NEAR;
+      let from = layout.findIndex((l) => l.top + l.h >= lo);
+      if (from < 0) from = Math.max(0, layout.length - 1);
+      let to = from;
+      while (to + 1 < layout.length && layout[to + 1].top <= hi) to++;
+      return [from, to] as const;
+    },
+    [layout],
+  );
+  const [range, setRange] = useState<readonly [number, number]>(() => [0, 0]);
+  const updateRange = useCallback(() => {
+    const sc = scroller.current;
+    const top = sc && sc.clientHeight ? sc.scrollTop : memory.scroll;
+    const next = rangeFor(top, sc?.clientHeight || 900);
+    setRange((r) => (r[0] === next[0] && r[1] === next[1] ? r : next));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rangeFor]);
+  useLayoutEffect(() => updateRange(), [updateRange]);
+  // The grid's width sets how many cards fit in a row.
+  useEffect(() => {
+    const el = daysTop.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setGridWidth((w) => (Math.abs(w - el.clientWidth) > 1 ? el.clientWidth : w)));
+    ro.observe(el);
+    setGridWidth(el.clientWidth);
+    return () => ro.disconnect();
+  });
+
   /** Folders view: one per game (same game, any spelling), biggest collections first. */
   const gameFolders = useMemo(() => {
     const by = new Map<string, { name: string; items: ClipFile[] }>();
@@ -477,7 +557,6 @@ function LibraryView({
 
   // Coming back from Studio: same scroll position, and the clip you opened glows
   // for a moment (scrolled into view if the list moved, e.g. a new clip arrived).
-  const scroller = useRef<HTMLDivElement>(null);
   const [returnedTo, setReturnedTo] = useState<string | null>(null);
   const restored = useRef(false);
   useLayoutEffect(() => {
@@ -512,9 +591,27 @@ function LibraryView({
     window.addEventListener("rewind-top", top);
     return () => window.removeEventListener("rewind-top", top);
   }, [active]);
+  const scrollFrame = useRef(0);
   const onScroll = () => {
     if (scroller.current && active) memory.scroll = scroller.current.scrollTop;
+    cancelAnimationFrame(scrollFrame.current);
+    scrollFrame.current = requestAnimationFrame(updateRange);
   };
+  // Built blocks remember their real height, so placeholders match them next time.
+  useLayoutEffect(() => {
+    const page = scroller.current;
+    if (!page || !gridWidth) return;
+    let changed = false;
+    page.querySelectorAll<HTMLElement>("[data-block]").forEach((el) => {
+      const k = `${el.dataset.block}|${Math.round(gridWidth)}`;
+      const h = el.offsetHeight;
+      if (h && Math.abs((measured.current.get(k) ?? 0) - h) > 1) {
+        measured.current.set(k, h);
+        changed = true;
+      }
+    });
+    if (changed) setMeasureTick((t) => t + 1);
+  });
   // The date timeline only makes sense for the gallery in date order.
   const days = useMemo(
     () => (viewMode === "list" || atFolderRoot || sort === "big" ? [] : groups.map((g) => ({ key: g.day, ts: g.ts, count: g.items.length }))),
@@ -658,59 +755,68 @@ clips === null ? null : clips.length === 0 && trimMode ? (
           ))}
         </div>
       ) : (
-        shownGroups.map(({ g, items: built }) => {
-          const allInDay = g.items.every((c) => selected.has(c.path));
-          return (
-            <section key={g.day} data-day={g.day} className="day">
-              <div className="day-head">
-                <h3>{g.day}</h3>
-                <span className="muted">
-                  {g.items.length} clip{g.items.length === 1 ? "" : "s"}
-                </span>
-                {selecting && (
-                  <button
-                    className="btn small"
-                    onClick={() =>
-                      setSelected((s) => {
-                        const n = new Set(s);
-                        g.items.forEach((c) => (allInDay ? n.delete(c.path) : n.add(c.path)));
-                        return n;
-                      })
-                    }
-                  >
-                    {allInDay ? "Unselect day" : "Select day"}
-                  </button>
+        <>
+          <div ref={daysTop} className="days-top" aria-hidden="true" />
+          {blocks.map((blk, i) => {
+            const { g, items: built, first } = blk;
+            if (i < range[0] || i > range[1]) {
+              return <section key={blk.key} data-day={first ? g.day : undefined} className={`day day-ph ${first ? "" : "day-more"}`} style={{ height: layout[i]?.h }} aria-hidden="true" />;
+            }
+            const allInDay = g.items.every((c) => selected.has(c.path));
+            return (
+              <section key={blk.key} data-day={first ? g.day : undefined} data-block={`${blk.key}|${built.length}`} className={`day ${first ? "" : "day-more"}`}>
+                {first && (
+                  <div className="day-head">
+                    <h3>{g.day}</h3>
+                    <span className="muted">
+                      {g.items.length} clip{g.items.length === 1 ? "" : "s"}
+                    </span>
+                    {selecting && (
+                      <button
+                        className="btn small"
+                        onClick={() =>
+                          setSelected((s) => {
+                            const n = new Set(s);
+                            g.items.forEach((c) => (allInDay ? n.delete(c.path) : n.add(c.path)));
+                            return n;
+                          })
+                        }
+                      >
+                        {allInDay ? "Unselect day" : "Select day"}
+                      </button>
+                    )}
+                  </div>
                 )}
-              </div>
-              <div className="grid">
-                {built.map((c) => (
-                  <ClipCard
-                    nasOn={nasOn}
-                    copying={nas?.copying}
-                    key={c.path}
-                    clip={c}
-                    selected={selected.has(c.path)}
-                    onClick={clickCard(c.path)}
-                    onToggle={(e) => (e.shiftKey ? selectRange(c.path) : toggle(c.path))}
-                    onDelete={() => onDelete(selected.has(c.path) ? [...selected] : [c.path])}
-                    deleteCount={selected.has(c.path) ? selected.size : 1}
-                    onToast={onToast}
-                    upload={uploads?.[c.path]}
-                    link={liveLink(links?.[c.path])}
-                    damage={health?.[c.path]}
-                    onShare={() => onShare?.({ path: c.path })}
-                    returned={c.path === returnedTo}
-                    onKeepWhole={onKeepWhole ? () => onKeepWhole([c.path]) : undefined}
-                  />
-                ))}
-              </div>
-            </section>
-          );
-        })
+                <div className="grid">
+                  {built.map((c) => (
+                    <ClipCard
+                      nasOn={nasOn}
+                      copying={nas?.copying}
+                      key={c.path}
+                      clip={c}
+                      selected={selected.has(c.path)}
+                      onClick={clickCard(c.path)}
+                      onToggle={(e) => (e.shiftKey ? selectRange(c.path) : toggle(c.path))}
+                      onDelete={() => onDelete(selected.has(c.path) ? [...selected] : [c.path])}
+                      deleteCount={selected.has(c.path) ? selected.size : 1}
+                      onToast={onToast}
+                      upload={uploads?.[c.path]}
+                      link={liveLink(links?.[c.path])}
+                      damage={health?.[c.path]}
+                      onShare={() => onShare?.({ path: c.path })}
+                      returned={c.path === returnedTo}
+                      onKeepWhole={onKeepWhole ? () => onKeepWhole([c.path]) : undefined}
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
+        </>
       )
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [clips, trimMode, damagedMode, hotkey, atFolderRoot, gameFolders, groups.length, activeFilters, viewMode, shownGroups, selected, selecting, health, nasOn, nas?.copying, uploads, links, returnedTo, onKeepWhole, onDelete, onToast, onShare, onOpen, selectRange, toggle],
+    [clips, trimMode, damagedMode, hotkey, atFolderRoot, gameFolders, groups.length, activeFilters, viewMode, shownGroups, blocks, layout, range, selected, selecting, health, nasOn, nas?.copying, uploads, links, returnedTo, onKeepWhole, onDelete, onToast, onShare, onOpen, selectRange, toggle],
   );
 
   return (
