@@ -638,11 +638,12 @@ export function Studio({
           {name}
         </div>
         <StudioNas clip={clips?.find((c) => c.path === path)} />
-        {theater && (
-          <button className="btn" onClick={toggleTheater} title="Leave theater mode (T)">
-            Show editing tools
-          </button>
-        )}
+        {/* One button both ways, with its key, so nobody has to know about T. */}
+        <button className="btn" onClick={toggleTheater} aria-pressed={theater} title={theater ? "Show the editing tools again (T)" : "Hide the editing tools for a bigger video (T)"}>
+          {theater ? Icon.theaterOff : Icon.theater}
+          {theater ? "Show editing tools" : "Hide editing tools"}
+          <span className="kbd">T</span>
+        </button>
         <button
           className="btn primary"
           disabled={busy || (wholeFile && !audioEdited)}
@@ -884,7 +885,7 @@ export function Studio({
             <span className="mono">
               Start {fmtTime(a)} · End {fmtTime(b)} · Length {fmtTime(Math.max(0, b - a))}
             </span>
-            <span>Space play · I / O set points · ← → 5 s · Shift+← → one frame · ↑ ↓ volume · M mute · T theater · F fullscreen</span>
+            <span>Space play · I / O set points · ← → 5 s · Shift+← → one frame · ↑ ↓ volume · M mute · T hide or show tools · F fullscreen</span>
           </div>
           {!theater && <ClipStrip clips={(clips ?? []).slice(0, 30)} current={path} onOpen={onOpen} />}
         </div>

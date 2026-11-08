@@ -1226,3 +1226,6 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
 .days-top { height: 0; margin-bottom: -22px; }
 .day-ph { flex-shrink: 0; }
 .day.day-more { margin-top: -16px; }
+/* A button with an icon and its keyboard key (Studio's Hide / Show editing tools). */
+.studio-top .btn svg { width: 16px; height: 16px; }
+.btn .kbd { font-size: 11px; padding: 1px 5px; border-color: color-mix(in srgb, var(--text) 25%, transparent); color: var(--muted); }

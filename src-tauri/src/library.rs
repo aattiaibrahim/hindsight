@@ -61,9 +61,35 @@ pub(crate) fn is_sidecar(p: &Path) -> bool {
 }
 
 pub(crate) fn is_video(p: &Path) -> bool {
+    // ".name.part.mkv": an edit still being written (see `part_of`), not a clip yet.
+    if p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.')) {
+        return false;
+    }
     p.extension()
         .map(|e| VIDEO_EXT.contains(&e.to_string_lossy().to_lowercase().as_str()))
         .unwrap_or(false)
+}
+
+/// Where an edit is written until it's finished: a hidden ".name.part.ext" next
+/// to its final name, so the library never shows a half-written file (it used
+/// to appear as a 0:00 clip while saving).
+fn part_of(out: &Path) -> PathBuf {
+    let stem = out.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let ext = out.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+    out.with_file_name(format!(".{stem}.part.{ext}"))
+}
+
+/// Move a finished edit from its hidden name to its real one.
+fn publish(part: &Path, out: &Path) -> Result<String, String> {
+    if fs::metadata(part).map(|m| m.len()).unwrap_or(0) == 0 {
+        let _ = fs::remove_file(part);
+        return Err("The edit came out empty, so nothing was saved.".into());
+    }
+    fs::rename(part, out).map_err(|e| {
+        let _ = fs::remove_file(part);
+        format!("Couldn't save the edit: {e}")
+    })?;
+    Ok(out.to_string_lossy().into_owned())
 }
 
 fn clip_file(p: &Path, folder: String, external: bool) -> Option<ClipFile> {
@@ -357,7 +383,26 @@ fn nvenc_for(codec: &str) -> &'static str {
     }
 }
 
-fn finish(args: Vec<OsString>, out: PathBuf) -> Result<String, String> {
+/// Run ffmpeg into `out` (the last argument): written under a hidden name
+/// first, and only given its real name once it's finished.
+fn finish(mut args: Vec<OsString>, out: PathBuf) -> Result<String, String> {
+    let part = part_of(&out);
+    if args.last().map(|a| Path::new(a) == out).unwrap_or(false) {
+        args.pop();
+        args.push(part.clone().into());
+    } else {
+        return run_into(args, out);
+    }
+    match ffmpeg::run("ffmpeg", &args) {
+        Ok(_) => publish(&part, &out),
+        Err(e) => {
+            let _ = fs::remove_file(&part);
+            Err(e)
+        }
+    }
+}
+
+fn run_into(args: Vec<OsString>, out: PathBuf) -> Result<String, String> {
     match ffmpeg::run("ffmpeg", &args) {
         Ok(_) => Ok(out.to_string_lossy().into_owned()),
         Err(e) => {
@@ -365,6 +410,29 @@ fn finish(args: Vec<OsString>, out: PathBuf) -> Result<String, String> {
             Err(e)
         }
     }
+}
+
+/// The whole clip with only its audio changed: the video is copied as it is
+/// and only the audio is redone, so it takes seconds instead of re-encoding
+/// the whole video (which took about a minute for a 3-minute clip).
+fn audio_only(path: &str, out: &Path, audio: &AudioEdit) -> Result<String, String> {
+    let n = probe(path).map(|p| p.audio_tracks).unwrap_or(0) as usize;
+    if n == 0 {
+        return Err("This clip has no audio to change.".into());
+    }
+    let mut args = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y", "-i"]);
+    args.push(path.into());
+    let graph: Vec<String> = (0..n).map(|i| format!("{}anull[a{i}]", audio.chain(i, 0.0))).collect();
+    args.extend(ffmpeg::args(&["-filter_complex", &graph.join(";"), "-map", "0:v:0"]));
+    for i in 0..n {
+        args.extend(ffmpeg::args(&["-map", &format!("[a{i}]"), &format!("-map_metadata:s:a:{i}"), &format!("0:s:a:{i}")]));
+    }
+    args.extend(ffmpeg::args(&["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"]));
+    if ext_of(out) == "mp4" {
+        args.extend(ffmpeg::args(&["-movflags", "+faststart"]));
+    }
+    args.push(out.to_path_buf().into());
+    finish(args, out.to_path_buf())
 }
 
 /// Same video/audio, new MP4 container. No quality loss, takes a second.
@@ -401,12 +469,18 @@ pub fn trim(path: &str, start: f64, end: f64, exact: bool, audio: &AudioEdit) ->
         _ => "mp4".into(),
     };
     let out = unique(src, " (trim)", &ext);
+    // Nothing cut, only the sound changed: copy the video, redo the audio.
+    let whole = start <= 0.01 && probe(path).map(|p| p.duration > 0.0 && end >= p.duration - 0.05).unwrap_or(false);
+    if whole && !audio.is_empty() {
+        return audio_only(path, &out, audio);
+    }
     if exact {
-        match smart_trim(path, start, end, &out, audio) {
-            Ok(()) => return Ok(out.to_string_lossy().into_owned()),
+        let part = part_of(&out);
+        match smart_trim(path, start, end, &part, audio) {
+            Ok(()) => return publish(&part, &out),
             Err(e) => {
                 crate::log!("[rewind] smart trim not used ({e}); re-encoding the whole range");
-                let _ = fs::remove_file(&out);
+                let _ = fs::remove_file(&part);
             }
         }
     }
@@ -1410,5 +1484,46 @@ mod live_scan {
             let clips = super::scan(std::path::Path::new(&dir), &[]);
             println!("round {round}: {} clips in {} ms", clips.len(), t.elapsed().as_millis());
         }
+    }
+}
+
+#[cfg(test)]
+mod live_audio_save {
+    /// "Save audio changes" on a copy of a real clip: the whole clip, one muted stretch.
+    /// set REWIND_AUDIO_CLIP, then cargo test --lib live_audio_save -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_audio_save() {
+        let Ok(src) = std::env::var("REWIND_AUDIO_CLIP") else { return };
+        crate::ffmpeg::init(None);
+        let dir = std::env::temp_dir().join(format!("hindsight-audio-save-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let copy = dir.join(std::path::Path::new(&src).file_name().unwrap());
+        std::fs::copy(&src, &copy).unwrap();
+        let path = copy.to_string_lossy().into_owned();
+        let p = super::probe(&path).unwrap();
+        println!("source: {:.2} s, {} audio tracks, codec {}", p.duration, p.audio_tracks, p.codec);
+        let mut edit = crate::audio_edit::AudioEdit::default();
+        edit.0 = vec![crate::audio_edit::TrackEdit { gain_db: 0.0, mutes: vec![[5.0, 10.0]] }];
+        let t = std::time::Instant::now();
+        let out = super::trim(&path, 0.0, p.duration, true, &edit);
+        println!("took {:?}: {:?}", t.elapsed(), out);
+        if let Ok(o) = &out {
+            let q = super::probe(o).unwrap();
+            println!("output: {:.2} s, {} audio tracks, {} MB", q.duration, q.audio_tracks, std::fs::metadata(o).unwrap().len() / 1_048_576);
+            // Loudness of track 1 inside the muted stretch (6-9 s) and outside it (12-15 s).
+            for (from, label) in [(6.0, "muted 6-9 s"), (12.0, "kept 12-15 s")] {
+                let mut a = crate::ffmpeg::args(&["-hide_banner", "-ss", &format!("{from}"), "-t", "3", "-i"]);
+                a.push(o.into());
+                a.extend(crate::ffmpeg::args(&["-map", "0:a:0", "-af", "volumedetect", "-f", "null", "-"]));
+                let out = crate::ffmpeg::cmd("ffmpeg").args(&a).output().unwrap();
+                let err = String::from_utf8_lossy(&out.stderr);
+                println!("  {label}: {}", err.lines().find(|l| l.contains("max_volume")).unwrap_or("?").split("] ").last().unwrap_or(""));
+            }
+        }
+        for e in std::fs::read_dir(&dir).unwrap().flatten() {
+            println!("  file: {} ({} MB)", e.file_name().to_string_lossy(), e.metadata().unwrap().len() / 1_048_576);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
