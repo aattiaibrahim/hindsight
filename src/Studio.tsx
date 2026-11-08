@@ -70,6 +70,15 @@ function SpeakerIcon({ level }: { level: number }) {
   const C = level === 0 ? VolumeX : level > 0.5 ? Volume2 : Volume1;
   return <C size={18} strokeWidth={2} aria-hidden="true" />;
 }
+/** Below this width the side panel moves under the video. */
+const NARROW_AT = 1180;
+type SideTab = "details" | "audio" | "share" | "save";
+const SIDE_TABS: [SideTab, string][] = [
+  ["save", "Save as"],
+  ["share", "Share"],
+  ["audio", "Audio"],
+  ["details", "Details"],
+];
 type Result = { text: string; path?: string; err?: boolean } | null;
 
 // The player's icons, from the same set as the rest of the app.
@@ -230,6 +239,20 @@ export function Studio({
   // Theater hides the editing panel, so it lasts for this visit only (it used to
   // be remembered, and one stray "T" left every clip opening without its tools).
   const [theater, setTheater] = useState(false);
+  // In a narrow window the side panel moves under the video, as tabs, so the
+  // video keeps the full width.
+  const studioRef = useRef<HTMLDivElement>(null);
+  const sideRef = useRef<HTMLElement>(null);
+  const [narrow, setNarrow] = useState(false);
+  const [sideTab, setSideTab] = useState<SideTab>("save");
+  useEffect(() => {
+    const el = studioRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setNarrow(el.clientWidth < NARROW_AT));
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+  const group = (id: SideTab) => `side-group ${narrow && sideTab !== id ? "off" : ""}`;
   useEffect(() => {
     try {
       localStorage.removeItem("rewind.theater");
@@ -623,12 +646,13 @@ export function Studio({
   const name = path.split("\\").pop() ?? path;
   const busy = !!job;
   const wholeFile = a <= 0.01 && duration - b <= 0.05;
+  const hasPreviewAudio = !!tracks && (tracks.extra.length > 0 || (info?.audioTracks ?? 0) > 0);
   const trackTitles = Array.from({ length: info?.audioTracks ?? 0 }, (_, i) =>
     i === 0 ? (tracks?.firstTitle ?? "Game audio") : (tracks?.extra[i - 1]?.title ?? (i === 1 ? "Microphone" : `Track ${i + 1}`)),
   );
 
   return (
-    <div className="studio">
+    <div className="studio" ref={studioRef}>
       <div className="studio-top">
         <button className="btn back" onClick={onBack} title="Back to your clips (Esc)">
           <ChevronLeft size={16} strokeWidth={2} aria-hidden="true" />
@@ -653,7 +677,7 @@ export function Studio({
           {wholeFile && audioEdited ? "Save audio changes" : "Save trim"}
         </button>
       </div>
-      <div className={`studio-body ${theater ? "theater" : ""}`}>
+      <div className={`studio-body ${theater ? "theater" : ""} ${narrow ? "narrow" : ""}`}>
         <div className="stage">
           {/* The box takes the video's own shape, so its rounded corners are the picture's corners. */}
           <div className="video-box">
@@ -890,7 +914,17 @@ export function Studio({
           {!theater && <ClipStrip clips={(clips ?? []).slice(0, 30)} current={path} onOpen={onOpen} />}
         </div>
 
-        <aside className="side">
+        <aside className="side" ref={sideRef}>
+          {narrow && (
+            <div className="side-tabs" role="tablist" aria-label="Editing tools">
+              {SIDE_TABS.filter(([id]) => id !== "audio" || hasPreviewAudio).map(([id, label]) => (
+                <button key={id} role="tab" aria-selected={sideTab === id} className={`tab ${sideTab === id ? "on" : ""}`} onClick={() => setSideTab(id)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className={group("details")}>
           <div className="label">File</div>
           <div className="facts">
             <span>Video</span>
@@ -902,9 +936,10 @@ export function Studio({
             <span>Size</span>
             <span>{fmtSize(clips?.find((c) => c.path === path)?.size ?? 0)}</span>
           </div>
+          </div>
 
-          {tracks && (tracks.extra.length > 0 || (info?.audioTracks ?? 0) > 0) && (
-            <>
+          {hasPreviewAudio && tracks && (
+            <div className={group("audio")}>
               <div className="label">Preview audio</div>
               <div className="stack">
                 {[{ index: 0, title: tracks.firstTitle, path: "" }, ...tracks.extra].map((t) => {
@@ -952,8 +987,9 @@ export function Studio({
                   onLoadedData={() => syncExtra(true)}
                 />
               ))}
-            </>
+            </div>
           )}
+          <div className={group("details")}>
           <HealthNotice
             path={path}
             health={health}
@@ -976,8 +1012,12 @@ export function Studio({
               }}
             />
           )}
+          </div>
+          <div className={group("share")}>
           <div className="label">Share</div>
           <SharePanel path={path} settings={settings} progress={uploads?.[path]} links={links?.[path]} onShare={(r) => onShare?.(r)} />
+          </div>
+          <div className={group("save")}>
           <div className="label">This file only</div>
           <div className="stack">
             {!path.toLowerCase().endsWith(".mp4") && (
@@ -1075,6 +1115,7 @@ export function Studio({
               ? "Trims, exports and compresses overwrite this file. The old version goes to the Recycle Bin."
               : "The original is kept. Edits are saved as new files next to it."}
           </span>
+          </div>
           {job && <div className="result">{job.label}</div>}
           {result && (
             <div className={`result ${result.err ? "err" : ""}`}>

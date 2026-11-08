@@ -1229,3 +1229,24 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
 /* A button with an icon and its keyboard key (Studio's Hide / Show editing tools). */
 .studio-top .btn svg { width: 16px; height: 16px; }
 .btn .kbd { font-size: 11px; padding: 1px 5px; border-color: color-mix(in srgb, var(--text) 25%, transparent); color: var(--muted); }
+
+/* Studio in a narrow window: tools under the video, as tabs; the video keeps the full width. */
+.studio-body.narrow { flex-direction: column; }
+.studio-body.narrow .stage { min-height: 0; }
+.studio-body.narrow .side {
+  width: auto; flex: none; max-height: 28vh; border-left: 0; border-top: 1px solid var(--line);
+  padding: 12px 18px 14px; gap: 10px;
+}
+.side-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.side-group { display: flex; flex-direction: column; gap: 16px; }
+.studio-body.narrow .side-group { gap: 10px; }
+.studio-body.narrow .side-group.off { display: none; }
+.studio-body.narrow .side-group > .stack { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+.studio-body.narrow .side-group .facts { grid-template-columns: auto 1fr auto 1fr; }
+/* Narrow: the video keeps a good share of the height; the rest of the stage scrolls. */
+.studio-body.narrow .stage { flex: 1; min-height: 0; overflow-y: auto; }
+.studio-body.narrow .video-box { flex: 1 0 24vh; }
+.studio-body.narrow .strip,
+.studio-body.narrow .lanes-hint,
+.studio-body.narrow .tl-foot > span:last-child { display: none; }
+.studio-body.narrow .stage > :not(.video-box) { flex-shrink: 0; }
