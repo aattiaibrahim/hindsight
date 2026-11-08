@@ -955,13 +955,21 @@ async fn edit(
     if replace && health::on_network(&path) {
         return Err("This clip is on the NAS, which has no Recycle Bin, so it can't be replaced. Turn off \"Replace the original\" to save your edit as a new file.".into());
     }
+    // Edits keep the clip's date: a trim stays where the clip was, not under today.
+    let dates = library::dates_of(std::path::Path::new(&original));
     let out = blocking(move || f(&path)).await?;
     if !replace {
+        if let Some(d) = dates {
+            library::set_dates(std::path::Path::new(&out), d);
+        }
         remember_edited(&app, &out);
         return Ok(out);
     }
     let o = original.clone();
     let final_path = blocking(move || library::replace_original(&o, &out, expected_secs)).await?;
+    if let Some(d) = dates {
+        library::set_dates(std::path::Path::new(&final_path), d);
+    }
     // Keep the NAS copy in step with the edit.
     nas::edited(&settings_of(&app), std::path::Path::new(&original), std::path::Path::new(&final_path));
     remember_edited(&app, &final_path);

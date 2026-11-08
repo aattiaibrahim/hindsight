@@ -205,6 +205,8 @@ struct NativeState {
     runs: Vec<Arc<native::pipeline::Buffers>>,
     rec: Option<NativeRec>,
     failures: u32,
+    /// When native capture last gave up (it's tried again after `NATIVE_RETRY`).
+    gave_up_at: Option<Instant>,
 }
 
 struct NativeRun {
@@ -222,8 +224,11 @@ struct NativeRec {
     last_disk_check: Instant,
 }
 
-/// Native capture is skipped for the session after this many failed starts.
+/// Native capture hands over to compatibility capture after this many failed starts...
 const NATIVE_MAX_FAILURES: u32 = 3;
+/// ...and is tried again this long after (e.g. once an NVIDIA driver update,
+/// which takes the GPU away for a minute or two, has finished).
+const NATIVE_RETRY: Duration = Duration::from_secs(120);
 
 impl Engine {
     pub fn start(settings: Arc<Mutex<Settings>>, buffer_root: PathBuf) -> Engine {
@@ -761,6 +766,9 @@ fn supervise_native(
             Err(e) => {
                 let mut n = native.lock().unwrap();
                 n.failures += 1;
+                if n.failures >= NATIVE_MAX_FAILURES {
+                    n.gave_up_at = Some(Instant::now());
+                }
                 let msg = if n.failures >= NATIVE_MAX_FAILURES {
                     format!("Native capture couldn't start ({e}). Using compatibility capture instead.")
                 } else {
@@ -851,6 +859,15 @@ fn supervise(
         let mut s = settings.lock().unwrap().clone();
         // "auto", or a choice this GPU can't encode, becomes what it can (AV1 needs an RTX 40).
         s.encoder = crate::native::nvenc::effective_encoder(&s.encoder).to_string();
+        // Back on compatibility capture for a while: try native again (never mid-recording).
+        {
+            let mut n = native.lock().unwrap();
+            if n.failures >= NATIVE_MAX_FAILURES && n.gave_up_at.is_some_and(|t| t.elapsed() >= NATIVE_RETRY) && rec.lock().unwrap().is_none() {
+                crate::log!("[rewind] trying native capture again");
+                n.failures = NATIVE_MAX_FAILURES - 1; // one try; a failure waits another NATIVE_RETRY
+                n.gave_up_at = None;
+            }
+        }
         let use_native = s.capture_engine == "native" && native.lock().unwrap().failures < NATIVE_MAX_FAILURES;
         let recording = rec.lock().unwrap().is_some() || native.lock().unwrap().rec.is_some();
         // A recording keeps capture running even if the replay buffer is paused.

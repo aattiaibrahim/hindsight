@@ -941,6 +941,28 @@ pub fn restore_clips(paths: &[String]) -> Result<usize, String> {
 
 /// Swap an edited file in for the original (original goes to the Recycle Bin).
 /// Nothing is removed unless the edit checks out first.
+/// A file's dates (modified, created), to put back on an edit of it.
+pub fn dates_of(p: &Path) -> Option<(std::time::SystemTime, Option<std::time::SystemTime>)> {
+    let m = fs::metadata(p).ok()?;
+    Some((m.modified().ok()?, m.created().ok()))
+}
+
+/// Give an edit its clip's dates, so a trim keeps its place in the library
+/// instead of jumping to today. 1 ms later, so players and thumbnails (which
+/// go by the date) still see that the file changed.
+pub fn set_dates(p: &Path, (modified, created): (std::time::SystemTime, Option<std::time::SystemTime>)) {
+    let Ok(f) = fs::OpenOptions::new().write(true).open(p) else { return };
+    let mut t = fs::FileTimes::new().set_modified(modified + std::time::Duration::from_millis(1));
+    #[cfg(windows)]
+    if let Some(c) = created {
+        use std::os::windows::fs::FileTimesExt;
+        t = t.set_created(c);
+    }
+    #[cfg(not(windows))]
+    let _ = created;
+    let _ = f.set_times(t);
+}
+
 pub fn replace_original(original: &str, edited: &str, expected_secs: Option<f64>) -> Result<String, String> {
     let orig = Path::new(original);
     let edited_p = Path::new(edited);
@@ -1455,6 +1477,12 @@ mod tests {
         let edited = trim(&src, 1.0, 3.0, true, &AudioEdit::default()).unwrap();
         let final_path = replace_original(&src, &edited, Some(2.0)).unwrap();
         assert_eq!(final_path, src, "same name, same place");
+        // The edit keeps the clip's date (set by `edit` in lib.rs through these two).
+        let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        set_dates(Path::new(&final_path), (old, Some(old)));
+        let (m, c) = dates_of(Path::new(&final_path)).unwrap();
+        assert_eq!(m, old + std::time::Duration::from_millis(1));
+        assert_eq!(c, Some(old));
         assert!(!Path::new(&edited).exists());
         assert!((probe(&final_path).unwrap().duration - 2.0).abs() < 0.15);
         let _ = fs::remove_dir_all(d);

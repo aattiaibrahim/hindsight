@@ -1303,3 +1303,10 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
 .nas-sure { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; cursor: pointer; }
 .nas-sure input { margin-top: 2px; }
 .ok-text { color: var(--ok, #3ccf7a); font-size: 13px; }
+
+/* Timeline magnifier: near the pointer the ticks spread out and every month is labelled. */
+.tl-day em { transform-origin: right center; }
+.tl-day.in-lens { background: color-mix(in srgb, var(--text) 70%, transparent); }
+.tl-day.in-lens em { color: var(--text); }
+.timeline-rail.active .tl-day:not(.in-lens) em { opacity: 0.45; }
+.tl-num { position: absolute; right: 14px; top: -6px; font-style: normal; font-size: 10px; line-height: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }

@@ -3,7 +3,25 @@ import { RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } 
 /** One day section in the library: its date, and how many clips. */
 export type TimelineDay = { key: string; ts: number; count: number };
 
-type Mark = { key: string; ts: number; y: number; month?: string; year?: string };
+/** `month` / `year`: labels shown normally; `monthAt`: this day starts a month (labelled under the lens). */
+type Mark = { key: string; ts: number; y: number; month?: string; year?: string; monthAt?: string };
+
+/** The lens around the pointer: how far it reaches (px) and how much it spreads the middle. */
+const LENS_R = 90;
+const LENS_M = 2.2;
+
+/**
+ * Fisheye (Sarkar-Brown): marks near `c` spread out, up to (M + 1)× in the
+ * middle, easing to no change at the edge, so nothing jumps. The point under the
+ * pointer stays put, so clicks and drags land where they did. `k`: 1 in the middle, 0 at the edge.
+ */
+function lensed(y: number, c: number | null) {
+  if (c == null) return { y, k: 0 };
+  const d = y - c;
+  const t = Math.abs(d) / LENS_R;
+  if (t >= 1) return { y, k: 0 };
+  return { y: c + Math.sign(d) * LENS_R * (((LENS_M + 1) * t) / (LENS_M * t + 1)), k: 1 - t };
+}
 
 /**
  * Immich-style date scrubber down the right edge of the library: a tick per
@@ -49,6 +67,7 @@ export function Timeline({ scroller, days }: { scroller: RefObject<HTMLDivElemen
       const month = date.toLocaleDateString(undefined, { month: "short" });
       const year = String(date.getFullYear());
       const m: Mark = { key: d.key, ts: d.ts, y };
+      if (month !== lastMonth || year !== lastYear) m.monthAt = month;
       // Like Immich: every year gets a label where it starts (the top too);
       // months get one where they change, if there's room.
       if (year !== lastYear) {
@@ -136,6 +155,29 @@ export function Timeline({ scroller, days }: { scroller: RefObject<HTMLDivElemen
   };
 
   if (days.length < 2) return <div className="timeline-rail empty-rail" ref={rail} />;
+
+  // Under the lens every month gets its label (bigger near the pointer), as long
+  // as it doesn't overlap the one above; elsewhere only the labels that fit.
+  const lens = hover?.y ?? null;
+  let lastY = -99;
+  const shown = marks.map((m) => {
+    const p = lensed(m.y, lens);
+    const scale = 1 + 0.45 * p.k;
+    const text = p.k > 0 ? (m.month ?? m.monthAt) : m.month;
+    // A label too close to the one above is skipped (years always win room outside the lens).
+    let label = !!(text || m.year);
+    if (label && p.y - lastY < (m.year ? 22 : 13) * scale && !(m.year && p.k === 0)) label = false;
+    if (label) lastY = p.y;
+    return { m, y: p.y, k: p.k, scale, text, label, dayNum: null as string | null };
+  });
+  // Then, right under the pointer, plain days get their number in the gaps
+  // (months and years keep their room).
+  const taken = shown.filter((x) => x.label).map((x) => x.y);
+  for (const x of shown) {
+    if (x.label || x.k <= 0.4 || taken.some((y) => Math.abs(y - x.y) < 11)) continue;
+    x.dayNum = String(new Date(x.m.ts).getDate());
+    taken.push(x.y);
+  }
   return (
     <div
       className={`timeline-rail ${hover ? "active" : ""}`}
@@ -155,14 +197,19 @@ export function Timeline({ scroller, days }: { scroller: RefObject<HTMLDivElemen
       aria-orientation="vertical"
     >
       <div className="tl-view" ref={viewBox} />
-      {marks.map((m) => (
-        <span key={m.key} className={`tl-day ${m.month || m.year ? "month" : ""} ${m.year ? "year" : ""}`} style={{ top: m.y }}>
-          {(m.month || m.year) && (
-            <em>
+      {shown.map(({ m, y, k, scale, text, label, dayNum }) => (
+        <span
+          key={m.key}
+          className={`tl-day ${text || m.year ? "month" : ""} ${m.year ? "year" : ""} ${k > 0 ? "in-lens" : ""}`}
+          style={{ top: y, ...(k > 0 ? { width: 5 + 7 * k } : {}) }}
+        >
+          {label && (
+            <em style={k > 0 ? { transform: `scale(${scale})`, opacity: 0.75 + 0.25 * k } : undefined}>
               {m.year && <b>{m.year}</b>}
-              {m.month}
+              {text}
             </em>
           )}
+          {dayNum && <i className="tl-num">{dayNum}</i>}
         </span>
       ))}
       {hover && (

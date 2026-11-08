@@ -71,6 +71,21 @@ pub struct Encoder {
     next: usize,
     frame: u64,
     pub cfg: EncoderConfig,
+    /// Keeps the driver's encoder library loaded while this encoder lives.
+    _lib: NvLib,
+}
+
+/// nvEncodeAPI64.dll, unloaded when the last user lets go. After an NVIDIA
+/// driver update, the next encoder then loads the new driver's copy instead of
+/// the old one still sitting in memory.
+struct NvLib(windows::Win32::Foundation::HMODULE);
+
+impl Drop for NvLib {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = windows::Win32::Foundation::FreeLibrary(self.0);
+        }
+    }
 }
 
 // The NVENC session is only used from the encoder thread; moving it there is fine.
@@ -128,7 +143,7 @@ fn detect() -> Result<(String, Vec<Codec>), String> {
             }
             let name = String::from_utf16_lossy(&desc.Description).trim_end_matches('\0').to_string();
             let gpu = Gpu::new(&adapter, name.clone()).map_err(|e| e.to_string())?;
-            let api = load_api()?;
+            let (_lib, api) = load_api()?;
             let mut enc: *mut c_void = null_mut();
             let mut open: NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS = zeroed();
             open.version = NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER;
@@ -203,21 +218,23 @@ mod pick_tests {
     }
 }
 
-fn load_api() -> Result<NV_ENCODE_API_FUNCTION_LIST, String> {
+fn load_api() -> Result<(NvLib, NV_ENCODE_API_FUNCTION_LIST), String> {
     unsafe {
-        let lib = LoadLibraryW(w!("nvEncodeAPI64.dll")).map_err(|_| "NVIDIA encoder not found (is the NVIDIA driver installed?)".to_string())?;
-        let f = GetProcAddress(lib, s!("NvEncodeAPICreateInstance")).ok_or("NvEncodeAPICreateInstance missing")?;
+        let lib = NvLib(LoadLibraryW(w!("nvEncodeAPI64.dll")).map_err(|_| "NVIDIA encoder not found (is the NVIDIA driver installed?)".to_string())?);
+        let NvLib(lib_h) = &lib;
+        let lib_h = *lib_h;
+        let f = GetProcAddress(lib_h, s!("NvEncodeAPICreateInstance")).ok_or("NvEncodeAPICreateInstance missing")?;
         let create: unsafe extern "C" fn(*mut NV_ENCODE_API_FUNCTION_LIST) -> NVENCSTATUS = std::mem::transmute(f);
         let mut list: NV_ENCODE_API_FUNCTION_LIST = zeroed();
         list.version = NV_ENCODE_API_FUNCTION_LIST_VER;
         check("create instance", create(&mut list))?;
-        Ok(list)
+        Ok((lib, list))
     }
 }
 
 impl Encoder {
     pub fn new(gpu: &Gpu, cfg: EncoderConfig) -> Result<Encoder, String> {
-        let api = load_api()?;
+        let (lib, api) = load_api()?;
         let mut enc: *mut c_void = null_mut();
         let mut open: NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS = unsafe { zeroed() };
         open.version = NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER;
@@ -226,7 +243,7 @@ impl Encoder {
         open.apiVersion = NVENCAPI_VERSION;
         call!(api, nvEncOpenEncodeSessionEx, &mut open, &mut enc)?;
 
-        let mut me = Encoder { api, enc, inputs: Vec::new(), bitstream: null_mut(), next: 0, frame: 0, cfg };
+        let mut me = Encoder { api, enc, inputs: Vec::new(), bitstream: null_mut(), next: 0, frame: 0, cfg, _lib: lib };
         me.initialize()?;
         // A few input textures so the GPU converter and encoder never wait on each other.
         for _ in 0..3 {
