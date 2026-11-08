@@ -1,12 +1,13 @@
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useState } from "react";
-import { api, ClipFolder, errText, FoundFolder, fmtSize, LastMove, MovePlan, NasState, Settings } from "./api";
+import { api, ClipFolder, errText, FoundFolder, fmtSize, LastMove, MovePlan, NasState, OldFolder, Settings } from "./api";
 import { ConfirmDialog } from "./ConfirmUpdate";
 import { NasProgress, useNasState } from "./NasProgress";
 import { useDetectStatus } from "./GameSort";
 import { HealthSetting } from "./Health";
 import { NasSetup } from "./NasSetup";
+import { OldFolderDialog } from "./OldFolder";
 
 type MoveJob = {
   folders: string[];
@@ -59,6 +60,26 @@ export function LibrarySettings({
 }) {
   const nas = useNasState();
   const [found, setFound] = useState<ClipFolder[]>([]);
+  // Recorder folders with no clips left: offered for deleting right on their row.
+  const [empties, setEmpties] = useState<OldFolder[]>([]);
+  const [emptyAsk, setEmptyAsk] = useState<OldFolder | null>(null);
+  const refreshEmpties = () => api.oldFolders().then((l) => setEmpties(Array.isArray(l) ? l : [])).catch(() => {});
+  useEffect(() => {
+    refreshEmpties();
+    const un = listen("clips-changed", () => refreshEmpties());
+    return () => {
+      un.then((f) => f());
+    };
+  }, [s.linkedFolders.join("|")]); // eslint-disable-line react-hooks/exhaustive-deps
+  const emptyOf = (p: string) => empties.find((f) => f.path.toLowerCase() === p.toLowerCase());
+  const deleteButton = (p: string) => {
+    const f = emptyOf(p);
+    return f ? (
+      <button className="btn small" onClick={() => setEmptyAsk(f)} title="No clips are left in this folder. Sends it to the Recycle Bin.">
+        Delete folder…
+      </button>
+    ) : null;
+  };
   // A folder picked for the NAS, being checked before anything syncs.
   const [checking, setChecking] = useState<string | null>(null);
   useEffect(() => {
@@ -203,6 +224,16 @@ export function LibrarySettings({
           </button>
         </div>
       </div>
+      {emptyAsk && (
+        <OldFolderDialog
+          folder={emptyAsk}
+          onClose={() => setEmptyAsk(null)}
+          onDone={() => {
+            setEmptyAsk(null);
+            refreshEmpties();
+          }}
+        />
+      )}
       {checking && (
         <NasSetup
           dir={checking}
@@ -295,10 +326,13 @@ export function LibrarySettings({
         <div className="setting sub" key={f.path}>
           <span>
             {f.label}
-            <small style={{ wordBreak: "break-all" }}>{f.exists ? f.path : `${f.path} (not found)`}</small>
+            <small style={{ wordBreak: "break-all" }}>
+              {f.exists ? f.path : `${f.path} (not found)`}
+              {emptyOf(f.path) ? " · no clips left in it" : ""}
+            </small>
           </span>
           <span className="row" style={{ flexWrap: "nowrap", flexShrink: 0 }}>
-            {moveButton(f.path)}
+            {deleteButton(f.path) ?? moveButton(f.path)}
             <Toggle label={`Show ${f.label} clips`} checked={linked(f.path)} onChange={(v) => toggleLinked(f.path, v)} />
           </span>
         </div>
@@ -307,10 +341,13 @@ export function LibrarySettings({
         <div className="setting sub" key={p}>
           <span>
             {p.split("\\").filter(Boolean).pop()}
-            <small style={{ wordBreak: "break-all" }}>{p}</small>
+            <small style={{ wordBreak: "break-all" }}>
+              {p}
+              {emptyOf(p) ? " · no clips left in it" : ""}
+            </small>
           </span>
           <span className="row" style={{ flexWrap: "nowrap", flexShrink: 0 }}>
-            {moveButton(p)}
+            {deleteButton(p) ?? moveButton(p)}
             <button className="btn small" onClick={() => toggleLinked(p, false)} title="Stops showing them. Files are not touched.">
               Remove
             </button>

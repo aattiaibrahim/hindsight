@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, codecLabel, errText, fmtDuration, Status } from "./api";
 import { audioLine, folderLine, RecordButton } from "./BufferCard";
-import { NasBadge, NasProgress, useNasState } from "./NasProgress";
+import { nasActivity, NasBadge, NasProgress, useNasState } from "./NasProgress";
 
 /**
  * One thin line along the bottom of the window: the buffer, what it records,
@@ -49,17 +49,8 @@ export function StatusBar({ status, hotkey, recordHotkey, version }: { status: S
       : status.enabled === false
         ? "Buffer paused"
         : "Buffer starting…";
-  const nasText = !nas?.enabled
-    ? null
-    : !nas.reachable
-      ? "Can't reach the NAS"
-      : nas.copying
-        ? `Copying to the NAS${nas.totalBytes ? ` · ${Math.round((nas.doneBytes / nas.totalBytes) * 100)}%` : "…"}`
-        : nas.paused && nas.pending
-          ? `${nas.pending} to copy after your game`
-          : nas.pending
-            ? `${nas.pending} waiting for the NAS`
-            : "NAS up to date";
+  const activity = nasActivity(nas);
+  const nasText = activity?.text ?? null;
 
   return (
     <footer className="statusbar">
@@ -92,10 +83,25 @@ export function StatusBar({ status, hotkey, recordHotkey, version }: { status: S
         </span>
       )}
       {nasText && (
-        <span className={`sb-item quiet ${nas && !nas.reachable ? "bad" : ""}`} title={nas?.lastError ?? undefined}>
+        <span className={`sb-item quiet sb-nas ${nas && !nas.reachable ? "bad" : ""}`} title={nas?.copying ? `${nas.copying}${nas.lastError ? `\n${nas.lastError}` : ""}` : (nas?.lastError ?? undefined)}>
           <NasBadge status={nas?.copying ? "copying" : nas?.pending ? "not-synced" : "synced"} />
           {nasText}
+          {activity?.pct != null && (
+            <span className="sb-meter" aria-hidden="true">
+              <i style={{ width: `${activity.pct}%` }} />
+            </span>
+          )}
         </span>
+      )}
+      {/* Stop copying or freeing up (e.g. changed your mind), and pick it up again later. */}
+      {nas?.enabled && nas.reachable && (activity?.busy || nas.stopped) && (
+        <button
+          className="btn small sb-stop"
+          onClick={() => api.stopNasSync(!nas.stopped).catch(() => {})}
+          title={nas.stopped ? "Carry on copying to the NAS (and freeing up space if that's on)" : "Stop after the current clip. Nothing is lost: it picks up where it left off when you resume."}
+        >
+          {nas.stopped ? "Resume" : "Stop"}
+        </button>
       )}
       <span style={{ flex: 1 }} />
       {err && <span className="sb-item bad">{err}</span>}

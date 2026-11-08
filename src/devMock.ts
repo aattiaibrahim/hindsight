@@ -136,9 +136,12 @@ export function installDevMock() {
     "plugin:opener|open_url": () => null,
     get_nas_state: () =>
       settings.nasDir
-        ? { enabled: true, reachable: true, pending: 1, copying: null, copied: 3, lastError: null, lastSync: Date.now() - 20_000, paused: false, totalFiles: 0, doneFiles: 0, totalBytes: 0, doneBytes: 0, pendingBytes: 0, checking: false, rate: 0, etaSecs: null }
-        : { enabled: false, reachable: false, pending: 0, copying: null, copied: 0, lastError: null, lastSync: null, paused: false, totalFiles: 0, doneFiles: 0, totalBytes: 0, doneBytes: 0, pendingBytes: 0, checking: false, rate: 0, etaSecs: null },
+        ? new URLSearchParams(location.search).has("freeing")
+          ? { enabled: true, reachable: true, pending: 0, copying: "OBS/OBS 2026-07-19 04-09-26.mp4", copied: 0, lastError: null, lastSync: Date.now() - 20_000, paused: false, totalFiles: 0, doneFiles: 0, totalBytes: 0, doneBytes: 0, pendingBytes: 0, checking: true, rate: 0, etaSecs: null, freeDone: 119, freeTotal: 298, freeing: true, stopped: false }
+          : { enabled: true, reachable: true, pending: 1, copying: null, copied: 3, lastError: null, lastSync: Date.now() - 20_000, paused: false, totalFiles: 0, doneFiles: 0, totalBytes: 0, doneBytes: 0, pendingBytes: 0, checking: false, rate: 0, etaSecs: null, freeDone: 0, freeTotal: 0, freeing: false, stopped: false }
+        : { enabled: false, reachable: false, pending: 0, copying: null, copied: 0, lastError: null, lastSync: null, paused: false, totalFiles: 0, doneFiles: 0, totalBytes: 0, doneBytes: 0, pendingBytes: 0, checking: false, rate: 0, etaSecs: null, freeDone: 0, freeTotal: 0, freeing: false, stopped: false },
     sync_nas_now: () => null,
+    stop_nas_sync: () => null,
     "plugin:dialog|open": () => "\\\\nas\\clips",
     nas_check: (a) => ({
       dir: a.dir, reachable: true, writable: true, clips: 412, clipBytes: 268e9, games: 9, otherFiles: 0, otherExamples: [],
@@ -154,7 +157,7 @@ export function installDevMock() {
     edited_clips: () => [],
     system_accent: () => "#4cc2ff",
     media_base: () => null,
-    old_folders: () => [{ path: "C:\\Users\\you\\Videos\\Medal", label: "Medal", moved: 42, files: 3, bytes: 18_400_000 }],
+    old_folders: () => [{ path: "C:\\Medal", label: "Medal", moved: 42, files: 3, bytes: 18_400_000 }],
     remove_old_folder: () => null,
     set_game_logo: () => null,
     detect_status: () => ({ installed: true, downloading: null, lookedAt: 51, toLookAt: 53, error: null }),

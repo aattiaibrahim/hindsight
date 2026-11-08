@@ -1,12 +1,17 @@
-//! Old recorder folders that "Move into Hindsight" emptied.
+//! Old recorder folders with no clips left in them.
 //!
-//! Once every clip from a linked folder (Medal, Outplayed, …) has moved into
-//! Hindsight, the folder is just left behind. Hindsight offers to remove it,
-//! but only when all of this holds:
-//! - a move log shows clips really were moved out of it (not copied);
+//! Once every clip from a recorder's folder (Medal, OBS, Xbox Game Bar, …) has
+//! moved into Hindsight, or the folder is simply empty, it's just left behind.
+//! Hindsight offers to remove it, but only when all of this holds:
 //! - not one video is left anywhere inside it;
+//! - a move log shows clips really were moved out of it, or what's left is
+//!   small (a few settings or thumbnail files);
 //! - it isn't a drive, a Windows folder (Videos, Desktop…), or a folder that
 //!   holds Hindsight's own clips or the NAS.
+//!
+//! The folders looked at: linked folders, the recorders' own folders, and the
+//! folders the move logs moved clips out of (a moved-from folder is unlinked,
+//! so it would otherwise never be offered).
 //!
 //! Removing it sends it to the Recycle Bin and stops showing it in the library.
 //! Undo for the move still works afterwards: moving a clip back recreates its folder.
@@ -97,20 +102,45 @@ fn moved_out_of(dir: &Path, logs: &Path) -> usize {
         .count()
 }
 
-/// Linked folders that are empty of clips now that they moved into Hindsight.
+/// Left in a folder nothing was moved out of, it still counts as empty (a
+/// recorder's settings, thumbnails or desktop.ini).
+const SMALL_FILES: usize = 20;
+const SMALL_BYTES: u64 = 50 * 1024 * 1024;
+
+/// The folder each move log moved clips out of: where all its moves came from.
+fn log_roots(logs: &Path) -> Vec<PathBuf> {
+    let Ok(rd) = fs::read_dir(logs) else { return Vec::new() };
+    rd.flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|e| e == "jsonl"))
+        .filter_map(|log| {
+            let dirs: Vec<PathBuf> = crate::consolidate::read_log(&log).into_iter().filter(|m| !m.copied).filter_map(|m| m.from.parent().map(Path::to_path_buf)).collect();
+            let mut root = dirs.first()?.clone();
+            for d in &dirs[1..] {
+                while !within(d, &root) {
+                    root = root.parent()?.to_path_buf();
+                }
+            }
+            Some(root)
+        })
+        .collect()
+}
+
+/// Recorder folders with no clips left in them. `candidates`: linked folders and
+/// the recorders' own folders (the move logs' folders are added here).
 /// `keep`: Hindsight's clips folder and the NAS. `logs`: the move logs folder.
-pub fn find(linked: &[String], keep: &[PathBuf], logs: &Path) -> Vec<OldFolder> {
-    linked
-        .iter()
-        .map(PathBuf::from)
+pub fn find(candidates: &[String], keep: &[PathBuf], logs: &Path) -> Vec<OldFolder> {
+    let mut all: Vec<PathBuf> = candidates.iter().map(PathBuf::from).chain(log_roots(logs)).collect();
+    all.sort_by_key(|p| p.to_string_lossy().to_lowercase());
+    all.dedup_by(|a, b| within(a, b) && within(b, a));
+    let offers: Vec<OldFolder> = all
+        .into_iter()
         .filter(|p| p.is_dir() && !protected(p, keep))
         .filter_map(|p| {
             let moved = moved_out_of(&p, logs);
-            if moved == 0 {
-                return None;
-            }
             let (videos, files, bytes) = contents(&p);
-            (videos == 0).then(|| OldFolder {
+            let empty_enough = moved > 0 || (files <= SMALL_FILES && bytes <= SMALL_BYTES);
+            (videos == 0 && empty_enough).then(|| OldFolder {
                 label: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.to_string_lossy().into_owned()),
                 path: p.to_string_lossy().into_owned(),
                 moved,
@@ -118,7 +148,9 @@ pub fn find(linked: &[String], keep: &[PathBuf], logs: &Path) -> Vec<OldFolder> 
                 bytes,
             })
         })
-        .collect()
+        .collect();
+    // One offer per folder: an emptied folder inside another offered one goes with it.
+    offers.iter().filter(|o| !offers.iter().any(|x| x.path != o.path && within(Path::new(&o.path), Path::new(&x.path)))).cloned().collect()
 }
 
 /// Check `path` again (it has to be offered right now), then send it to the Recycle Bin.
@@ -207,15 +239,48 @@ mod tests {
     }
 
     #[test]
+    fn moved_from_folders_and_empty_recorder_folders_are_offered() {
+        let base = tmp("roots");
+        let logs = base.join("moves");
+        // Medal: clips moved out of two subfolders, the folder itself no longer linked.
+        let medal = base.join("Medal");
+        fs::create_dir_all(medal.join("Clips/Valorant")).unwrap();
+        fs::create_dir_all(medal.join("Edits")).unwrap();
+        for i in 0..30 {
+            fs::write(medal.join(format!("thumb{i}.jpg")), b"t").unwrap(); // more than SMALL_FILES
+        }
+        fs::create_dir_all(&logs).unwrap();
+        let mv = |from: PathBuf| serde_json::to_string(&crate::consolidate::Move { from, to: PathBuf::from(r"C:\x\y.mp4"), size: 1, copied: false }).unwrap();
+        fs::write(logs.join("20260101-000000-Medal.jsonl"), format!("{}\n{}\n", mv(medal.join("Clips/Valorant/a.mp4")), mv(medal.join("Edits/b.mp4")))).unwrap();
+        // Xbox Game Bar: never moved from, but empty apart from desktop.ini.
+        let captures = base.join("Captures");
+        fs::create_dir_all(&captures).unwrap();
+        fs::write(captures.join("desktop.ini"), b"[x]").unwrap();
+        // A folder with lots of other stuff and nothing moved out: not offered.
+        let busy = base.join("Busy");
+        fs::create_dir_all(&busy).unwrap();
+        for i in 0..30 {
+            fs::write(busy.join(format!("doc{i}.txt")), b"d").unwrap();
+        }
+        let cands: Vec<String> = [&captures, &busy, &medal.join("Clips")].iter().map(|p| p.to_string_lossy().into_owned()).collect();
+        let mut found: Vec<String> = find(&cands, &[], &logs).into_iter().map(|f| f.label).collect();
+        found.sort();
+        assert_eq!(found, vec!["Captures".to_string(), "Medal".to_string()], "Medal once (its Clips folder is inside it)");
+        let _ = fs::remove_dir_all(base.parent().unwrap());
+    }
+
+    #[test]
     fn copies_and_protected_folders_are_never_offered() {
         let base = tmp("protect");
         let obs = base.join("OBS");
         let logs = base.join("moves");
         fs::create_dir_all(&obs).unwrap();
-        // Copied in (the originals stay): not offered.
+        // Copied in (the originals stay) and a clip still there: not offered.
         log(&logs, &obs.join("a.mp4"), true);
+        fs::write(obs.join("a.mp4"), b"v").unwrap();
         let linked = vec![obs.to_string_lossy().into_owned()];
         assert!(find(&linked, &[], &logs).is_empty());
+        fs::remove_file(obs.join("a.mp4")).unwrap();
         // Moved, but it holds Hindsight's own clips folder: not offered.
         log(&logs, &obs.join("a.mp4"), false);
         assert_eq!(find(&linked, &[], &logs).len(), 1);
@@ -229,5 +294,22 @@ mod tests {
             assert!(!protected(&PathBuf::from(&home).join("Videos").join("Medal"), &[]));
         }
         let _ = fs::remove_dir_all(base.parent().unwrap());
+    }
+}
+
+#[cfg(test)]
+mod live {
+    /// What would be offered on this PC (read-only): cargo test --lib live_old_folders -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_old_folders() {
+        let home = std::env::var("USERPROFILE").unwrap();
+        let logs = std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join("com.rewind.app").join("moves");
+        let mut cands: Vec<String> = crate::bench::recorders::clip_folders().into_iter().filter(|f| f.exists).map(|f| f.path).collect();
+        cands.extend([format!(r"{home}\Videos\Captures"), r"D:\Recordings".into(), r"D:\Medal\Clips".into()]);
+        let keep = vec![std::path::PathBuf::from(format!(r"{home}\Videos\Rewind"))];
+        for f in super::find(&cands, &keep, &logs) {
+            println!("offer: {} ({} moved out, {} other files, {} bytes)", f.path, f.moved, f.files, f.bytes);
+        }
     }
 }

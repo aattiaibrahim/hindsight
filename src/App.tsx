@@ -269,8 +269,8 @@ export default function App() {
     notices.push({
       id: `old:${f.path}`,
       kind: "folders",
-      title: `Your old ${f.label} folder isn't used any more`,
-      detail: `All ${f.moved} of its clips moved into Hindsight. ${f.files ? `Only ${f.files} other file${f.files === 1 ? "" : "s"} (${fmtSize(f.bytes)}) are left in it.` : "It's empty."}`,
+      title: `Your ${f.label} folder has no clips left in it`,
+      detail: `${f.moved ? `All ${f.moved} of its clips moved into Hindsight. ` : ""}${f.files ? `Only ${f.files} other file${f.files === 1 ? "" : "s"} (${fmtSize(f.bytes)}) ${f.files === 1 ? "is" : "are"} left in it.` : "It's empty."}`,
       actions: [{ label: "Delete folder…", run: () => setOldAsk(f), primary: true }],
     });
   if (nasNow?.enabled && !nasNow.reachable)

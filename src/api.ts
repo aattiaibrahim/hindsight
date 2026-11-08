@@ -229,6 +229,13 @@ export type NasState = {
   pendingBytes: number;
   /** Reading the NAS copy back to check it */
   checking: boolean;
+  /** Freeing up space on this PC: clips done of this many (this pass) */
+  freeDone: number;
+  freeTotal: number;
+  /** Checking a clip before freeing up its local copy (vs copying one) */
+  freeing: boolean;
+  /** Stopped from the status bar until Resume */
+  stopped: boolean;
   /** Bytes per second this pass */
   rate: number;
   etaSecs: number | null;
@@ -460,6 +467,8 @@ export const api = {
   repairClip: (path: string) => invoke<string>("repair_clip", { path }),
   secretsSet: () => invoke<{ discordWebhook: boolean; streamablePassword: boolean }>("secrets_set"),
   syncNasNow: () => invoke<void>("sync_nas_now"),
+  /** Stop (true) or resume (false) NAS copying and freeing up. */
+  stopNasSync: (stop: boolean) => invoke<void>("stop_nas_sync", { stop }),
   recorderClipFolders: () => invoke<ClipFolder[]>("recorder_clip_folders"),
   planMoveIntoRewind: (folders: string[]) => invoke<MovePlan>("plan_move_into_rewind", { folders }),
   moveIntoRewind: (folders: string[]) => invoke<MoveOutcome>("move_into_rewind", { folders }),

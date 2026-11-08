@@ -24,6 +24,28 @@ export function fmtEta(secs: number) {
   return `about ${h} h${m % 60 ? ` ${m % 60} min` : ""}`;
 }
 
+/**
+ * What the NAS sync is doing, in words, with a percentage when there is one:
+ * "Copying to the NAS · 2 of 5 · 63%", "Freeing up space on this PC · 120 of 300 · 40%".
+ */
+export function nasActivity(n: NasState | null): { text: string; pct: number | null; busy: boolean } | null {
+  if (!n?.enabled) return null;
+  if (!n.reachable) return { text: "Can't reach the NAS", pct: null, busy: false };
+  if (n.stopped) return { text: "NAS sync stopped", pct: null, busy: false };
+  if (n.copying && n.freeing && n.freeTotal > 0) {
+    const pct = Math.min(100, Math.round((n.freeDone / n.freeTotal) * 100));
+    return { text: `Freeing up space on this PC · ${Math.min(n.freeDone + 1, n.freeTotal)} of ${n.freeTotal} · ${pct}%`, pct, busy: true };
+  }
+  if (n.copying) {
+    const pct = n.totalBytes ? Math.min(100, Math.round((n.doneBytes / n.totalBytes) * 100)) : null;
+    const count = n.totalFiles ? ` · ${Math.min(n.doneFiles + 1, n.totalFiles)} of ${n.totalFiles}` : "";
+    return { text: `${n.checking ? "Checking the NAS copy" : "Copying to the NAS"}${count}${pct != null ? ` · ${pct}%` : ""}`, pct, busy: true };
+  }
+  if (n.paused && n.pending) return { text: `${n.pending} to copy after your game`, pct: null, busy: false };
+  if (n.pending) return { text: `${n.pending} waiting for the NAS`, pct: null, busy: false };
+  return { text: "NAS up to date", pct: null, busy: false };
+}
+
 /** Is there copying going on (or waiting) worth showing? */
 export function nasBusy(n: NasState | null) {
   return !!n && n.enabled && n.reachable && n.pendingBytes > 0;

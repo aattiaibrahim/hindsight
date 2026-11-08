@@ -66,6 +66,13 @@ pub struct NasState {
     pub rate: f64,
     /// Time left at that speed
     pub eta_secs: Option<u64>,
+    /// Freeing up space on this PC: clips done so far of this many.
+    pub free_done: usize,
+    pub free_total: usize,
+    /// Checking a clip before freeing up its local copy (vs copying).
+    pub freeing: bool,
+    /// Stopped by the user (Stop in the status bar) until they press Resume.
+    pub stopped: bool,
 }
 
 /// Where a sync pass is up to, for the progress display.
@@ -78,6 +85,11 @@ pub struct Step<'a> {
     pub total_bytes: u64,
     pub done_files: usize,
     pub total_files: usize,
+    /// Freeing up space on this PC: clips checked so far, and how many to check.
+    pub free_done: usize,
+    pub free_total: usize,
+    /// This step is checking a clip before freeing up its local copy.
+    pub freeing: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -290,6 +302,17 @@ static STATE: Mutex<Option<NasState>> = Mutex::new(None);
 static LISTING: Mutex<Option<Listing>> = Mutex::new(None);
 /// Set while game folders are being merged: the worker skips its passes.
 static HOLD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Stop in the status bar: no copying or freeing up until Resume (or the app restarts).
+static STOPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_stopped(on: bool) {
+    STOPPED.store(on, std::sync::atomic::Ordering::SeqCst);
+    wake();
+}
+
+fn stopped() -> bool {
+    STOPPED.load(std::sync::atomic::Ordering::SeqCst)
+}
 /// Folder renames from a merge ("old/" → "new/", lowercase) still to apply to
 /// the copied-clips record, so a clip deleted on the NAS isn't copied back under
 /// its new folder name.
@@ -738,6 +761,15 @@ pub fn sync_once(
         }
     }
     let (mut done_files, mut done_bytes) = (0usize, 0u64);
+    // Clips already on the NAS whose copy here will be freed up, for the progress display.
+    let free_total = if remove_local {
+        todo.iter()
+            .filter(|(src, rel, _)| synced.contains(&rel_key(rel)) && size(src).is_some() && size(&nas.join(rel.replace('/', "\\"))) == size(src))
+            .count()
+    } else {
+        0
+    };
+    let mut free_done = 0usize;
 
     // Edits first, so the NAS never keeps an old version next to a new one.
     let mut keep = Vec::new();
@@ -751,9 +783,9 @@ pub fn sync_once(
             keep.push((old, new));
             continue;
         }
-        on_copy(Step { file: Some(&new), checking: false, done_bytes, total_bytes, done_files, total_files });
+        on_copy(Step { file: Some(&new), checking: false, done_bytes, total_bytes, done_files, total_files, free_done, free_total, freeing: false });
         let mut progress = |n: u64, checking: bool| {
-            on_copy(Step { file: Some(&new), checking, done_bytes: done_bytes + n, total_bytes, done_files, total_files })
+            on_copy(Step { file: Some(&new), checking, done_bytes: done_bytes + n, total_bytes, done_files, total_files, free_done, free_total, freeing: false })
         };
         match push_edit(local, nas, &old, &new, &mut progress) {
             Ok(()) => {
@@ -792,25 +824,32 @@ pub fn sync_once(
                 if stop() {
                     continue;
                 }
-                on_copy(Step { file: Some(&rel), checking: true, done_bytes, total_bytes, done_files, total_files });
+                on_copy(Step { file: Some(&rel), checking: true, done_bytes, total_bytes, done_files, total_files, free_done, free_total, freeing: true });
                 match same_contents(&src, &dest) {
                     Ok(true) => {
                         verified.insert(key.clone());
                     }
                     Ok(false) => {
                         pass.errors.push(format!("{rel}: the NAS copy isn't identical to this one, so this one is kept"));
+                        free_done += 1;
                         continue;
                     }
                     Err(e) => {
                         pass.errors.push(format!("{rel}: couldn't check the NAS copy ({e}), so this one is kept"));
+                        free_done += 1;
                         continue;
                     }
                 }
             }
+            if stop() {
+                continue;
+            }
             match recycle(&src) {
-                Ok(()) => pass.removed.push(rel),
+                Ok(()) => pass.removed.push(rel.clone()),
                 Err(e) => pass.errors.push(format!("{rel}: couldn't move the local copy to the Recycle Bin ({e})")),
             }
+            free_done += 1;
+            on_copy(Step { file: Some(&rel), checking: false, done_bytes, total_bytes, done_files, total_files, free_done, free_total, freeing: true });
             continue;
         }
         match size(&dest) {
@@ -828,7 +867,7 @@ pub fn sync_once(
         if stop() {
             continue; // counted as waiting, copied on a later pass
         }
-        on_copy(Step { file: Some(&rel), checking: false, done_bytes, total_bytes, done_files, total_files });
+        on_copy(Step { file: Some(&rel), checking: false, done_bytes, total_bytes, done_files, total_files, free_done, free_total, freeing: false });
         let name = dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let tmp = dest.with_file_name(format!(".{name}{PARTIAL}"));
         let copied = (|| -> Result<(), String> {
@@ -836,7 +875,7 @@ pub fn sync_once(
                 fs::create_dir_all(dir).map_err(|e| e.to_string())?;
             }
             copy_verified(&src, &tmp, &mut |n, checking| {
-                on_copy(Step { file: Some(&rel), checking, done_bytes: done_bytes + n, total_bytes, done_files, total_files })
+                on_copy(Step { file: Some(&rel), checking, done_bytes: done_bytes + n, total_bytes, done_files, total_files, free_done, free_total, freeing: false })
             })?;
             if size(&tmp) != local_size {
                 return Err("the copy came out the wrong size".into());
@@ -865,7 +904,7 @@ pub fn sync_once(
         }
     }
     pass.pending_bytes = total_bytes.saturating_sub(done_bytes);
-    on_copy(Step { file: None, checking: false, done_bytes, total_bytes, done_files, total_files });
+    on_copy(Step { file: None, checking: false, done_bytes, total_bytes, done_files, total_files, free_done, free_total, freeing: false });
     Ok(pass)
 }
 
@@ -945,15 +984,28 @@ pub fn start(app: AppHandle) {
                 let st = app.state::<crate::AppState>();
                 st.engine.is_recording()
             };
+            if stopped() {
+                publish(&app, |st| {
+                    st.enabled = true;
+                    st.stopped = true;
+                    st.copying = None;
+                    st.freeing = false;
+                });
+                continue;
+            }
             if crate::games::game_running() || app_busy {
                 publish(&app, |st| {
                     st.enabled = true;
                     st.paused = true;
+                    st.stopped = false;
                     st.copying = None;
                 });
                 continue;
             }
-            publish(&app, |st| st.paused = false);
+            publish(&app, |st| {
+                st.paused = false;
+                st.stopped = false;
+            });
             // Only sync into the folder that was checked and confirmed: if the path
             // now leads somewhere else (a remapped drive, a different share), stop.
             let nas_root = PathBuf::from(&s.nas_dir);
@@ -1011,6 +1063,10 @@ pub fn start(app: AppHandle) {
             let mut started: Option<std::time::Instant> = None;
             let mut last_emit = std::time::Instant::now() - Duration::from_secs(1);
             let mut last_file = String::new();
+            // While freeing up space, the library is refreshed every few seconds, so a
+            // freed clip moves from Local clips to the NAS-only ones right away instead
+            // of when the (long) pass ends.
+            let mut last_refresh = std::time::Instant::now();
             // Edits made in the NAS app come down first, so this PC never pushes an old version.
             let mut pulled_any = false;
             if let Some(pf) = pulled_path(&app) {
@@ -1029,6 +1085,10 @@ pub fn start(app: AppHandle) {
                 }
             }
             let result = sync_once(Path::new(&s.clips_dir), &nas, &mut synced, &mut verified, &mut edits, s.nas_remove_local, SETTLE, |step| {
+                if step.freeing && !step.checking && last_refresh.elapsed() >= Duration::from_secs(4) {
+                    last_refresh = std::time::Instant::now();
+                    let _ = a.emit("clips-changed", ());
+                }
                 let file = step.file.map(|r| r.rsplit('/').next().unwrap_or(r).to_string());
                 // Throttled: a clip is hundreds of 1 MB chunks.
                 let new_file = file.as_deref().unwrap_or("") != last_file;
@@ -1044,6 +1104,9 @@ pub fn start(app: AppHandle) {
                 publish(&a, |st| {
                     st.copying = file;
                     st.checking = step.checking;
+                    st.freeing = step.freeing;
+                    st.free_done = step.free_done;
+                    st.free_total = step.free_total;
                     st.total_files = step.total_files;
                     st.done_files = step.done_files;
                     st.total_bytes = step.total_bytes;
@@ -1052,7 +1115,7 @@ pub fn start(app: AppHandle) {
                     st.rate = rate;
                     st.eta_secs = (rate > 0.0 && left > 0).then(|| (left as f64 / rate) as u64);
                 });
-            }, &|| crate::games::game_running());
+            }, &|| crate::games::game_running() || stopped());
             if let Some(p) = &manifest {
                 save_synced(p, &s.nas_dir, &synced);
             }

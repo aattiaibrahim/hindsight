@@ -31,7 +31,9 @@ export function OldFolderDialog({ folder, onClose, onDone }: { folder: OldFolder
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="old-title" onClick={(e) => e.stopPropagation()}>
         <h2 id="old-title">Delete the old {folder.label} folder?</h2>
         <p className="muted" style={{ margin: 0 }}>
-          All {folder.moved} of its clips are in Hindsight now, and no videos are left in it.
+          {folder.moved
+            ? `All ${folder.moved} of its clips are in Hindsight now, and no videos are left in it.`
+            : "No videos are in it."}
           {folder.files
             ? ` What's left is ${folder.files} other file${folder.files === 1 ? "" : "s"} (${fmtSize(folder.bytes)}), like the recorder's thumbnails or settings.`
             : " It's empty."}

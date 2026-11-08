@@ -369,6 +369,12 @@ fn sync_nas_now() {
     nas::wake();
 }
 
+/// Stop (or resume) NAS copying and freeing up, from the status bar.
+#[tauri::command]
+fn stop_nas_sync(stop: bool) {
+    nas::set_stopped(stop);
+}
+
 fn linked_root_for(s: &Settings, folder: &str) -> Result<library::LinkedRoot, String> {
     linked_roots(s)
         .into_iter()
@@ -441,7 +447,14 @@ fn own_folders(s: &Settings) -> Vec<PathBuf> {
 async fn old_folders(app: AppHandle) -> Result<Vec<old_folders::OldFolder>, String> {
     let s = settings_of(&app);
     let logs = moves_dir(&app)?;
-    blocking(move || Ok(old_folders::find(&s.linked_folders, &own_folders(&s), &logs))).await
+    blocking(move || Ok(old_folders::find(&old_folder_candidates(&s), &own_folders(&s), &logs))).await
+}
+
+/// Folders that might be emptied recorder folders: linked ones and the recorders' own.
+fn old_folder_candidates(s: &Settings) -> Vec<String> {
+    let mut v = s.linked_folders.clone();
+    v.extend(bench::recorders::clip_folders().into_iter().filter(|f| f.exists).map(|f| f.path));
+    v
 }
 
 /// Send an emptied recorder folder to the Recycle Bin and stop showing it.
@@ -449,7 +462,7 @@ async fn old_folders(app: AppHandle) -> Result<Vec<old_folders::OldFolder>, Stri
 async fn remove_old_folder(app: AppHandle, path: String) -> Result<(), String> {
     let s = settings_of(&app);
     let logs = moves_dir(&app)?;
-    let (p, linked, keep) = (path.clone(), s.linked_folders.clone(), own_folders(&s));
+    let (p, linked, keep) = (path.clone(), old_folder_candidates(&s), own_folders(&s));
     blocking(move || old_folders::remove(&p, &linked, &keep, &logs)).await?;
     let mut s = settings_of(&app);
     s.linked_folders.retain(|f| !library::same_path(std::path::Path::new(f), std::path::Path::new(&path)));
@@ -1771,6 +1784,7 @@ pub fn run() {
             install_update,
             get_nas_state,
             sync_nas_now,
+            stop_nas_sync,
             recorder_clip_folders,
             upload_clip,
             upload_history,

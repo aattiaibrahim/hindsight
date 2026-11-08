@@ -1310,3 +1310,8 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
 .tl-day.in-lens em { color: var(--text); }
 .timeline-rail.active .tl-day:not(.in-lens) em { opacity: 0.45; }
 .tl-num { position: absolute; right: 14px; top: -6px; font-style: normal; font-size: 10px; line-height: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+
+/* Status bar: NAS activity with a small progress bar, and Stop / Resume */
+.sb-meter { width: 64px; height: 4px; border-radius: 2px; background: var(--raised); overflow: hidden; }
+.sb-meter i { display: block; height: 100%; background: var(--accent); }
+.sb-stop { height: 24px; padding: 0 10px; font-size: 12px; }
