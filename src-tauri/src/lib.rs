@@ -1016,7 +1016,7 @@ async fn export_h264(app: AppHandle, path: String, replace: bool, audio: Option<
 
 /// Clips changed in the app (trimmed, healed, exported in place), for the
 /// montage's "edited clips" choice. Kept in app data as a list of paths.
-fn remember_edited(app: &AppHandle, path: &str) {
+pub(crate) fn remember_edited(app: &AppHandle, path: &str) {
     if let Ok(file) = data_file(app, "edited.json") {
         let mut list: Vec<String> = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
         if !list.iter().any(|p| p == path) {

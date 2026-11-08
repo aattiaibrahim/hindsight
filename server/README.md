@@ -63,10 +63,15 @@ to the NAS folder. Hindsight Server reads that folder:
   then re-encodes).
 - Outputs are saved next to the original with the desktop's names, for example
   `VALORANT 2026-11-03 21-14-03 - GAMING-PC (trim).mkv`. Edits run one at a time, with progress.
-- **Replace the original** is only offered for clips that exist only on the NAS: no PC name in the
-  file name, or made by the NAS editor. A clip from a PC is always saved as a new file, because that
-  PC's sync would overwrite an edit made here the next time it syncs its own edit of the clip. The
-  replaced file moves to `.hindsight-replaced/<date>/` for 30 days, like the desktop's NAS sync.
+- **Replace the original** works for every clip. The replaced file moves to
+  `.hindsight-replaced/<date>/` for 30 days, like the desktop's NAS sync. Each replace is noted in
+  `.hindsight-edits.jsonl` in the clips folder, and the PC the clip came from swaps in the edit on
+  its next sync: it checks the copy byte for byte and sends its old copy to the Recycle Bin. Edits
+  made on a PC replace the NAS copy the same way, so an edit shows up everywhere.
+- **Pairing:** Settings > PCs that sync here > Pair a PC shows a 6-digit code. A PC only syncs into
+  the library once it's paired (or once someone confirms the folder on the PC). The PC proves its
+  folder is this server's clips folder with a one-time file it writes there; the server never writes
+  into the clips folder for this.
 - Without `ALLOW_CHANGES=1` the editor still works, but its outputs stay in the cache to download.
 
 **Clips**

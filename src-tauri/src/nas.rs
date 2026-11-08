@@ -390,6 +390,95 @@ fn push_edit(local: &Path, nas: &Path, old: &str, new: &str, on_copy: &mut dyn F
     fs::rename(&tmp, &dest).map_err(|e| e.to_string())
 }
 
+/// Clips saved over in the NAS app (written by server/src/edit.js), one JSON line each.
+pub const EDIT_LOG: &str = ".hindsight-edits.jsonl";
+
+#[derive(serde::Deserialize, Debug)]
+struct NasEdit {
+    rel: String,
+    old: String,
+    at: i64,
+    size: u64,
+}
+
+/// Bring edits made in the NAS app to this PC: for each clip this PC has (and
+/// synced), copy the new version down, check it byte for byte, send the old
+/// copy here to the Recycle Bin and put the edit in its place. `done` is the
+/// newest edit already handled for this NAS. Returns the (old, new) local paths
+/// swapped, and the first error (which stops the pass, to try again later).
+pub fn pull_edits(
+    local: &Path,
+    nas: &Path,
+    done: &mut i64,
+    synced: &mut HashSet<String>,
+    verified: &mut HashSet<String>,
+    stop: &dyn Fn() -> bool,
+) -> (Vec<(PathBuf, PathBuf)>, Option<String>) {
+    let mut pulled = Vec::new();
+    let Ok(text) = fs::read_to_string(nas.join(EDIT_LOG)) else {
+        return (pulled, None);
+    };
+    let mut list: Vec<NasEdit> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).filter(|e: &NasEdit| e.at > *done).collect();
+    list.sort_by_key(|e| e.at);
+    for e in list {
+        if stop() {
+            break;
+        }
+        let ok_rel = |r: &str| !r.is_empty() && !r.contains("..") && !r.starts_with('/') && !r.contains(':');
+        let (old_key, new_key) = (rel_key(&e.old), rel_key(&e.rel));
+        let old_local = local.join(e.old.replace('/', "\\"));
+        let new_local = local.join(e.rel.replace('/', "\\"));
+        let nas_file = nas.join(e.rel.replace('/', "\\"));
+        // Not this PC's clip, never synced from here, or edited again since (a later line covers it).
+        if !ok_rel(&e.old) || !ok_rel(&e.rel) || !synced.contains(&old_key) || !old_local.is_file() || size(&nas_file) != Some(e.size) {
+            *done = e.at;
+            continue;
+        }
+        let name = new_local.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let tmp = new_local.with_file_name(format!(".{name}{PARTIAL}"));
+        let res = copy_verified(&nas_file, &tmp, &mut |_, _| {})
+            .and_then(|_| recycle(&old_local))
+            .and_then(|_| if new_local != old_local && new_local.exists() { recycle(&new_local) } else { Ok(()) })
+            .and_then(|_| fs::rename(&tmp, &new_local).map_err(|x| x.to_string()));
+        if let Err(x) = res {
+            let _ = fs::remove_file(&tmp);
+            return (pulled, Some(format!("Couldn't bring the NAS edit of {name} to this PC: {x}")));
+        }
+        // Same date as the original (keeps its place in the library), plus 1 ms so the
+        // player and thumbnails, which go by the date, load the new version.
+        if let Ok(f) = fs::OpenOptions::new().write(true).open(&new_local)
+            && let Ok(t) = f.metadata().and_then(|m| m.modified())
+        {
+            let _ = f.set_modified(t + Duration::from_millis(1));
+        }
+        crate::log!("[rewind] nas: pulled the NAS app's edit of {}", e.rel);
+        for set in [&mut *synced, &mut *verified] {
+            set.remove(&old_key);
+            set.insert(new_key.clone());
+        }
+        *done = e.at;
+        pulled.push((old_local, new_local));
+    }
+    (pulled, None)
+}
+
+fn pulled_path(app: &AppHandle) -> Option<PathBuf> {
+    app.path().app_data_dir().ok().map(|d| d.join("nas-pulled.txt"))
+}
+
+/// Newest NAS edit handled, per NAS folder ("<root>|<ms>" lines).
+fn load_pulled(path: &Path, root: &str) -> i64 {
+    let prefix = format!("{}|", root.to_lowercase());
+    fs::read_to_string(path).unwrap_or_default().lines().find_map(|l| l.strip_prefix(&prefix).and_then(|v| v.parse().ok())).unwrap_or(0)
+}
+
+fn save_pulled(path: &Path, root: &str, at: i64) {
+    let prefix = format!("{}|", root.to_lowercase());
+    let mut lines: Vec<String> = fs::read_to_string(path).unwrap_or_default().lines().filter(|l| !l.starts_with(&prefix)).map(str::to_string).collect();
+    lines.push(format!("{prefix}{at}"));
+    let _ = fs::write(path, lines.join("\n"));
+}
+
 /// " - GAMING-PC": added to clip names when a NAS is shared by several PCs.
 pub fn pc_suffix() -> String {
     let name: String = std::env::var("COMPUTERNAME")
@@ -922,6 +1011,23 @@ pub fn start(app: AppHandle) {
             let mut started: Option<std::time::Instant> = None;
             let mut last_emit = std::time::Instant::now() - Duration::from_secs(1);
             let mut last_file = String::new();
+            // Edits made in the NAS app come down first, so this PC never pushes an old version.
+            let mut pulled_any = false;
+            if let Some(pf) = pulled_path(&app) {
+                let before = load_pulled(&pf, &s.nas_dir);
+                let mut done = before;
+                let (pulled, err) = pull_edits(Path::new(&s.clips_dir), &nas, &mut done, &mut synced, &mut verified, &|| crate::games::game_running());
+                if done != before {
+                    save_pulled(&pf, &s.nas_dir, done);
+                }
+                for (_, new) in &pulled {
+                    crate::remember_edited(&app, &new.to_string_lossy());
+                }
+                pulled_any = !pulled.is_empty();
+                if let Some(e) = err {
+                    publish(&app, |st| st.last_error = Some(e));
+                }
+            }
             let result = sync_once(Path::new(&s.clips_dir), &nas, &mut synced, &mut verified, &mut edits, s.nas_remove_local, SETTLE, |step| {
                 let file = step.file.map(|r| r.rsplit('/').next().unwrap_or(r).to_string());
                 // Throttled: a clip is hundreds of 1 MB chunks.
@@ -954,7 +1060,7 @@ pub fn start(app: AppHandle) {
                 save_synced(p, &s.nas_dir, &verified);
             }
             let reachable = result.is_ok();
-            let mut changed = false;
+            let mut changed = pulled_any;
             match &result {
                 Ok(pass) => {
                     prune_replaced(&nas, chrono::Local::now().date_naive());
@@ -1035,6 +1141,39 @@ mod tests {
         for d in [local, docs, nas] {
             let _ = fs::remove_dir_all(d);
         }
+    }
+
+    #[test]
+    fn edits_made_in_the_nas_app_come_down_to_this_pc() {
+        let local = tmp("pull-local");
+        let nas = tmp("pull-nas");
+        let old = clip(&local, "VALORANT/ace - PC.mkv", 1000);
+        clip(&nas, "VALORANT/ace - PC.mkv", 400); // the NAS app saved a 400-byte trim over it
+        clip(&local, "VALORANT/other - PC.mkv", 10);
+        let log = [
+            r#"{"rel":"VALORANT/ace - PC.mkv","old":"VALORANT/ace - PC.mkv","at":100,"size":400}"#,
+            r#"{"rel":"VALORANT/other - PC.mkv","old":"VALORANT/other - PC.mkv","at":200,"size":999}"#,
+            r#"{"rel":"VALORANT/never - OTHERPC.mkv","old":"VALORANT/never - OTHERPC.mkv","at":300,"size":5}"#,
+        ];
+        fs::write(nas.join(EDIT_LOG), log.join("\n")).unwrap();
+        let mut synced: HashSet<String> = ["valorant/ace - pc.mkv", "valorant/other - pc.mkv"].iter().map(|s| s.to_string()).collect();
+        let mut verified = synced.clone();
+        let mut done = 0;
+        let (pulled, err) = pull_edits(&local, &nas, &mut done, &mut synced, &mut verified, &|| false);
+        assert!(err.is_none(), "{err:?}");
+        assert_eq!(pulled.len(), 1);
+        assert_eq!(fs::metadata(&old).unwrap().len(), 400, "the edit replaced the clip here");
+        assert_eq!(fs::metadata(local.join("VALORANT").join("other - PC.mkv")).unwrap().len(), 10, "size mismatch: left alone");
+        assert_eq!(done, 300);
+        // Nothing new: a second pass does nothing.
+        let (again, _) = pull_edits(&local, &nas, &mut done, &mut synced, &mut verified, &|| false);
+        assert!(again.is_empty());
+        // A game running: nothing happens and nothing is marked done.
+        let mut d0 = 0;
+        let (none, _) = pull_edits(&local, &nas, &mut d0, &mut synced, &mut verified, &|| true);
+        assert!(none.is_empty() && d0 == 0);
+        let _ = fs::remove_dir_all(local);
+        let _ = fs::remove_dir_all(nas);
     }
 
     fn tmp(name: &str) -> PathBuf {

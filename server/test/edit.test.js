@@ -102,7 +102,8 @@ describe("To trim and replace rules", () => {
     const info = { duration: 10, audio: [{ name: "Desktop" }] };
     let change = true;
     const edits = new Edits({ root: dir, cacheDir: dir, store, canChange: () => change });
-    assert.throws(() => edits.plan(fromPc, info, { op: "save", start: 1, end: 5, replace: true }), (e) => e.status === 409 && /GAMING-PC/.test(e.message));
+    // A PC's clip can be saved over too: the PC picks the edit up from the edit log.
+    assert.equal(edits.plan(fromPc, info, { op: "save", start: 1, end: 5, replace: true }).replace, true);
     assert.equal(edits.plan(fromPc, info, { op: "save", start: 1, end: 5 }).suffix, " (trim)", "a new file is fine");
     assert.equal(edits.plan(nasOnly, info, { op: "save", start: 1, end: 5, replace: true }).replace, true);
     // A file the NAS editor made counts as NAS-only, even with a PC name in it.

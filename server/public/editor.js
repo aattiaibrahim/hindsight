@@ -306,14 +306,14 @@ export function editor(root, { back, changed }) {
     if (!c || !info) return side.replaceChildren();
     const len = end - start;
     const nothing = !trimmed() && !audioChanged();
-    const mayReplace = canChange && c.nasOnly;
+    const mayReplace = canChange;
     const rep = el("input", { type: "checkbox", checked: replace && mayReplace ? true : null, disabled: mayReplace ? null : true });
     rep.addEventListener("change", () => ((replace = rep.checked), drawSide()));
     const repHint = !canChange
       ? "This server is read-only, so edits are kept to download."
       : c.nasOnly
         ? "The original moves to the hidden .hindsight-replaced folder for 30 days."
-        : `From ${c.pc}: saved as a new file, so that PC's sync can't overwrite the edit.`;
+        : `The original moves to the hidden .hindsight-replaced folder for 30 days. ${c.pc} gets the edit on its next sync (its old copy goes to its Recycle Bin).`;
     const saveBtn = btn(replace && mayReplace ? "Save over the original" : "Save trim", { cls: "primary", icon: "save", disabled: nothing ? true : null, onclick: () => run("save") });
     const busy = jobs.some((x) => x.state === "queued" || x.state === "working");
 

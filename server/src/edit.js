@@ -10,20 +10,29 @@
 //   (two-pass with libx264), and repair (decode past errors, then re-encode).
 // - Outputs go next to the original with the desktop's suffixes, written to a
 //   hidden ".…rewind-partial" file first so the library never lists half a file.
-// - Saving over the original is only for clips that exist only on the NAS (see
-//   Store.nasOnly). The replaced file moves to `.hindsight-replaced/<day>/`,
-//   like the desktop's NAS sync, and goes after 30 days.
+// - Saving over the original works for every clip. The replaced file moves to
+//   `.hindsight-replaced/<day>/`, like the desktop's NAS sync, and goes after
+//   30 days. Each replace is added to `.hindsight-edits.jsonl` in the clips
+//   folder, so the PC the clip came from swaps in the edit on its next sync
+//   (its old copy goes to its Recycle Bin): an edit shows up everywhere.
 // - Without ALLOW_CHANGES the outputs are kept in the cache, to download.
 
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { freePath } from "./cleanup.js";
 
 const FFMPEG = () => process.env.FFMPEG || "ffmpeg";
 const FFPROBE = () => process.env.FFPROBE || "ffprobe";
 export const REPLACED = ".hindsight-replaced";
+/** Clips saved over here, for PCs to pick up: one JSON line each, { rel, old, at, size }. */
+export const EDIT_LOG = ".hindsight-edits.jsonl";
+
+/** Note a saved-over clip in the edit log that PCs read. */
+export async function logEdit(root, entry) {
+  await appendFile(path.join(root, EDIT_LOG), `${JSON.stringify(entry)}\n`);
+}
 const KEEP_REPLACED_DAYS = 30;
 
 function fail(message, status = 400) {
@@ -567,7 +576,6 @@ export class Edits {
     if (replace) {
       if (op === "mp3") throw fail("An MP3 can't replace the clip.");
       if (!this.canChange()) throw fail("Changes are off on this server (set ALLOW_CHANGES=1 and mount the clips folder read-write).", 403);
-      if (!this.store.nasOnly(clip)) throw fail(`This clip came from ${clip.pc}, so it's saved as a new file: replacing it here would be overwritten the next time that PC syncs an edit of it.`, 409);
     }
     return { op, start, end, audio, trimmed, replace, stem, suffix, ext, track: body.track ?? null, targetMb: body.targetMb };
   }
@@ -622,6 +630,8 @@ export class Edits {
         await rename(tmp, target);
         await utimes(target, mtime, mtime).catch(() => {});
         final = target;
+        const rel = path.relative(this.root, target).split(path.sep).join("/");
+        await logEdit(this.root, { rel, old: clip.rel, at: Date.now(), size: (await stat(target)).size }).catch((e) => console.error("edit log:", e.message));
       } else {
         final = path.join(outDir, await uniqueName(outDir, p.stem, p.suffix, p.ext));
         await rename(tmp, final);
