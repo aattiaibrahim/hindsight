@@ -128,7 +128,8 @@ pub struct Converter {
 }
 
 impl Converter {
-    pub fn new(gpu: &Gpu, in_w: u32, in_h: u32, out_w: u32, out_h: u32, fps: u32) -> Result<Converter> {
+    /// `area`: the part of the input to use, (x, y, w, h) in pixels; None = all of it.
+    pub fn new(gpu: &Gpu, in_w: u32, in_h: u32, out_w: u32, out_h: u32, fps: u32, area: Option<(u32, u32, u32, u32)>) -> Result<Converter> {
         let vdev: ID3D11VideoDevice = gpu.device.cast()?;
         let vctx: ID3D11VideoContext = gpu.context.cast()?;
         let desc = D3D11_VIDEO_PROCESSOR_CONTENT_DESC {
@@ -151,7 +152,8 @@ impl Converter {
             }
             // Never let the driver "auto-process" (no sharpening, no denoise).
             vctx.VideoProcessorSetStreamAutoProcessingMode(&processor, 0, false);
-            let src = RECT { left: 0, top: 0, right: in_w as i32, bottom: in_h as i32 };
+            let (ax, ay, aw, ah) = area.unwrap_or((0, 0, in_w, in_h));
+            let src = RECT { left: ax as i32, top: ay as i32, right: (ax + aw).min(in_w) as i32, bottom: (ay + ah).min(in_h) as i32 };
             let dst = RECT { left: 0, top: 0, right: out_w as i32, bottom: out_h as i32 };
             vctx.VideoProcessorSetStreamSourceRect(&processor, 0, true, Some(&src));
             vctx.VideoProcessorSetStreamDestRect(&processor, 0, true, Some(&dst));

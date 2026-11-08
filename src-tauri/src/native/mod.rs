@@ -74,6 +74,35 @@ mod tests {
         assert_eq!(info.audio_tracks as usize, p.buffers.audio.len());
     }
 
+    /// A recording area gives clips of just that area.
+    /// cargo test --lib native_area -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn native_area_records_only_the_area() {
+        crate::ffmpeg::init(None);
+        let area = crate::settings::Area { x: 0.3, y: 0.1, w: 0.3, h: 0.8 };
+        let s = crate::settings::Settings {
+            buffer_seconds: 10,
+            capture_area: Some(area),
+            desktop_audio: false,
+            mic_enabled: false,
+            ..Default::default()
+        };
+        let m = crate::monitors::list().into_iter().find(|m| m.primary).unwrap();
+        let (w, h) = crate::engine::capture_size(&s, &m);
+        let p = pipeline::Pipeline::start(&s, &m, w as u32, h as u32, "area".into()).expect("pipeline");
+        std::thread::sleep(Duration::from_secs(5));
+        assert!(p.failed().is_none(), "{:?}", p.failed());
+        let out = std::env::temp_dir().join("rewind-native-area.mkv");
+        pipeline::save(&[p.buffers.clone()], 3, &out, &std::env::temp_dir()).expect("save");
+        let info = crate::library::probe(&out.to_string_lossy()).unwrap();
+        println!("area clip {}x{} (expected {w}x{h})", info.width, info.height);
+        assert_eq!((info.width, info.height), (w as i64, h as i64));
+        if std::env::var_os("REWIND_KEEP").is_none() {
+            let _ = std::fs::remove_file(out);
+        }
+    }
+
     fn cpu_time() -> f64 {
         use windows::Win32::Foundation::FILETIME;
         use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
@@ -107,7 +136,7 @@ mod tests {
             (nvenc::Codec::H264, w, h),
         ] {
             let fps = 60;
-            let conv = gpu::Converter::new(&g, w, h, ow, oh, fps).expect("converter");
+            let conv = gpu::Converter::new(&g, w, h, ow, oh, fps, None).expect("converter");
             let mut enc = nvenc::Encoder::new(
                 &g,
                 nvenc::EncoderConfig { codec, width: ow, height: oh, fps, quality: 24, gop: fps },
@@ -177,7 +206,7 @@ mod tests {
 
         // GPU convert to NV12 at native, 1280x720 and 3840x2160.
         for (ow, oh) in [(w, h), (1280, 720), (3840, 2160)] {
-            let conv = gpu::Converter::new(&g, w, h, ow, oh, 60).expect("converter");
+            let conv = gpu::Converter::new(&g, w, h, ow, oh, 60, None).expect("converter");
             let dst = g.texture(ow, oh, DXGI_FORMAT_NV12, D3D11_BIND_RENDER_TARGET).expect("nv12 texture");
             let t = Instant::now();
             for _ in 0..60 {

@@ -160,6 +160,7 @@ impl Pipeline {
 
         let quality = s.quality;
         let cursor = s.draw_cursor;
+        let capture_area = s.capture_area;
         let tracks_for_thread = tracks.clone();
         let (stop2, last2, err2, rec2) = (stop.clone(), last_frame.clone(), error.clone(), rec.clone());
         let thread = thread::Builder::new()
@@ -175,7 +176,12 @@ impl Pipeline {
                         let l = cap.latest.lock().unwrap();
                         (l.width, l.height)
                     };
-                    let conv = Converter::new(&g, w, h, out_w, out_h, fps).map_err(|e| format!("GPU scaler: {e}"))?;
+                    // The recording area, measured on the captured frame itself.
+                    let area = capture_area.map(|a| {
+                        let (x, y, aw, ah) = a.pixels(w as i32, h as i32);
+                        (x as u32, y as u32, aw as u32, ah as u32)
+                    });
+                    let conv = Converter::new(&g, w, h, out_w, out_h, fps, area).map_err(|e| format!("GPU scaler: {e}"))?;
                     let enc = Encoder::new(&g, EncoderConfig { codec, width: out_w, height: out_h, fps, quality, gop: fps })?;
                     Ok((g, cap, conv, enc))
                 })();

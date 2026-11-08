@@ -72,7 +72,7 @@ export function installDevMock() {
   const secrets: Record<string, boolean> = {};
   const settings = {
     clipsDir: "C:\\Users\\you\\Videos\\Hindsight", encoder: "auto", quality: 24, fps: 60, bufferSeconds: 120,
-    bufferInRam: true, captureEngine: "native", monitorMode: "primary", fixedMonitor: "", drawCursor: true, hotkey: "Alt+F10",
+    bufferInRam: true, captureEngine: "native", monitorMode: "primary", fixedMonitor: "", drawCursor: true, captureArea: null, hotkey: "Alt+F10",
     recordHotkey: "Alt+F9", bufferEnabled: true, launchOnStartup: false, autoUpdate: true, startMinimized: true,
     keepOriginalAfterRemux: true, replaceOriginalOnEdit: false, externalFiles: [], desktopAudio: true, discordTrack: true,
     micEnabled: true, micMono: true, micDevice: "", micGainDb: 0, theme: "tinted", accent: "winblue", keepWhole: [], reduceMotion: false,
@@ -226,6 +226,7 @@ export function installDevMock() {
     },
     list_clips: () => clips,
     list_monitors: () => [],
+    screen_preview: () => fetch("/thumb-cs2a.jpg").then((r) => r.arrayBuffer()),
     list_audio_inputs: () => [],
     probe_file: () => ({ duration: 45, codec: "av1", width: 1920, height: 1080, fps: 60, audioTracks: 2, container: "matroska" }),
     // Thumbnails matched to each game (frames picked from real clips for the README screenshots).

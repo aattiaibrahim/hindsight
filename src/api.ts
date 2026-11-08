@@ -31,6 +31,8 @@ export type Settings = {
   monitorMode: MonitorMode;
   fixedMonitor: string;
   drawCursor: boolean;
+  /** Part of the screen to record (fractions); null = all of it. */
+  captureArea: CropRect | null;
   hotkey: string;
   recordHotkey: string;
   bufferEnabled: boolean;
@@ -336,6 +338,8 @@ export const api = {
   getStatus: () => invoke<Status>("get_status"),
   restartCapture: () => invoke<void>("restart_capture"),
   listMonitors: () => invoke<Monitor[]>("list_monitors"),
+  /** A small PNG of the screen being recorded (refused while a game runs). */
+  screenPreview: () => invoke<ArrayBuffer>("screen_preview"),
   saveClip: (seconds?: number) => invoke<string>("save_clip", { seconds: seconds ?? null }),
   toggleRecording: () => invoke<string | null>("toggle_recording"),
   listClips: () => invoke<ClipFile[]>("list_clips"),

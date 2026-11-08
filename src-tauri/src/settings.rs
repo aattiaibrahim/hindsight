@@ -22,6 +22,8 @@ pub struct Settings {
     /// Device name like \\.\DISPLAY1, used when monitor_mode == "fixed"
     pub fixed_monitor: String,
     pub draw_cursor: bool,
+    /// Part of the screen to record, as fractions of the monitor; None = all of it.
+    pub capture_area: Option<Area>,
     pub hotkey: String,
     /// Start / stop a full recording
     pub record_hotkey: String,
@@ -94,6 +96,39 @@ pub struct Settings {
     pub online_game_logos: bool,
 }
 
+/// A rectangle of the screen, as fractions (0..1) of the monitor.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct Area {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+impl Area {
+    /// Kept inside the screen and at least 5% each way; None for the whole screen.
+    pub fn cleaned(self) -> Option<Area> {
+        if ![self.x, self.y, self.w, self.h].iter().all(|v| v.is_finite()) {
+            return None;
+        }
+        let w = self.w.clamp(0.05, 1.0);
+        let h = self.h.clamp(0.05, 1.0);
+        let a = Area { x: self.x.clamp(0.0, 1.0 - w), y: self.y.clamp(0.0, 1.0 - h), w, h };
+        let whole = a.x <= 0.002 && a.y <= 0.002 && a.w >= 0.998 && a.h >= 0.998;
+        (!whole).then_some(a)
+    }
+
+    /// In pixels of a `width` × `height` screen: (x, y, w, h), even sizes, inside the screen.
+    pub fn pixels(&self, width: i32, height: i32) -> (i32, i32, i32, i32) {
+        let even = |v: f64| ((v.round() as i32) / 2 * 2).max(2);
+        let w = even(self.w * width as f64).min(width / 2 * 2);
+        let h = even(self.h * height as f64).min(height / 2 * 2);
+        let x = ((self.x * width as f64).round() as i32).clamp(0, width - w);
+        let y = ((self.y * height as f64).round() as i32).clamp(0, height - h);
+        (x, y, w, h)
+    }
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Settings {
@@ -108,6 +143,7 @@ impl Default for Settings {
             monitor_mode: "primary".into(),
             fixed_monitor: String::new(),
             draw_cursor: true,
+            capture_area: None,
             hotkey: "Alt+F10".into(),
             record_hotkey: "Alt+F9".into(),
             buffer_enabled: true,
@@ -171,6 +207,7 @@ impl Settings {
         if ![0, 720, 1080, 1440, 2160].contains(&self.output_height) {
             self.output_height = 0;
         }
+        self.capture_area = self.capture_area.and_then(Area::cleaned);
         if self.hotkey.trim().is_empty() {
             self.hotkey = d.hotkey;
         }

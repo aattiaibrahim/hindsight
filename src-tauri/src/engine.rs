@@ -644,6 +644,24 @@ pub fn output_size(m: &monitors::Monitor, height: u32) -> (i32, i32) {
     (w, h)
 }
 
+/// The part of the monitor that's recorded, in pixels: (x, y, w, h).
+pub fn area_px(s: &Settings, m: &monitors::Monitor) -> (i32, i32, i32, i32) {
+    match s.capture_area {
+        Some(a) => a.pixels(m.width, m.height),
+        None => (0, 0, m.width, m.height),
+    }
+}
+
+/// Clip size for these settings: the recorded area (or monitor), scaled to
+/// the clip height. A recording area is never scaled up.
+pub fn capture_size(s: &Settings, m: &monitors::Monitor) -> (i32, i32) {
+    let (_, _, w, h) = area_px(s, m);
+    if s.capture_area.is_some() && (s.output_height == 0 || s.output_height as i32 >= h) {
+        return (w, h);
+    }
+    output_size(&monitors::Monitor { width: w, height: h, ..m.clone() }, s.output_height)
+}
+
 /// Don't judge a capture that has only just started.
 const FREEZE_GRACE: Duration = Duration::from_secs(10);
 /// Segments finish every 2 s; 3 missed in a row means the grabber is stuck.
@@ -719,7 +737,7 @@ fn supervise_native(
     // 2. Start one if needed.
     let need_start = want && Instant::now() >= *retry_at && native.lock().unwrap().run.is_none();
     if need_start && let Some(m) = picked {
-        let (w, h) = output_size(m, s.output_height);
+        let (w, h) = capture_size(s, m);
         let key = format!("{w}x{h}_{}_{}", s.encoder, s.fps);
         match native::pipeline::Pipeline::start(s, m, w as u32, h as u32, key.clone()) {
             Ok(p) => {
@@ -842,7 +860,7 @@ fn supervise(
         let devices = if s.desktop_audio || s.mic_enabled { audio::default_devices() } else { (None, None) };
         // Anything in here changing means "restart capture" (incl. a new default headset).
         let sig = format!(
-            "{}|{:?}|{:?}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{:?}",
+            "{}|{:?}|{:?}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{}|{:?}|{:?}",
             s.buffer_in_ram,
             mons,
             picked.as_ref().map(|m| m.index),
@@ -857,6 +875,7 @@ fn supervise(
             s.mic_mono,
             s.mic_device,
             devices,
+            s.capture_area,
         );
 
         // Native engine (default): run it and skip the FFmpeg engine entirely.
@@ -916,8 +935,8 @@ fn supervise(
                     gen_no += 1;
                     let mut generation = Gen {
                         dir: root.join(format!("gen_{gen_no:04}")),
-                        width: output_size(&m, s.output_height).0,
-                        height: output_size(&m, s.output_height).1,
+                        width: capture_size(&s, &m).0,
+                        height: capture_size(&s, &m).1,
                         encoder: s.encoder.clone(),
                         fps: s.fps,
                         ram: None,
@@ -934,7 +953,7 @@ fn supervise(
                             drop(g);
                             let mut st = status.lock().unwrap();
                             st.monitor = Some(m.label());
-                            (st.width, st.height) = output_size(&m, s.output_height);
+                            (st.width, st.height) = capture_size(&s, &m);
                             st.audio = sp.labels;
                             st.audio_error = sp.audio_error;
                             cur = Some(Running {
@@ -1117,8 +1136,12 @@ fn spawn(s: &Settings, m: &monitors::Monitor, generation: &Gen) -> Result<Spawne
         s.fps,
         if s.draw_cursor { 1 } else { 0 }
     );
-    let (w, h) = output_size(m, s.output_height);
-    if (w, h) != (m.width, m.height) {
+    let (ax, ay, aw, ah) = area_px(s, m);
+    if s.capture_area.is_some() {
+        src.push_str(&format!(":offset_x={ax}:offset_y={ay}:video_size={aw}x{ah}"));
+    }
+    let (w, h) = capture_size(s, m);
+    if (w, h) != (aw, ah) {
         // Native size stays 100% on the GPU. Other sizes are scaled on the CPU
         // (about 1-5% of a modern CPU): this FFmpeg's GPU scalers can't take
         // desktop-capture frames.
@@ -1262,6 +1285,13 @@ mod tests {
         assert_eq!(output_size(&mon(3840, 2160), 1440), (2560, 1440));
         assert_eq!(output_size(&mon(3440, 1440), 1080), (2580, 1080)); // ultrawide
         assert_eq!(output_size(&mon(1366, 768), 720), (1280, 720));
+        // A recording area: its own size, never scaled up.
+        let area = crate::settings::Area { x: 0.25, y: 0.0, w: 0.5, h: 1.0 };
+        let s = Settings { capture_area: Some(area), ..Default::default() };
+        assert_eq!(area_px(&s, &mon(1920, 1080)), (480, 0, 960, 1080));
+        assert_eq!(capture_size(&s, &mon(1920, 1080)), (960, 1080));
+        assert_eq!(capture_size(&Settings { output_height: 720, ..s.clone() }, &mon(1920, 1080)), (640, 720));
+        assert_eq!(capture_size(&Settings { output_height: 1440, ..s }, &mon(1920, 1080)), (960, 1080));
     }
 
     #[test]

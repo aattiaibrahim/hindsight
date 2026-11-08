@@ -270,6 +270,23 @@ fn list_monitors() -> Vec<monitors::Monitor> {
     monitors::list()
 }
 
+/// A live picture of the screen that gets recorded, for picking the recording
+/// area in Settings. Refused while a game runs, so it never costs game FPS.
+#[tauri::command]
+async fn screen_preview(app: AppHandle) -> Result<tauri::ipc::Response, String> {
+    let s = settings_of(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        if games::game_running() {
+            return Err("game".to_string());
+        }
+        let mons = monitors::list();
+        let m = monitors::pick(&s.monitor_mode, &s.fixed_monitor, &mons).ok_or("No screen found")?;
+        monitors::preview_png(&m, 960).map(tauri::ipc::Response::new)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn list_audio_inputs() -> Vec<String> {
     audio::input_devices()
@@ -1668,6 +1685,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_settings,
             set_settings,
+            screen_preview,
             get_status,
             restart_capture,
             list_monitors,

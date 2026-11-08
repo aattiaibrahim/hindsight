@@ -1,4 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
+import { RecordingArea } from "./RecordingArea";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useState } from "react";
 import { Accent, api, bufferEstimateMb, errText, fmtDb, GpuEncoders, Monitor, Settings, Theme } from "./api";
@@ -649,6 +650,17 @@ export function SettingsView({
               </select>
             </label>
           )}
+          <div className="setting stacked">
+            <span>
+              Recording area
+              <small>
+                Record only part of the screen, like OBS: drag the box on the live preview, then press Use this area. The
+                preview only runs on this page, and pauses while a game is open.
+                {s.captureArea ? " Clips are the size of the area." : ""}
+              </small>
+            </span>
+            {tab === "recording" && <RecordingArea area={s.captureArea} screen={screen} onSave={(a) => set({ captureArea: a })} />}
+          </div>
           <label className="setting">
             <span>Show mouse cursor in clips</span>
             <Toggle label="Capture cursor" checked={s.drawCursor} onChange={(v) => set({ drawCursor: v })} />
