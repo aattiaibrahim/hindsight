@@ -242,7 +242,7 @@ pub fn probe(path: &str) -> Result<Probe, String> {
         "json",
     ]);
     args.push(path.into());
-    let json: Value = serde_json::from_str(&ffmpeg::run("ffprobe", &args)?).map_err(|e| e.to_string())?;
+    let json: Value = serde_json::from_str(&ffmpeg::run_limited("ffprobe", &args, Some(std::time::Duration::from_secs(45)))?).map_err(|e| e.to_string())?;
     let mut p = Probe {
         duration: json["format"]["duration"].as_str().and_then(|d| d.parse().ok()).unwrap_or(0.0),
         container: json["format"]["format_name"].as_str().unwrap_or("").to_string(),
@@ -351,7 +351,8 @@ pub fn thumbnail(path: &str, cache: &Path) -> Result<String, String> {
         args.push(path.into());
         args.extend(ffmpeg::args(&["-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "4"]));
         args.push(out.clone().into());
-        if ffmpeg::run("ffmpeg", &args).is_ok() && out.exists() {
+        // A stuck ffmpeg (a drive that stopped answering) mustn't hold the thumbnail queue.
+        if ffmpeg::run_limited("ffmpeg", &args, Some(std::time::Duration::from_secs(20))).is_ok() && out.exists() {
             return Ok(out.to_string_lossy().into_owned());
         }
     }

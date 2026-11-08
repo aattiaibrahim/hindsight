@@ -292,14 +292,14 @@ export default function App() {
   const keepWhole = settings?.keepWhole;
   const trimClips = useMemo(() => {
     if (!clips) return null;
-    const keep = new Set((keepWhole ?? []).map((p) => p.toLowerCase()));
+    // Matched by "<game folder>\<file>", not the whole path: a clip whose copy here
+    // was freed up (it's only on the NAS now) is still the same clip, so it stays on
+    // To trim, and one trimmed or kept whole before it was freed stays off it.
+    const tail = (p: string) => p.replace(/\//g, "\\").toLowerCase().split("\\").slice(-2).join("\\");
+    const keep = new Set((keepWhole ?? []).map(tail));
+    const done = new Set([...edited].map(tail));
     return clips.filter(
-      (c) =>
-        c.location !== "nas" &&
-        !EDIT_FOLDERS.has(c.folder.toLowerCase()) &&
-        !MADE_BY_EDIT.test(c.name) &&
-        !edited.has(c.path.toLowerCase()) &&
-        !keep.has(c.path.toLowerCase()),
+      (c) => !EDIT_FOLDERS.has(c.folder.toLowerCase()) && !MADE_BY_EDIT.test(c.name) && !done.has(tail(c.path)) && !keep.has(tail(c.path)),
     );
   }, [clips, edited, keepWhole]);
   const keepClipsWhole = useCallback(

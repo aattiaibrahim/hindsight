@@ -329,19 +329,45 @@ export type Monitor = {
 
 // Thumbnails and probes spawn ffmpeg, so only run a few at a time. Newest
 // first: the clips just scrolled into view matter more than ones scrolled past.
-const MAX_JOBS = 3;
-let active = 0;
-const waiting: (() => void)[] = [];
-async function limited<T>(job: () => Promise<T>): Promise<T> {
-  if (active >= MAX_JOBS) await new Promise<void>((r) => waiting.push(r));
-  active++;
+/**
+ * Thumbnails and probes, a few at a time, newest request first (the cards you
+ * just scrolled to). Clips on the NAS have their own lane: reading them over the
+ * network can be slow (more so while the NAS is busy checking copies), and they
+ * must never hold up the clips on this PC.
+ */
+type Lane = { active: number; max: number; waiting: (() => void)[] };
+const LANES: Record<"local" | "net", Lane> = { local: { active: 0, max: 3, waiting: [] }, net: { active: 0, max: 2, waiting: [] } };
+const laneOf = (path: string): Lane => (/^(\\\\|\/\/)/.test(path) ? LANES.net : LANES.local);
+
+/** Thrown for a request whose card left the screen before its turn came. */
+export const NOT_NEEDED = "not needed any more";
+
+async function limited<T>(path: string, job: () => Promise<T>, stillWanted: () => boolean = () => true): Promise<T> {
+  const lane = laneOf(path);
+  if (lane.active >= lane.max) await new Promise<void>((r) => lane.waiting.push(r));
+  if (!stillWanted()) {
+    lane.waiting.pop()?.(); // pass the turn on
+    throw new Error(NOT_NEEDED);
+  }
+  lane.active++;
   try {
     return await job();
   } finally {
-    active--;
-    waiting.pop()?.();
+    lane.active--;
+    lane.waiting.pop()?.();
   }
 }
+
+/**
+ * Who still wants a thumbnail or probe: cards add themselves while they're near
+ * the screen and remove themselves when they leave. Something nobody registered
+ * for (other views) always counts as wanted.
+ */
+const wants = new Map<string, number>();
+export function want(key: string, delta: 1 | -1) {
+  wants.set(key, Math.max(0, (wants.get(key) ?? 0) + delta));
+}
+const wanted = (key: string) => !wants.has(key) || (wants.get(key) ?? 0) > 0;
 
 const thumbCache = new Map<string, Promise<string>>();
 const thumbReady = new Map<string, string>();
@@ -376,19 +402,22 @@ export const api = {
   saveClip: (seconds?: number) => invoke<string>("save_clip", { seconds: seconds ?? null }),
   toggleRecording: () => invoke<string | null>("toggle_recording"),
   listClips: () => invoke<ClipFile[]>("list_clips"),
-  probe: (path: string, key = "", now = false) => {
+  /** `tracked`: the caller registers with `want` (cards); anyone else always gets an answer. */
+  probe: (path: string, key = "", now = false, tracked = false) => {
     const k = path + key;
+    if (!tracked) wants.delete("p:" + k);
     if (!probeCache.has(k)) {
-      const p = now ? invoke<Probe>("probe_file", { path }) : limited(() => invoke<Probe>("probe_file", { path }));
+      const p = now ? invoke<Probe>("probe_file", { path }) : limited(path, () => invoke<Probe>("probe_file", { path }), () => wanted("p:" + k));
       p.catch(() => probeCache.delete(k));
       probeCache.set(k, p);
     }
     return probeCache.get(k)!;
   },
-  thumbnail: (path: string, key = "") => {
+  thumbnail: (path: string, key = "", tracked = false) => {
     const k = path + key;
+    if (!tracked) wants.delete("t:" + k);
     if (!thumbCache.has(k)) {
-      const p = limited(() => invoke<string>("thumbnail", { path })).then(convertFileSrc);
+      const p = limited(path, () => invoke<string>("thumbnail", { path }), () => wanted("t:" + k)).then(convertFileSrc);
       p.then((src) => thumbReady.set(k, src)).catch(() => thumbCache.delete(k));
       thumbCache.set(k, p);
     }

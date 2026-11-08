@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ClipFile, Settings, Status, UpdateState } from "./api";
+import { api, ClipFile, Settings, Status, UpdateState, NOT_NEEDED, want as wantThumb } from "./api";
 
 export function useUpdate() {
   const [u, setU] = useState<UpdateState | null>(null);
@@ -108,12 +108,22 @@ export function useThumb(path: string, key: string | number = "", want = true) {
     const now = path ? api.thumbNow(path, String(key)) : null;
     setSrc(now);
     if (!path || now || !want) return;
-    api
-      .thumbnail(path, String(key))
-      .then((s) => alive && setSrc(s))
-      .catch(() => {});
+    const k = "t:" + path + String(key);
+    wantThumb(k, 1);
+    let retry = 0;
+    const load = (again: boolean) =>
+      api
+        .thumbnail(path, String(key), true)
+        .then((s) => alive && setSrc(s))
+        .catch((e) => {
+          // A slow drive or a busy NAS: try once more a little later.
+          if (alive && !again && !String(e).includes(NOT_NEEDED)) retry = window.setTimeout(() => load(true), 2500);
+        });
+    load(false);
     return () => {
       alive = false;
+      clearTimeout(retry);
+      wantThumb(k, -1); // left the screen: a request still waiting its turn is dropped
     };
   }, [path, key, want]);
   return src;

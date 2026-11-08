@@ -1,6 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, ClipFile, codecLabel, errText, fmtDuration, fmtSize, Health, Probe, Upload, UploadProgress, VIDEO_EXTENSIONS } from "./api";
+import { api, ClipFile, codecLabel, errText, fmtDuration, fmtSize, Health, Probe, Upload, UploadProgress, VIDEO_EXTENSIONS, want } from "./api";
 import { useNearView, useThumb } from "./hooks";
 import { liveLink, progressText, ShareRequest, timeLeft } from "./Share";
 import { Timeline } from "./Timeline";
@@ -179,7 +179,18 @@ function ClipCard({
   const thumb = useThumb(clip.path, clip.modified, near);
   const [info, setInfo] = useState<Probe | null>(null);
   useEffect(() => {
-    if (near) api.probe(clip.path, String(clip.modified)).then(setInfo).catch(() => {});
+    if (!near) return;
+    let alive = true;
+    const k = "p:" + clip.path + String(clip.modified);
+    want(k, 1);
+    api
+      .probe(clip.path, String(clip.modified), false, true)
+      .then((p) => alive && setInfo(p))
+      .catch(() => {});
+    return () => {
+      alive = false;
+      want(k, -1);
+    };
   }, [near, clip.path, clip.modified]);
 
   const time = new Date(clip.modified).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
