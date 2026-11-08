@@ -1293,3 +1293,13 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
   padding: 6px 12px; border-radius: 8px; background: rgba(0,0,0,.78); color: #fff; font-size: 13px; white-space: nowrap;
 }
 .rec-area-tools { max-width: 720px; flex-wrap: wrap; gap: 8px; }
+
+/* NAS folder check before syncing */
+.nas-setup { max-width: 560px; }
+.nas-setup .nas-dir { font-size: 12px; color: var(--text-2); word-break: break-all; }
+.nas-pair { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 10px; background: var(--bg); }
+.nas-pair small { font-size: 12px; line-height: 1.4; }
+.nas-pair .row { gap: 8px; flex-wrap: nowrap; }
+.nas-sure { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; cursor: pointer; }
+.nas-sure input { margin-top: 2px; }
+.ok-text { color: var(--ok, #3ccf7a); font-size: 13px; }

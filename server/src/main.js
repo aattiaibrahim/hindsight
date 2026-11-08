@@ -22,6 +22,7 @@ import { Shares } from "./share.js";
 import { Edits } from "./edit.js";
 import { Logos } from "./logos.js";
 import { Store } from "./store.js";
+import { Pairing } from "./pairing.js";
 
 const env = process.env;
 const clipsDir = env.CLIPS_DIR || "/clips";
@@ -63,7 +64,8 @@ const edits = new Edits({
 await edits.init();
 const shares = new Shares(cacheDir);
 const montages = new Montages(cacheDir, { encoder: env.H264_ENCODER || "libx264" });
-const server = await createServer({ library, media, cleanup, shares, montages, store, logos, edits });
+const pairing = new Pairing({ root: clipsDir, store });
+const server = await createServer({ library, media, cleanup, shares, montages, store, logos, edits, pairing });
 server.listen(port, () => {
   console.log(`Hindsight Server ${VERSION}: ${library.clips.length} clips in ${clipsDir}, listening on :${port}`);
 });

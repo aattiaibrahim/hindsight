@@ -6,6 +6,7 @@ import { ConfirmDialog } from "./ConfirmUpdate";
 import { NasProgress, useNasState } from "./NasProgress";
 import { useDetectStatus } from "./GameSort";
 import { HealthSetting } from "./Health";
+import { NasSetup } from "./NasSetup";
 
 type MoveJob = {
   folders: string[];
@@ -58,13 +59,15 @@ export function LibrarySettings({
 }) {
   const nas = useNasState();
   const [found, setFound] = useState<ClipFolder[]>([]);
+  // A folder picked for the NAS, being checked before anything syncs.
+  const [checking, setChecking] = useState<string | null>(null);
   useEffect(() => {
     api.recorderClipFolders().then(setFound).catch(() => {});
   }, []);
 
   const pickNas = async () => {
     const dir = await open({ directory: true, title: "Pick the NAS folder for clips (e.g. \\\\nas\\clips)", defaultPath: s.nasDir || undefined });
-    if (typeof dir === "string") set({ nasDir: dir });
+    if (typeof dir === "string") setChecking(dir);
   };
   const linked = (p: string) => s.linkedFolders.some((f) => f.toLowerCase() === p.toLowerCase());
   const toggleLinked = (p: string, on: boolean) =>
@@ -200,6 +203,16 @@ export function LibrarySettings({
           </button>
         </div>
       </div>
+      {checking && (
+        <NasSetup
+          dir={checking}
+          server={s.nasServer}
+          onStart={async (p) => {
+            await api.setSettings({ ...(await api.getSettings()), ...p });
+          }}
+          onClose={() => setChecking(null)}
+        />
+      )}
       {s.nasDir && (
         <label className="setting">
           <span>

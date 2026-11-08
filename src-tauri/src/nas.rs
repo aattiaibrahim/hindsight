@@ -95,6 +95,197 @@ struct Listing {
     rels: HashSet<String>,
 }
 
+/// Marker file in a confirmed NAS folder: one id per library.
+pub const MARKER: &str = ".hindsight-library";
+
+/// What's in a folder someone picked as the NAS folder, and what syncing would
+/// do there, shown before anything is copied.
+#[derive(Serialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderCheck {
+    pub dir: String,
+    pub reachable: bool,
+    pub writable: bool,
+    /// Clips already in it, and in how many game folders.
+    pub clips: usize,
+    pub clip_bytes: u64,
+    pub games: usize,
+    /// Files in it that aren't clips (documents, photos, programs…).
+    pub other_files: usize,
+    pub other_examples: Vec<String>,
+    /// What this PC would copy into it.
+    pub to_copy: usize,
+    pub to_copy_bytes: u64,
+    /// It was confirmed before as a Hindsight library (from this or another PC).
+    pub known_library: bool,
+    /// A guess at the NAS app's address, from the share's host name.
+    pub server_guess: String,
+    pub on_this_pc: bool,
+    /// Plain warnings; empty = it looks like a clips folder.
+    pub warnings: Vec<String>,
+}
+
+fn new_id() -> String {
+    let mut h = Sha256::new();
+    h.update(format!("{:?}{}{:?}", SystemTime::now(), std::process::id(), std::thread::current().id()));
+    h.update(std::env::var("COMPUTERNAME").unwrap_or_default());
+    let x = 0u8;
+    h.update(format!("{:p}", &x));
+    h.finalize().iter().take(16).map(|b| format!("{b:02x}")).collect()
+}
+
+pub fn read_marker(nas: &Path) -> Option<String> {
+    let id = fs::read_to_string(nas.join(MARKER)).ok()?;
+    let id = id.trim().to_string();
+    (id.len() == 32 && id.chars().all(|c| c.is_ascii_hexdigit())).then_some(id)
+}
+
+/// Look through a folder before syncing into it.
+pub fn check_folder(clips_dir: &Path, dir: &Path) -> FolderCheck {
+    let mut c = FolderCheck { dir: dir.to_string_lossy().into_owned(), ..Default::default() };
+    let d = c.dir.trim_end_matches(['\\', '/']).to_string();
+    c.on_this_pc = !d.starts_with("\\\\");
+    if let Some(host) = d.strip_prefix("\\\\").and_then(|r| r.split('\\').next()).filter(|h| !h.is_empty()) {
+        c.server_guess = format!("http://{host}:8420");
+    }
+    if !dir.is_dir() {
+        c.warnings.push("Can't open this folder right now. Is the NAS on and the share reachable?".into());
+        return c;
+    }
+    c.reachable = true;
+    let probe = dir.join(format!(".hindsight-write-test-{}", std::process::id()));
+    c.writable = fs::write(&probe, b"").is_ok();
+    let _ = fs::remove_file(&probe);
+    c.known_library = read_marker(dir).is_some();
+
+    // What's there: clips in game folders, and anything else (two levels down is enough to tell).
+    let mut games = HashSet::new();
+    let mut seen = 0usize;
+    let mut stack = vec![(dir.to_path_buf(), 0u32)];
+    while let Some((p, depth)) = stack.pop() {
+        let Ok(rd) = fs::read_dir(&p) else { continue };
+        for e in rd.flatten() {
+            seen += 1;
+            if seen > 200_000 {
+                break;
+            }
+            let path = e.path();
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || name.starts_with('$') || name.eq_ignore_ascii_case("#recycle") {
+                continue;
+            }
+            let Ok(ft) = e.file_type() else { continue };
+            if ft.is_dir() {
+                if depth < 3 {
+                    stack.push((path, depth + 1));
+                }
+            } else if crate::library::is_video(&path) {
+                c.clips += 1;
+                c.clip_bytes += e.metadata().map(|m| m.len()).unwrap_or(0);
+                if depth >= 1 {
+                    games.insert(path.parent().map(|p| p.to_string_lossy().to_lowercase()).unwrap_or_default());
+                }
+            } else if !is_sidecar(&name) {
+                c.other_files += 1;
+                if c.other_examples.len() < 4 {
+                    c.other_examples.push(name);
+                }
+            }
+        }
+    }
+    c.games = games.len();
+
+    // What this PC would copy there.
+    for (src, rel, _) in clips_in(clips_dir) {
+        if size(&dir.join(rel.replace('/', "\\"))).is_none() {
+            c.to_copy += 1;
+            c.to_copy_bytes += size(&src).unwrap_or(0);
+        }
+    }
+
+    if !c.writable {
+        c.warnings.push("Hindsight can't write to this folder, so nothing could be copied.".into());
+    }
+    if c.on_this_pc {
+        c.warnings.push("This folder is on this PC, not a network share. A NAS folder usually starts with \\\\ (like \\\\nas\\clips).".into());
+    }
+    let parts = d.trim_start_matches("\\\\").split('\\').filter(|p| !p.is_empty()).count();
+    if parts <= 1 {
+        c.warnings.push("This is the top of a drive or server. Pick (or make) a folder just for clips.".into());
+    }
+    if c.other_files > 20 && c.other_files > c.clips {
+        c.warnings.push(format!(
+            "It has {} files that aren't clips (like {}). It doesn't look like a clips folder.",
+            c.other_files,
+            c.other_examples.join(", ")
+        ));
+    }
+    c
+}
+
+/// Thumbnails, notes and other files recorders keep next to clips.
+fn is_sidecar(name: &str) -> bool {
+    let l = name.to_lowercase();
+    [".jpg", ".jpeg", ".png", ".webp", ".json", ".txt", ".ini", ".db", ".m4a", ".wav", ".ogg", ".mp3", ".aac", ".opus"]
+        .iter()
+        .any(|e| l.ends_with(e))
+}
+
+/// Mark the folder as this library (keeping an id another PC already gave it).
+pub fn confirm_folder(dir: &Path) -> Result<String, String> {
+    if !dir.is_dir() {
+        return Err(format!("Can't reach {}", dir.display()));
+    }
+    if let Some(id) = read_marker(dir) {
+        return Ok(id);
+    }
+    let id = new_id();
+    fs::write(dir.join(MARKER), format!("{id}\n")).map_err(|e| format!("Can't write to the NAS folder: {e}"))?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_HIDDEN, SetFileAttributesW};
+        let w: Vec<u16> = dir.join(MARKER).as_os_str().encode_wide().chain([0]).collect();
+        unsafe {
+            let _ = SetFileAttributesW(windows::core::PCWSTR(w.as_ptr()), FILE_ATTRIBUTE_HIDDEN);
+        }
+    }
+    Ok(id)
+}
+
+/// Pair with the NAS app: a one-time token file in the folder proves the folder
+/// is that server's library, and the code proves someone at the NAS app agreed.
+pub fn pair(dir: &Path, server: &str, code: &str) -> Result<String, String> {
+    let server = server.trim().trim_end_matches('/');
+    if !(server.starts_with("http://") || server.starts_with("https://")) {
+        return Err("The NAS app's address starts with http://, like http://nas:8420".into());
+    }
+    let token = new_id();
+    let file = dir.join(format!(".hindsight-pair-{token}"));
+    fs::write(&file, b"").map_err(|e| format!("Can't write to the NAS folder: {e}"))?;
+    let pc = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "PC".into());
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let res = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())
+        .and_then(|c| {
+            c.post(format!("{server}/api/pair"))
+                .json(&serde_json::json!({ "code": code.trim(), "token": token, "pc": pc }))
+                .send()
+                .map_err(|e| format!("Can't reach the NAS app at {server}. Check the address and that it's running. ({e})"))
+        });
+    let _ = fs::remove_file(&file);
+    let res = res?;
+    let ok = res.status().is_success();
+    let body: serde_json::Value = res.json().unwrap_or_default();
+    if ok {
+        Ok(format!("Paired with the NAS app ({} clips there).", body["clips"].as_u64().unwrap_or(0)))
+    } else {
+        Err(body["error"].as_str().unwrap_or("The NAS app said no.").to_string())
+    }
+}
+
 static STATE: Mutex<Option<NasState>> = Mutex::new(None);
 static LISTING: Mutex<Option<Listing>> = Mutex::new(None);
 /// Set while game folders are being merged: the worker skips its passes.
@@ -674,6 +865,38 @@ pub fn start(app: AppHandle) {
                 continue;
             }
             publish(&app, |st| st.paused = false);
+            // Only sync into the folder that was checked and confirmed: if the path
+            // now leads somewhere else (a remapped drive, a different share), stop.
+            let nas_root = PathBuf::from(&s.nas_dir);
+            if nas_root.is_dir() {
+                match read_marker(&nas_root) {
+                    Some(id) if id == s.nas_library_id => {}
+                    found if s.nas_library_id.is_empty() => {
+                        // Set up before this check existed: adopt the folder once.
+                        let id = match found {
+                            Some(id) => Ok(id),
+                            None => confirm_folder(&nas_root),
+                        };
+                        if let Ok(id) = id {
+                            let st = app.state::<crate::AppState>();
+                            let mut cur = st.settings.lock().unwrap();
+                            if cur.nas_dir == s.nas_dir {
+                                cur.nas_library_id = id;
+                                let _ = crate::settings::save(&st.settings_path, &cur);
+                            }
+                        }
+                    }
+                    _ => {
+                        publish(&app, |st| {
+                            st.enabled = true;
+                            st.reachable = true;
+                            st.copying = None;
+                            st.last_error = Some("Syncing stopped: this isn't the NAS folder you confirmed (its Hindsight marker is missing or different). Nothing was copied. Choose the NAS folder again in Settings to check it.".into());
+                        });
+                        continue;
+                    }
+                }
+            }
             if crate::engine::saves_in_progress() > 0 {
                 std::thread::sleep(Duration::from_secs(3));
                 wake();
@@ -781,6 +1004,37 @@ mod tests {
         let mut v: Vec<&String> = synced.iter().collect();
         v.sort();
         assert_eq!(v, vec!["desktop/c.mkv", "valorant x/b.mkv", "valorant!/a.mkv"]);
+    }
+
+    #[test]
+    fn folder_check_warns_about_a_folder_that_isnt_for_clips() {
+        let local = tmp("chk-local");
+        let docs = tmp("chk-docs");
+        fs::create_dir_all(local.join("VALORANT")).unwrap();
+        fs::write(local.join("VALORANT").join("a.mkv"), vec![0u8; 1000]).unwrap();
+        for i in 0..30 {
+            fs::write(docs.join(format!("report {i}.docx")), b"x").unwrap();
+        }
+        let c = check_folder(&local, &docs);
+        assert!(c.reachable && c.writable);
+        assert_eq!((c.clips, c.other_files, c.to_copy, c.to_copy_bytes), (0, 30, 1, 1000));
+        assert!(c.warnings.iter().any(|w| w.contains("doesn't look like a clips folder")), "{:?}", c.warnings);
+        assert!(!c.known_library);
+
+        // A clips folder: no "not a clips folder" warning, and the marker sticks.
+        let nas = tmp("chk-nas");
+        fs::create_dir_all(nas.join("VALORANT")).unwrap();
+        fs::write(nas.join("VALORANT").join("a.mkv"), vec![0u8; 1000]).unwrap();
+        let c = check_folder(&local, &nas);
+        assert_eq!((c.clips, c.games, c.to_copy), (1, 1, 0));
+        assert!(!c.warnings.iter().any(|w| w.contains("clips folder")), "{:?}", c.warnings);
+        let id = confirm_folder(&nas).unwrap();
+        assert_eq!(read_marker(&nas).as_deref(), Some(id.as_str()));
+        assert_eq!(confirm_folder(&nas).unwrap(), id, "keeps the id it has");
+        assert!(check_folder(&local, &nas).known_library);
+        for d in [local, docs, nas] {
+            let _ = fs::remove_dir_all(d);
+        }
     }
 
     fn tmp(name: &str) -> PathBuf {
@@ -1063,3 +1317,22 @@ mod live {
     }
 }
 
+
+#[cfg(test)]
+mod live_pair {
+    /// Pairs with a running NAS app. REWIND_PAIR_SERVER, REWIND_PAIR_DIR (its
+    /// clips folder) and REWIND_PAIR_CODE: cargo test --lib live_pair -- --ignored
+    #[test]
+    #[ignore]
+    fn live_pair() {
+        let v = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("set {k}"));
+        let dir = v("REWIND_PAIR_DIR");
+        let wrong = super::pair(std::path::Path::new(&std::env::temp_dir()), &v("REWIND_PAIR_SERVER"), &v("REWIND_PAIR_CODE"));
+        println!("other folder: {wrong:?}");
+        assert!(wrong.unwrap_err().contains("isn't this server's clips folder"));
+        let ok = super::pair(std::path::Path::new(&dir), &v("REWIND_PAIR_SERVER"), &v("REWIND_PAIR_CODE"));
+        println!("right folder: {ok:?}");
+        assert!(ok.is_ok());
+        assert!(!std::fs::read_dir(&dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with(".hindsight-pair-")), "token file left behind");
+    }
+}

@@ -123,7 +123,7 @@ async function jsonBody(req) {
   return text ? JSON.parse(text) : {};
 }
 
-export async function createServer({ library, media, cleanup = null, shares = null, montages = null, store = null, logos = null, edits = null }) {
+export async function createServer({ library, media, cleanup = null, shares = null, montages = null, store = null, logos = null, edits = null, pairing = null }) {
   const withMeta = (c) => {
     const out = { ...c, ...(media.meta(c) ?? {}) };
     if (store) {
@@ -301,6 +301,23 @@ export async function createServer({ library, media, cleanup = null, shares = nu
       } catch (e) {
         return fail(res, e);
       }
+    }
+
+    // ---- pairing a PC (see pairing.js) ----
+    if (pairing && url.pathname === "/api/pair" && !post(req)) {
+      return send(res, 200, { code: pairing.current(), paired: pairing.paired() }, { "cache-control": "no-cache" });
+    }
+    if (pairing && url.pathname === "/api/pair/code" && post(req)) return send(res, 200, pairing.newCode());
+    if (pairing && url.pathname === "/api/pair" && post(req)) {
+      try {
+        return send(res, 200, { ...(await pairing.pair(await jsonBody(req))), clips: library.clips.length, version: VERSION });
+      } catch (e) {
+        return fail(res, e);
+      }
+    }
+    if (pairing && url.pathname === "/api/pair/forget" && post(req)) {
+      await pairing.forget((await jsonBody(req)).pc);
+      return send(res, 200, { ok: true });
     }
 
     if (url.pathname === "/healthz") return send(res, 200, { ok: true, version: VERSION, release: RELEASE, clips: library.clips.length });

@@ -755,8 +755,56 @@ function renderSwatches() {
   );
 }
 
+let pairTimer = 0;
+async function renderPairing() {
+  clearTimeout(pairTimer);
+  const body = $("pair-body");
+  let p;
+  try {
+    p = await (await fetch("api/pair", { cache: "no-cache" })).json();
+  } catch {
+    return body.replaceChildren(el("p", { class: "error", text: "Can't read the paired PCs right now." }));
+  }
+  const rows = p.paired.map((x) =>
+    el(
+      "div",
+      { class: "pair-row" },
+      el("span", {}, el("b", { text: x.pc }), el("small", { class: "muted", text: ` paired ${new Date(x.at).toLocaleDateString()}` })),
+      btn("Forget", {
+        cls: "small",
+        onclick: async () => {
+          await postJson("api/pair/forget", { pc: x.pc });
+          renderPairing();
+        },
+      }),
+    ),
+  );
+  const code = p.code
+    ? el(
+        "div",
+        { class: "pair-code" },
+        el("b", { class: "mono", text: `${p.code.code.slice(0, 3)} ${p.code.code.slice(3)}` }),
+        el("small", { class: "muted", text: `Type this in Hindsight on the PC. Works once, until ${new Date(p.code.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.` }),
+      )
+    : null;
+  body.replaceChildren(
+    ...(rows.length ? rows : [el("p", { class: "muted small", text: "No PCs paired yet." })]),
+    code ??
+      btn("Pair a PC", {
+        cls: "primary",
+        onclick: async () => {
+          await postJson("api/pair/code");
+          renderPairing();
+        },
+      }),
+  );
+  // While a code is showing, notice when the PC has used it.
+  if (p.code && view === "settings") pairTimer = setTimeout(renderPairing, 3000);
+}
+
 async function renderSettings() {
   renderSwatches();
+  renderPairing();
   $("about").textContent = `Hindsight on the NAS ${about.release ?? ""} (${about.version ?? ""}). ${canChange ? "Cleanup and the editor can change files." : "Read-only: edits are kept in the cache to download, and cleanup only lists clips."}${about.scannedAt ? ` Library read ${new Date(about.scannedAt).toLocaleTimeString()}.` : ""}`;
   let s;
   try {

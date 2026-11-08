@@ -76,7 +76,7 @@ export function installDevMock() {
     recordHotkey: "Alt+F9", bufferEnabled: true, launchOnStartup: false, autoUpdate: true, startMinimized: true,
     keepOriginalAfterRemux: true, replaceOriginalOnEdit: false, externalFiles: [], desktopAudio: true, discordTrack: true,
     micEnabled: true, micMono: true, micDevice: "", micGainDb: 0, theme: "tinted", accent: "winblue", keepWhole: [], reduceMotion: false,
-    saveSound: true, nasDir: "\\\\nas\\clips", nasRemoveLocal: false, linkedFolders: [] as string[], benchmarkMode: false, uploadHost: "catbox", litterboxTime: "72h", autoUpload: false, postLinkToDiscord: false, streamableEmail: "", discordWebhookName: "", confirmUploads: true, healthCheck: true, prepareThumbnails: true, gameDetect: true, detectDismissed: [] as string[],
+    saveSound: true, nasDir: "\\\\nas\\clips", nasLibraryId: "mock", nasServer: "", nasRemoveLocal: false, linkedFolders: [] as string[], benchmarkMode: false, uploadHost: "catbox", litterboxTime: "72h", autoUpload: false, postLinkToDiscord: false, streamableEmail: "", discordWebhookName: "", confirmUploads: true, healthCheck: true, prepareThumbnails: true, gameDetect: true, detectDismissed: [] as string[],
     folderNames: {} as Record<string, string>, similarDismissed: [] as string[], cleanupKept: {} as Record<string, number>,
   };
   // Same game under two folder names (preview of the merge prompt).
@@ -139,6 +139,16 @@ export function installDevMock() {
         ? { enabled: true, reachable: true, pending: 1, copying: null, copied: 3, lastError: null, lastSync: Date.now() - 20_000, paused: false, totalFiles: 0, doneFiles: 0, totalBytes: 0, doneBytes: 0, pendingBytes: 0, checking: false, rate: 0, etaSecs: null }
         : { enabled: false, reachable: false, pending: 0, copying: null, copied: 0, lastError: null, lastSync: null, paused: false, totalFiles: 0, doneFiles: 0, totalBytes: 0, doneBytes: 0, pendingBytes: 0, checking: false, rate: 0, etaSecs: null },
     sync_nas_now: () => null,
+    "plugin:dialog|open": () => "\\\\nas\\clips",
+    nas_check: (a) => ({
+      dir: a.dir, reachable: true, writable: true, clips: 412, clipBytes: 268e9, games: 9, otherFiles: 0, otherExamples: [],
+      toCopy: 38, toCopyBytes: 21.4e9, knownLibrary: true, serverGuess: "http://nas:8420", onThisPc: false, warnings: [],
+    }),
+    nas_confirm: () => "mock",
+    nas_pair: (a) => {
+      if (String(a.code).replace(/\s/g, "") !== "123456") throw "That code isn't right.";
+      return "Paired with the NAS app (412 clips there).";
+    },
     run_diagnostics: () => "C:\\Users\\you\\Downloads\\Hindsight diagnostics 2026-11-06 12-00-00.txt",
     find_duplicates: () => [],
     edited_clips: () => [],

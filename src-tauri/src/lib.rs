@@ -234,6 +234,13 @@ fn set_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
         std::fs::create_dir_all(&settings.clips_dir)
             .map_err(|e| format!("Can't use that clips folder: {e}"))?;
     }
+    // A new NAS folder must have been checked and confirmed first (see `nas_confirm`).
+    if !settings.nas_dir.is_empty() && settings.nas_dir != old.nas_dir {
+        let marker = nas::read_marker(std::path::Path::new(&settings.nas_dir));
+        if settings.nas_library_id.is_empty() || marker.as_deref() != Some(settings.nas_library_id.as_str()) {
+            return Err("Check the NAS folder first: choose it in Settings > Library.".into());
+        }
+    }
     if !settings.nas_dir.is_empty() {
         let (n, c) = (settings.nas_dir.to_lowercase(), settings.clips_dir.trim_end_matches(['\\', '/']).to_lowercase());
         if n == c || n.starts_with(&format!("{c}\\")) || c.starts_with(&format!("{n}\\")) {
@@ -263,6 +270,26 @@ fn get_status(app: AppHandle) -> engine::Status {
 #[tauri::command]
 fn restart_capture(app: AppHandle) {
     app.state::<AppState>().engine.restart();
+}
+
+#[tauri::command]
+
+async fn nas_check(app: AppHandle, dir: String) -> nas::FolderCheck {
+    let s = settings_of(&app);
+    tauri::async_runtime::spawn_blocking(move || nas::check_folder(std::path::Path::new(&s.clips_dir), std::path::Path::new(&dir)))
+        .await
+        .unwrap_or_default()
+}
+
+/// Mark the checked folder as the library and return its id (for `nasLibraryId`).
+#[tauri::command]
+async fn nas_confirm(dir: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || nas::confirm_folder(std::path::Path::new(&dir))).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn nas_pair(dir: String, server: String, code: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || nas::pair(std::path::Path::new(&dir), &server, &code)).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1686,6 +1713,9 @@ pub fn run() {
             get_settings,
             set_settings,
             screen_preview,
+            nas_check,
+            nas_confirm,
+            nas_pair,
             get_status,
             restart_capture,
             list_monitors,

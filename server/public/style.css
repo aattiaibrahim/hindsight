@@ -428,3 +428,9 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* Settings: paired PCs and the pairing code */
+.pair-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line, #2a2a2a); }
+.pair-code { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.pair-code b { font-size: 34px; letter-spacing: 0.12em; }
+#pair-body > button { margin-top: 10px; }

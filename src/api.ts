@@ -40,6 +40,10 @@ export type Settings = {
   autoUpdate: boolean;
   saveSound: boolean;
   nasDir: string;
+  /** Id in the confirmed NAS folder's marker file. */
+  nasLibraryId: string;
+  /** The paired NAS app's address, "" = not paired. */
+  nasServer: string;
   nasRemoveLocal: boolean;
   linkedFolders: string[];
   /** Game key → the folder spelling picked when merging */
@@ -278,6 +282,24 @@ export type LastMove = { label: string; count: number; when: number };
 /** Part of the picture to keep, as fractions of the frame. */
 export type CropRect = { x: number; y: number; w: number; h: number };
 
+/** What's in a folder picked as the NAS folder (before anything syncs). */
+export type NasFolderCheck = {
+  dir: string;
+  reachable: boolean;
+  writable: boolean;
+  clips: number;
+  clipBytes: number;
+  games: number;
+  otherFiles: number;
+  otherExamples: string[];
+  toCopy: number;
+  toCopyBytes: number;
+  knownLibrary: boolean;
+  serverGuess: string;
+  onThisPc: boolean;
+  warnings: string[];
+};
+
 export type Probe = {
   duration: number;
   codec: string;
@@ -338,6 +360,10 @@ export const api = {
   getStatus: () => invoke<Status>("get_status"),
   restartCapture: () => invoke<void>("restart_capture"),
   listMonitors: () => invoke<Monitor[]>("list_monitors"),
+  nasCheck: (dir: string) => invoke<NasFolderCheck>("nas_check", { dir }),
+  /** Marks the folder as the library; returns its id. */
+  nasConfirm: (dir: string) => invoke<string>("nas_confirm", { dir }),
+  nasPair: (dir: string, server: string, code: string) => invoke<string>("nas_pair", { dir, server, code }),
   /** A small PNG of the screen being recorded (refused while a game runs). */
   screenPreview: () => invoke<ArrayBuffer>("screen_preview"),
   saveClip: (seconds?: number) => invoke<string>("save_clip", { seconds: seconds ?? null }),

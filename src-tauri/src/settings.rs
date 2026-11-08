@@ -57,6 +57,11 @@ pub struct Settings {
     pub save_sound: bool,
     /// Network folder (e.g. \\nas\clips) that saved clips are copied to in the background; "" = off
     pub nas_dir: String,
+    /// The id in the NAS folder's `.hindsight-library` marker, set when the folder
+    /// was checked and confirmed. Syncing stops if the folder's marker differs.
+    pub nas_library_id: String,
+    /// The NAS app this PC is paired with (e.g. http://nas:8420), "" = not paired
+    pub nas_server: String,
     /// Delete the copy on this PC once a clip is safely on the NAS
     pub nas_remove_local: bool,
     /// Other recorders' folders (Medal, OBS, NVIDIA, any folder) shown in the library in place
@@ -164,6 +169,8 @@ impl Default for Settings {
             reduce_motion: false,
             save_sound: true,
             nas_dir: String::new(),
+            nas_library_id: String::new(),
+            nas_server: String::new(),
             nas_remove_local: false,
             linked_folders: Vec::new(),
             folder_names: std::collections::BTreeMap::new(),
@@ -218,7 +225,10 @@ impl Settings {
         self.nas_dir = self.nas_dir.trim().trim_end_matches(['\\', '/']).to_string();
         if self.nas_dir.is_empty() {
             self.nas_remove_local = false;
+            self.nas_library_id.clear();
+            self.nas_server.clear();
         }
+        self.nas_server = self.nas_server.trim().trim_end_matches('/').to_string();
         if !["catbox", "litterbox", "discord", "streamable"].contains(&self.upload_host.as_str()) {
             self.upload_host = d.upload_host.clone();
         }
