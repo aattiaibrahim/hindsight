@@ -8,6 +8,7 @@ import {
   Maximize,
   Minimize,
   PanelRight,
+  Crop as CropIcon,
   Pause,
   Play,
   RectangleHorizontal,
@@ -27,6 +28,7 @@ import { HealReview } from "./HealReview";
 import { HealthNotice } from "./Health";
 import { StudioNas } from "./NasProgress";
 import { Slider } from "./Slider";
+import { Crop, CROP_PRESETS, CropBox, cropPixels, fitRatio, isWhole, WHOLE } from "./CropBox";
 
 type Job = { label: string } | null;
 
@@ -150,7 +152,14 @@ function StripItem({ clip, current, onOpen }: { clip: ClipFile; current: boolean
   const thumb = useThumb(clip.path, clip.modified);
   const ref = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    if (current) ref.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    // Scroll only the strip sideways: scrollIntoView would also scroll the
+    // editor down to the strip, hiding the top of the video in a short window.
+    const el = ref.current;
+    const strip = el?.parentElement;
+    if (!current || !el || !strip) return;
+    const l = el.offsetLeft - strip.offsetLeft;
+    if (l < strip.scrollLeft) strip.scrollLeft = l;
+    else if (l + el.offsetWidth > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = l + el.offsetWidth - strip.clientWidth;
   }, [current]);
   return (
     <button
@@ -371,6 +380,11 @@ export function Studio({
   const [job, setJob] = useState<Job>(null);
   const [result, setResult] = useState<Result>(null);
   const [targetMb, setTargetMb] = useState(10);
+  // Crop: the box over the video (fractions of the frame), whether it's being
+  // edited, and its locked shape (null = free).
+  const [crop, setCrop] = useState<Crop | null>(null);
+  const [cropping, setCropping] = useState(false);
+  const [cropRatio, setCropRatio] = useState<number | null>(null);
 
   useEffect(() => {
     setInfo(null);
@@ -382,6 +396,8 @@ export function Studio({
     setTracks(null);
     setAudioEdits([]);
     setWaves(null);
+    setCrop(null);
+    setCropping(false);
     if (!path) return;
     let alive = true;
     // On a hard drive, reading the file for the waveform and the extra audio
@@ -533,12 +549,14 @@ export function Studio({
       } else if (e.key === "m" || e.key === "M") toggleMute();
       else if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.altKey) toggleFullscreen();
       else if (e.key === "Escape" && fullscreen) setFullscreen(false);
+      else if ((e.key === "Escape" || e.key === "Enter") && cropping) setCropping(false);
       else if (e.key === "Escape" && !document.querySelector(".modal-backdrop")) onBack();
       else if ((e.key === "t" || e.key === "T") && !e.ctrlKey && !e.altKey && !fullscreen) toggleTheater();
+      else if ((e.key === "c" || e.key === "C") && !e.ctrlKey && !e.altKey && !fullscreen) setCropping((v) => !v);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [path, toggle, seek, nudgeVolume, toggleMute, toggleFullscreen, toggleTheater, fullscreen, onBack]);
+  }, [path, toggle, seek, nudgeVolume, toggleMute, toggleFullscreen, toggleTheater, fullscreen, onBack, cropping]);
 
   // Dragging on the timeline: handles move in/out, anywhere else scrubs.
   const drag = (kind: "in" | "out" | "seek") => (e: React.PointerEvent) => {
@@ -646,6 +664,17 @@ export function Studio({
   const name = path.split("\\").pop() ?? path;
   const busy = !!job;
   const wholeFile = a <= 0.01 && duration - b <= 0.05;
+  const cropped = !isWhole(crop);
+  const cropForSave = cropped ? crop! : undefined;
+  const pickRatio = (r: number | null) => {
+    setCropRatio(r);
+    setCrop(r ? fitRatio(r, ar || 16 / 9) : (crop ?? WHOLE));
+  };
+  const cropLabel = () => {
+    if (!crop || !info?.width || !info?.height) return undefined;
+    const [w, h] = cropPixels(crop, info.width, info.height);
+    return `${w} × ${h}`;
+  };
   const hasPreviewAudio = !!tracks && (tracks.extra.length > 0 || (info?.audioTracks ?? 0) > 0);
   const trackTitles = Array.from({ length: info?.audioTracks ?? 0 }, (_, i) =>
     i === 0 ? (tracks?.firstTitle ?? "Game audio") : (tracks?.extra[i - 1]?.title ?? (i === 1 ? "Microphone" : `Track ${i + 1}`)),
@@ -670,11 +699,13 @@ export function Studio({
         </button>
         <button
           className="btn primary"
-          disabled={busy || (wholeFile && !audioEdited)}
+          disabled={busy || (wholeFile && !audioEdited && !cropped)}
           title="Cuts exactly at your start and end frames, with your audio changes. Only the moment before the first keyframe is re-encoded (under a second for Hindsight's clips); the rest of the video is copied untouched, so it's quick and keeps full quality."
-          onClick={() => run(wholeFile ? "Saving audio changes…" : "Saving trim…", () => api.trim(path, a, b, true, replace, editsForSave), replace)}
+          onClick={() =>
+            run(wholeFile ? (cropped ? "Saving crop…" : "Saving audio changes…") : "Saving trim…", () => api.trim(path, a, b, true, replace, editsForSave, cropForSave), replace)
+          }
         >
-          {wholeFile && audioEdited ? "Save audio changes" : "Save trim"}
+          {wholeFile && cropped ? "Save crop" : wholeFile && audioEdited ? "Save audio changes" : "Save trim"}
         </button>
       </div>
       <div className={`studio-body ${theater ? "theater" : ""} ${narrow ? "narrow" : ""}`}>
@@ -742,7 +773,10 @@ export function Studio({
                 } else setPlayErrorFor(path);
               }}
             />
-            {!playError && (
+            {(cropping || cropped) && !fullscreen && !playError && (
+              <CropBox value={crop ?? WHOLE} onChange={setCrop} ratio={cropRatio} videoAr={ar || 16 / 9} editing={cropping} label={cropping ? cropLabel() : undefined} />
+            )}
+            {!playError && !cropping && (
               <div
                 className={`vid-overlay ${playing ? "playing" : "paused"}`}
                 onClick={(e) => e.target === e.currentTarget && toggle()}
@@ -871,6 +905,35 @@ export function Studio({
               </span>
             </div>
             <span style={{ flex: 1 }} />
+            {cropping ? (
+              <span className="transport-pill crop-tools" role="group" aria-label="Crop shape">
+                {CROP_PRESETS.map(([name, r, hint]) => (
+                  <button key={name} className={`btn pill ${cropRatio === r ? "on" : ""}`} aria-pressed={cropRatio === r} title={hint} onClick={() => pickRatio(r)}>
+                    {name}
+                  </button>
+                ))}
+                <button className="round icon" aria-label="Reset crop" title="Keep the whole picture" onClick={() => { setCrop(null); setCropRatio(null); }}>
+                  {Icon.reset}
+                </button>
+                <button className="btn primary crop-done" title="Done (Enter)" onClick={() => setCropping(false)}>
+                  Done
+                </button>
+              </span>
+            ) : (
+              <button
+                className={`btn pill ${cropped ? "on" : ""}`}
+                title={cropped ? "Change the crop. Save trim, Export H.264 and Compress use it." : "Crop the picture, for example to 9:16 for TikTok or Shorts (C)"}
+                disabled={!!playError}
+                onClick={() => {
+                  if (fullscreen) toggleFullscreen();
+                  video.current?.pause();
+                  setCropping(true);
+                }}
+              >
+                <CropIcon size={15} strokeWidth={2} aria-hidden="true" />
+                {cropped ? "Cropped" : "Crop"}
+              </button>
+            )}
             <span className="transport-pill">
               <button className="btn pill" title="Start the trim here (I)" onClick={() => setRange(([, y]) => [Math.min(time, y - 0.1), y])}>
                 {Icon.markIn}
@@ -909,7 +972,7 @@ export function Studio({
             <span className="mono">
               Start {fmtTime(a)} · End {fmtTime(b)} · Length {fmtTime(Math.max(0, b - a))}
             </span>
-            <span>Space play · I / O set points · ← → 5 s · Shift+← → one frame · ↑ ↓ volume · M mute · T hide or show tools · F fullscreen</span>
+            <span>Space play · I / O set points · ← → 5 s · Shift+← → one frame · ↑ ↓ volume · M mute · C crop · T hide or show tools · F fullscreen</span>
           </div>
           {!theater && <ClipStrip clips={(clips ?? []).slice(0, 30)} current={path} onOpen={onOpen} />}
         </div>
@@ -1034,7 +1097,7 @@ export function Studio({
               className="btn block"
               disabled={busy}
               title="Re-encodes the video as H.264 and mixes the audio into one track, so it plays on every phone, browser, editor and Discord. Slower and a little bigger, with your audio changes."
-              onClick={() => run("Exporting H.264…", () => api.exportH264(path, replace, editsForSave), replace)}
+              onClick={() => run("Exporting H.264…", () => api.exportH264(path, replace, editsForSave, cropForSave), replace)}
             >
               Export H.264 (plays everywhere)
             </button>
@@ -1066,7 +1129,7 @@ export function Studio({
                 className="btn block"
                 style={{ flex: 1 }}
                 disabled={busy}
-                onClick={() => run(`Compressing to ${targetMb} MB…`, () => api.compress(path, targetMb, replace, editsForSave), replace)}
+                onClick={() => run(`Compressing to ${targetMb} MB…`, () => api.compress(path, targetMb, replace, editsForSave, cropForSave), replace)}
               >
                 Compress to
               </button>

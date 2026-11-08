@@ -481,7 +481,7 @@ async fn shrink_clip(app: AppHandle, path: String) -> Result<String, String> {
         return Err("It's already small; shrinking wouldn't save anything.".into());
     }
     let secs = duration_of(&path);
-    let out = edit(app.clone(), path, true, secs, move |p| library::compress(p, target_mb, &Default::default())).await?;
+    let out = edit(app.clone(), path, true, secs, move |p| library::compress(p, target_mb, &Default::default(), None)).await?;
     if let Some(t) = when {
         let _ = std::fs::File::options().write(true).open(&out).and_then(|f| f.set_modified(t));
     }
@@ -943,9 +943,13 @@ async fn trim_clip(
     exact: bool,
     replace: bool,
     audio: Option<audio_edit::AudioEdit>,
+    crop: Option<library::Crop>,
 ) -> Result<String, String> {
     let audio = audio.unwrap_or_default();
-    edit(app, path, replace, Some(end - start), move |p| library::trim(p, start, end, exact, &audio)).await
+    match crop.filter(|c| !c.is_whole()) {
+        Some(c) => edit(app, path, replace, Some(end - start), move |p| library::trim_cropped(p, start, end, &audio, c)).await,
+        None => edit(app, path, replace, Some(end - start), move |p| library::trim(p, start, end, exact, &audio)).await,
+    }
 }
 
 /// Loudness over time for each audio track, for Studio's audio lanes.
@@ -960,10 +964,10 @@ async fn clip_waveforms(app: AppHandle, path: String) -> Result<Vec<audio_edit::
 }
 
 #[tauri::command]
-async fn export_h264(app: AppHandle, path: String, replace: bool, audio: Option<audio_edit::AudioEdit>) -> Result<String, String> {
+async fn export_h264(app: AppHandle, path: String, replace: bool, audio: Option<audio_edit::AudioEdit>, crop: Option<library::Crop>) -> Result<String, String> {
     let secs = duration_of(&path);
     let audio = audio.unwrap_or_default();
-    edit(app, path, replace, secs, move |p| library::export_h264(p, &audio)).await
+    edit(app, path, replace, secs, move |p| library::export_h264(p, &audio, crop)).await
 }
 
 /// Clips changed in the app (trimmed, healed, exported in place), for the
@@ -1250,10 +1254,11 @@ async fn compress_clip(
     target_mb: u32,
     replace: bool,
     audio: Option<audio_edit::AudioEdit>,
+    crop: Option<library::Crop>,
 ) -> Result<String, String> {
     let secs = duration_of(&path);
     let audio = audio.unwrap_or_default();
-    edit(app, path, replace, secs, move |p| library::compress(p, target_mb, &audio)).await
+    edit(app, path, replace, secs, move |p| library::compress(p, target_mb, &audio, crop)).await
 }
 
 /// Open Explorer with the file selected (or the folder itself, for a folder).

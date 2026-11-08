@@ -954,16 +954,91 @@ pub fn replace_original(original: &str, edited: &str, expected_secs: Option<f64>
     Ok(target.to_string_lossy().into_owned())
 }
 
+/// Part of the picture to keep, as fractions of the frame (0..1), e.g. a 9:16
+/// slice from the middle of a 16:9 clip for Shorts.
+#[derive(serde::Deserialize, Clone, Copy, Debug, PartialEq)]
+pub struct Crop {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+impl Crop {
+    /// ffmpeg's crop filter for a `width` × `height` video, in even pixels
+    /// (encoders need even sizes), kept inside the frame.
+    pub fn filter(&self, width: i64, height: i64) -> String {
+        let even = |v: f64| ((v.round() as i64) / 2 * 2).max(2);
+        let w = even((self.w.clamp(0.02, 1.0) * width as f64).min(width as f64));
+        let h = even((self.h.clamp(0.02, 1.0) * height as f64).min(height as f64));
+        let x = even(self.x.clamp(0.0, 1.0) * width as f64).min(width - w).max(0);
+        let y = even(self.y.clamp(0.0, 1.0) * height as f64).min(height - h).max(0);
+        format!("crop={w}:{h}:{x}:{y}")
+    }
+
+    /// The whole frame (or near enough): nothing to crop.
+    pub fn is_whole(&self) -> bool {
+        self.x <= 0.002 && self.y <= 0.002 && self.w >= 0.998 && self.h >= 0.998
+    }
+}
+
+/// Trim (or keep the whole clip) and crop the picture: the video has to be
+/// re-encoded to crop it, in the clip's own format; audio edits apply too.
+pub fn trim_cropped(path: &str, start: f64, end: f64, audio: &AudioEdit, crop: Crop) -> Result<String, String> {
+    if end <= start {
+        return Err("The end point has to be after the start point.".into());
+    }
+    let p = probe(path)?;
+    if p.width <= 0 || p.height <= 0 {
+        return Err("Couldn't read the video's size.".into());
+    }
+    let src = Path::new(path);
+    let ext = match ext_of(src).as_str() {
+        "mkv" | "mp4" | "webm" | "mov" => ext_of(src),
+        _ => "mp4".into(),
+    };
+    let out = unique(src, " (crop)", &ext);
+    let (ss, to) = (format!("{start:.3}"), format!("{end:.3}"));
+    let mut args = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y", "-ss", &ss, "-to", &to, "-i"]);
+    args.push(path.into());
+    let n = p.audio_tracks as usize;
+    let mut graph = vec![format!("[0:v:0]{}[v]", crop.filter(p.width, p.height))];
+    for i in 0..n {
+        // The input starts at the cut (-ss before -i), so mute times shift by `start`.
+        graph.push(format!("{}anull[a{i}]", audio.chain(i, start)));
+    }
+    args.extend(ffmpeg::args(&["-filter_complex", &graph.join(";"), "-map", "[v]"]));
+    for i in 0..n {
+        args.extend(ffmpeg::args(&["-map", &format!("[a{i}]"), &format!("-map_metadata:s:a:{i}"), &format!("0:s:a:{i}")]));
+    }
+    let gop = (p.fps.round() as i64).max(1).to_string();
+    args.extend(ffmpeg::args(&[
+        "-c:v", nvenc_for(&p.codec), "-preset", "p5", "-cq", "20", "-b:v", "0", "-g", &gop, "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+    ]));
+    if ext == "mp4" {
+        args.extend(ffmpeg::args(&["-movflags", "+faststart"]));
+    }
+    args.push(out.clone().into());
+    finish(args, out)
+}
+
 /// An H.264 + AAC MP4 that plays everywhere (audio tracks mixed into one).
-pub fn export_h264(path: &str, audio: &AudioEdit) -> Result<String, String> {
-    export_h264_into(path, unique(Path::new(path), " (H.264)", "mp4"), audio)
+pub fn export_h264(path: &str, audio: &AudioEdit, crop: Option<Crop>) -> Result<String, String> {
+    export_h264_vf(path, unique(Path::new(path), " (H.264)", "mp4"), audio, crop)
 }
 
 pub fn export_h264_into(path: &str, out: PathBuf, audio: &AudioEdit) -> Result<String, String> {
+    export_h264_vf(path, out, audio, None)
+}
+
+fn export_h264_vf(path: &str, out: PathBuf, audio: &AudioEdit, crop: Option<Crop>) -> Result<String, String> {
     let info = probe(path)?;
     let mut args = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-i"]);
     args.push(path.into());
     map_mixed_audio(&mut args, info.audio_tracks, audio);
+    if let Some(c) = crop.filter(|c| !c.is_whole()) {
+        args.extend(ffmpeg::args(&["-vf", &c.filter(info.width, info.height)]));
+    }
     args.extend(ffmpeg::args(&[
         "-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21", "-b:v", "0",
         "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
@@ -1010,11 +1085,15 @@ pub fn export_audio(path: &str, start: f64, end: f64, track: Option<usize>, labe
 }
 
 /// Fit under `target_mb` (e.g. Discord's limit). Drops to 720p when the bitrate gets low.
-pub fn compress(path: &str, target_mb: u32, audio: &AudioEdit) -> Result<String, String> {
-    compress_into(path, target_mb, unique(Path::new(path), &format!(" ({target_mb} MB)"), "mp4"), audio)
+pub fn compress(path: &str, target_mb: u32, audio: &AudioEdit, crop: Option<Crop>) -> Result<String, String> {
+    compress_vf(path, target_mb, unique(Path::new(path), &format!(" ({target_mb} MB)"), "mp4"), audio, crop)
 }
 
 pub fn compress_into(path: &str, target_mb: u32, out: PathBuf, audio: &AudioEdit) -> Result<String, String> {
+    compress_vf(path, target_mb, out, audio, None)
+}
+
+fn compress_vf(path: &str, target_mb: u32, out: PathBuf, audio: &AudioEdit, crop: Option<Crop>) -> Result<String, String> {
     let info = probe(path)?;
     if info.duration <= 0.0 {
         return Err("Couldn't read the video length.".into());
@@ -1026,8 +1105,15 @@ pub fn compress_into(path: &str, target_mb: u32, out: PathBuf, audio: &AudioEdit
     let mut args = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-i"]);
     args.push(path.into());
     map_mixed_audio(&mut args, info.audio_tracks, audio);
+    let mut vf = Vec::new();
+    if let Some(c) = crop.filter(|c| !c.is_whole()) {
+        vf.push(c.filter(info.width, info.height));
+    }
     if video_kbps < 2500 && info.height > 720 {
-        args.extend(ffmpeg::args(&["-vf", "scale=-2:720"]));
+        vf.push("scale=-2:'min(720,ih)'".to_string());
+    }
+    if !vf.is_empty() {
+        args.extend(ffmpeg::args(&["-vf", &vf.join(",")]));
     }
     args.extend(ffmpeg::args(&[
         "-c:v", "h264_nvenc", "-preset", "p6", "-rc", "vbr", "-b:v", &b, "-maxrate", &b, "-bufsize", &buf,
@@ -1069,6 +1155,27 @@ mod tests {
         a.push(path.into());
         a.extend(ffmpeg::args(&["-map", "0:v:0", "-vf", &format!("trim=start_frame={skip}:end_frame={}", skip + n), "-f", "framemd5", "-"]));
         ffmpeg::run("ffmpeg", &a).unwrap().lines().filter(|l| !l.starts_with('#')).map(|l| l.rsplit(',').next().unwrap().trim().to_string()).collect()
+    }
+
+    #[test]
+    fn crop_is_even_and_inside_the_frame() {
+        let c = Crop { x: 0.3, y: 0.0, w: 0.3164, h: 1.0 };
+        assert_eq!(c.filter(1920, 1080), "crop=606:1080:576:0");
+        // Off the edge: pulled back inside.
+        assert_eq!(Crop { x: 0.9, y: 0.9, w: 0.5, h: 0.5 }.filter(1920, 1080), "crop=960:540:960:540");
+        assert!(Crop { x: 0.0, y: 0.0, w: 1.0, h: 1.0 }.is_whole());
+    }
+
+    #[test]
+    fn cropped_trim_has_the_new_size_and_the_audio() {
+        let d = tmp("crop");
+        let src = rewind_like(&d, "c.mkv", "hevc_nvenc");
+        let out = trim_cropped(&src, 1.0, 4.0, &AudioEdit::default(), Crop { x: 0.25, y: 0.0, w: 0.5, h: 1.0 }).unwrap();
+        let p = probe(&out).unwrap();
+        assert_eq!((p.width, p.height), (640, 720));
+        assert!((p.duration - 3.0).abs() < 0.1, "{}", p.duration);
+        assert_eq!(p.audio_tracks, 2);
+        let _ = fs::remove_dir_all(d);
     }
 
     #[test]
@@ -1261,7 +1368,7 @@ mod tests {
     #[test]
     fn export_h264_mixes_audio_into_one_track() {
         let d = tmp("export");
-        let out = export_h264(&sample(&d, "a.mkv"), &AudioEdit::default()).unwrap();
+        let out = export_h264(&sample(&d, "a.mkv"), &AudioEdit::default(), None).unwrap();
         let p = probe(&out).unwrap();
         assert_eq!((p.codec.as_str(), p.audio_tracks), ("h264", 1));
         let _ = fs::remove_dir_all(d);
@@ -1298,7 +1405,7 @@ mod tests {
     #[test]
     fn compress_hits_target_size() {
         let d = tmp("compress");
-        let out = compress(&sample(&d, "a.mkv"), 1, &AudioEdit::default()).unwrap();
+        let out = compress(&sample(&d, "a.mkv"), 1, &AudioEdit::default(), None).unwrap();
         let size = fs::metadata(&out).unwrap().len();
         assert!(size <= 1024 * 1024 + 64 * 1024, "{size} bytes");
         assert_eq!(probe(&out).unwrap().audio_tracks, 1);
@@ -1336,7 +1443,7 @@ mod tests {
             let _ = fs::remove_file(out);
         }
         // Export mixes the tracks, with the same edits.
-        let out = export_h264(&src, &edit).unwrap();
+        let out = export_h264(&src, &edit, None).unwrap();
         assert!(level(&out, 0, 2.15, 2.85) > 150.0, "the game track still plays in the mix");
         let _ = fs::remove_dir_all(d);
     }

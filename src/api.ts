@@ -273,6 +273,9 @@ export type FoundFolder = { path: string; label: string; drive: string; clips: n
 export type MoveOutcome = { moved: number; failed: [string, string][] };
 export type LastMove = { label: string; count: number; when: number };
 
+/** Part of the picture to keep, as fractions of the frame. */
+export type CropRect = { x: number; y: number; w: number; h: number };
+
 export type Probe = {
   duration: number;
   codec: string;
@@ -362,16 +365,16 @@ export const api = {
   benchState: () => invoke<[boolean, BenchReport | null]>("bench_state"),
   previewAudio: (path: string) => invoke<PreviewAudio>("preview_audio", { path }),
   remuxMp4: (path: string) => invoke<string>("remux_mp4", { path }),
-  trim: (path: string, start: number, end: number, exact: boolean, replace = false, audio?: TrackEdit[]) =>
-    invoke<string>("trim_clip", { path, start, end, exact, replace, audio: audio ?? null }),
+  trim: (path: string, start: number, end: number, exact: boolean, replace = false, audio?: TrackEdit[], crop?: CropRect) =>
+    invoke<string>("trim_clip", { path, start, end, exact, replace, audio: audio ?? null, crop: crop ?? null }),
   clipWaveforms: (path: string) => invoke<Waveform[]>("clip_waveforms", { path }),
-  exportH264: (path: string, replace = false, audio?: TrackEdit[]) =>
-    invoke<string>("export_h264", { path, replace, audio: audio ?? null }),
+  exportH264: (path: string, replace = false, audio?: TrackEdit[], crop?: CropRect) =>
+    invoke<string>("export_h264", { path, replace, audio: audio ?? null, crop: crop ?? null }),
   /** MP3 of [start, end]: every track mixed (track null) or one track alone. */
   exportAudio: (path: string, start: number, end: number, track: number | null, label: string, audio?: TrackEdit[]) =>
     invoke<string>("export_audio", { path, start, end, track, label, audio: audio ?? null }),
-  compress: (path: string, targetMb: number, replace = false, audio?: TrackEdit[]) =>
-    invoke<string>("compress_clip", { path, targetMb, replace, audio: audio ?? null }),
+  compress: (path: string, targetMb: number, replace = false, audio?: TrackEdit[], crop?: CropRect) =>
+    invoke<string>("compress_clip", { path, targetMb, replace, audio: audio ?? null, crop: crop ?? null }),
   gpuEncoders: () => invoke<GpuEncoders>("gpu_encoders"),
   /** Sets of paths holding the very same clip */
   findDuplicates: () => invoke<string[][]>("find_duplicates"),
