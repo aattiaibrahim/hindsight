@@ -63,6 +63,15 @@ pub fn probe(path: &str) -> Result<Probe, String> {
     {
         return Ok(e.probe.clone());
     }
+    // A clip on the NAS whose copy was on this PC: same size and date, same details.
+    if let (Some((size, modified)), Some(twin)) = (st, library::local_twin(path))
+        && let Some(c) = CACHE.lock().unwrap().as_mut()
+        && let Some(e) = c.map.get(&twin).filter(|e| e.size == size && e.modified == modified).cloned()
+    {
+        c.map.insert(path.to_string(), e.clone());
+        c.dirty = true;
+        return Ok(e.probe);
+    }
     let p = library::probe(path)?;
     if let (Some((size, modified)), Some(c)) = (st, CACHE.lock().unwrap().as_mut()) {
         c.map.insert(path.to_string(), Entry { size, modified, probe: p.clone() });
@@ -85,12 +94,10 @@ pub fn flush() {
 
 fn known(path: &str) -> bool {
     let st = stamp(Path::new(path));
-    CACHE
-        .lock()
-        .unwrap()
-        .as_ref()
-        .and_then(|c| c.map.get(path))
-        .is_some_and(|e| Some((e.size, e.modified)) == st)
+    let twin = library::local_twin(path);
+    CACHE.lock().unwrap().as_ref().is_some_and(|c| {
+        [Some(path.to_string()), twin].into_iter().flatten().any(|k| c.map.get(&k).is_some_and(|e| Some((e.size, e.modified)) == st))
+    })
 }
 
 /// How many of the newest clips get their audio (waveforms, extra tracks) ready
@@ -117,11 +124,10 @@ pub fn start(
                     std::thread::sleep(Duration::from_secs(20));
                     continue;
                 }
-                let todo: Vec<String> = clips()
-                    .into_iter()
-                    .filter(|p| !p.starts_with(r"\\")) // NAS clips are prepared by the server
-                    .filter(|p| !known(p) || !library::thumbnail_exists(p, &thumbs))
-                    .collect();
+                // This PC's clips first, then the ones only on the NAS (slower to read,
+                // so they're ready before you open Synced clips instead of while you look).
+                let mut todo: Vec<String> = clips().into_iter().filter(|p| !known(p) || !library::thumbnail_exists(p, &thumbs)).collect();
+                todo.sort_by_key(|p| p.starts_with(r"\\"));
                 if todo.is_empty() {
                     flush();
                     // The newest clips' audio, the ones you're likely to open next.
@@ -146,7 +152,7 @@ pub fn start(
                         std::thread::sleep(Duration::from_millis(150));
                     }
                     // Everything's ready: look for duplicates too, so Cleanup opens instantly.
-                    let sized: Vec<(String, u64)> = clips().into_iter().filter_map(|p| fs::metadata(&p).ok().map(|m| (p, m.len()))).collect();
+                    let sized: Vec<(String, u64)> = clips().into_iter().filter(|p| !p.starts_with(r"\\")).filter_map(|p| fs::metadata(&p).ok().map(|m| (p, m.len()))).collect();
                     let _ = crate::duplicates::find(&sized);
                     std::thread::sleep(Duration::from_secs(300));
                     continue;

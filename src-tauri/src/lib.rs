@@ -249,6 +249,7 @@ fn set_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
     }
     settings::save(&st.settings_path, &settings)?;
     *st.settings.lock().unwrap() = settings.clone();
+    library::set_twin(&settings.nas_dir, &settings.clips_dir);
     if old.launch_on_startup != settings.launch_on_startup {
         apply_autostart(&app, settings.launch_on_startup);
     }
@@ -1561,6 +1562,10 @@ pub fn run() {
             // Clip details and thumbnails, ready before you scroll to them.
             if let Ok(file) = data_file(&handle, "probes.json") {
                 prepare::init(file);
+                {
+                    let s = settings_of(&handle);
+                    library::set_twin(&s.nas_dir, &s.clips_dir);
+                }
                 let thumbs = handle.state::<AppState>().thumbs_dir.clone();
                 let preview = thumbs.with_file_name("preview");
                 let (p1, p2, p3) = (handle.clone(), handle.clone(), handle.clone());
@@ -1569,7 +1574,7 @@ pub fn run() {
                     move || {
                         let s = settings_of(&p1);
                         let linked = linked_roots(&s);
-                        library::scan_all(PathBuf::from(&s.clips_dir).as_path(), &s.external_files, &[], &linked, &s.nas_dir)
+                        library::scan_all(PathBuf::from(&s.clips_dir).as_path(), &s.external_files, &nas::listing(&s.nas_dir), &linked, &s.nas_dir)
                             .into_iter()
                             .map(|c| c.path)
                             .collect()

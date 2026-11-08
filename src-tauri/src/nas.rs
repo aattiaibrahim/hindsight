@@ -1538,3 +1538,21 @@ mod live_pair {
         assert!(!std::fs::read_dir(&dir).unwrap().flatten().any(|e| e.file_name().to_string_lossy().starts_with(".hindsight-pair-")), "token file left behind");
     }
 }
+
+#[cfg(test)]
+mod live_scan_nas {
+    /// How long listing the NAS takes (read-only): cargo test --lib live_nas_scan -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_nas_scan() {
+        let root = std::path::Path::new("//voyager-1/clips");
+        let t = std::time::Instant::now();
+        println!("read_dir: {:?}", std::fs::read_dir(root).map(|r| r.count()));
+        let files = super::scan_nas(root);
+        let listed = t.elapsed();
+        let t = std::time::Instant::now();
+        let n = files.iter().filter(|f| std::fs::metadata(&f.path).is_ok()).count();
+        let statted = t.elapsed();
+        println!("listed {} NAS clips in {listed:?}; one metadata call each ({n}) took {statted:?}", files.len());
+    }
+}

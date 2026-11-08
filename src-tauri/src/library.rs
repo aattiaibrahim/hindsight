@@ -328,22 +328,56 @@ pub fn first_track_title(path: &str) -> String {
 
 fn thumbnail_path(path: &str, cache: &Path) -> Result<PathBuf, String> {
     let meta = fs::metadata(path).map_err(|e| e.to_string())?;
+    Ok(thumbnail_key(path, &meta, cache))
+}
+
+fn thumbnail_key(path: &str, meta: &fs::Metadata, cache: &Path) -> PathBuf {
     let mut h = DefaultHasher::new();
     path.hash(&mut h);
     meta.len().hash(&mut h);
     meta.modified().ok().hash(&mut h);
-    Ok(cache.join(format!("{:016x}.jpg", h.finish())))
+    cache.join(format!("{:016x}.jpg", h.finish()))
+}
+
+/// The NAS folder and this PC's clips folder, so a clip on the NAS can find
+/// what was already worked out for it while it was on this PC.
+static TWIN: std::sync::Mutex<Option<(String, String)>> = std::sync::Mutex::new(None);
+
+pub fn set_twin(nas_dir: &str, clips_dir: &str) {
+    *TWIN.lock().unwrap() = (!nas_dir.is_empty()).then(|| (format!("{}\\", nas_dir.trim_end_matches(['\\', '/']).to_lowercase()), clips_dir.trim_end_matches(['\\', '/']).to_string()));
+}
+
+/// For a clip on the NAS: where its copy on this PC is, or was before it was
+/// freed up (same game folder and name). Its size and date are the same there,
+/// so its thumbnail and details can be reused instead of read over the network.
+pub fn local_twin(path: &str) -> Option<String> {
+    let t = TWIN.lock().unwrap();
+    let (nas, local) = t.as_ref()?;
+    let p = path.replace('/', "\\");
+    let rest = if p.to_lowercase().starts_with(nas.as_str()) { p.get(nas.len()..)? } else { return None };
+    Some(format!("{local}\\{rest}"))
+}
+
+/// A thumbnail made for this clip's twin on this PC, if there is one.
+fn twin_thumbnail(path: &str, cache: &Path) -> Option<PathBuf> {
+    let twin = local_twin(path)?;
+    let meta = fs::metadata(path).ok()?;
+    let old = thumbnail_key(&twin, &meta, cache);
+    old.exists().then_some(old)
 }
 
 /// Is this clip's thumbnail already made?
 pub fn thumbnail_exists(path: &str, cache: &Path) -> bool {
-    thumbnail_path(path, cache).is_ok_and(|p| p.exists())
+    thumbnail_path(path, cache).is_ok_and(|p| p.exists()) || twin_thumbnail(path, cache).is_some()
 }
 
 pub fn thumbnail(path: &str, cache: &Path) -> Result<String, String> {
     let out = thumbnail_path(path, cache)?;
     if out.exists() {
         return Ok(out.to_string_lossy().into_owned());
+    }
+    if let Some(old) = twin_thumbnail(path, cache) {
+        return Ok(old.to_string_lossy().into_owned());
     }
     fs::create_dir_all(cache).map_err(|e| e.to_string())?;
     for seek in ["1", "0"] {
@@ -1181,6 +1215,15 @@ mod tests {
     }
 
     #[test]
+    fn nas_clips_reuse_what_was_made_for_their_copy_on_this_pc() {
+        set_twin("\\\\nas\\clips\\", "C:\\Videos\\Hindsight");
+        assert_eq!(local_twin("\\\\NAS\\Clips\\VALORANT\\a.mkv").as_deref(), Some("C:\\Videos\\Hindsight\\VALORANT\\a.mkv"));
+        assert_eq!(local_twin("D:\\Medal\\a.mp4"), None);
+        set_twin("", "");
+        assert_eq!(local_twin("\\\\nas\\clips\\VALORANT\\a.mkv"), None);
+    }
+
+    #[test]
     fn crop_is_even_and_inside_the_frame() {
         let c = Crop { x: 0.3, y: 0.0, w: 0.3164, h: 1.0 };
         assert_eq!(c.filter(1920, 1080), "crop=606:1080:576:0");
@@ -1661,5 +1704,34 @@ mod live_audio_save {
             println!("  file: {} ({} MB)", e.file_name().to_string_lossy(), e.metadata().unwrap().len() / 1_048_576);
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod live_twin {
+    /// Freed-up clips find the thumbnail made while they were on this PC (read-only).
+    /// REWIND_TWIN_LIST: a file of the freed clips' old paths.
+    /// cargo test --lib live_twin -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_twin() {
+        let home = std::env::var("USERPROFILE").unwrap();
+        let clips = format!(r"{home}\Videos\Rewind");
+        super::set_twin(r"\\voyager-1\clips", &clips);
+        let thumbs = std::path::PathBuf::from(std::env::var("LOCALAPPDATA").unwrap()).join("com.rewind.app").join("thumbs");
+        let list = std::fs::read_to_string(std::env::var("REWIND_TWIN_LIST").unwrap()).unwrap();
+        let (mut found, mut total) = (0, 0);
+        for old in list.lines().map(|l| l.trim_start_matches('\u{feff}').trim()).filter(|l| !l.is_empty()) {
+            let Some(rest) = old.strip_prefix(&format!(r"{clips}\")) else { continue };
+            let nas = format!(r"\\voyager-1\clips\{rest}");
+            if !std::path::Path::new(&nas).exists() {
+                continue;
+            }
+            total += 1;
+            if super::twin_thumbnail(&nas, &thumbs).is_some() {
+                found += 1;
+            }
+        }
+        println!("freed clips whose old thumbnail is reused: {found} of {total}");
     }
 }

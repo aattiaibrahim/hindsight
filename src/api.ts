@@ -336,7 +336,7 @@ export type Monitor = {
  * must never hold up the clips on this PC.
  */
 type Lane = { active: number; max: number; waiting: (() => void)[] };
-const LANES: Record<"local" | "net", Lane> = { local: { active: 0, max: 3, waiting: [] }, net: { active: 0, max: 2, waiting: [] } };
+const LANES: Record<"local" | "net", Lane> = { local: { active: 0, max: 3, waiting: [] }, net: { active: 0, max: 3, waiting: [] } };
 const laneOf = (path: string): Lane => (/^(\\\\|\/\/)/.test(path) ? LANES.net : LANES.local);
 
 /** Thrown for a request whose card left the screen before its turn came. */
