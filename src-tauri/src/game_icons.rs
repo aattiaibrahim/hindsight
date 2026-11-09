@@ -258,7 +258,8 @@ fn steam_app(game: &str, client: &reqwest::blocking::Client) -> Option<u64> {
         }
     }
     // "Resident Evil 3 Remake" finds nothing, "Resident Evil 3" does: drop up to two words from the end.
-    let words: Vec<&str> = game.split_whitespace().collect();
+    // A word that's only punctuation ("Empyrion - Galactic Survival") makes Steam find nothing.
+    let words: Vec<&str> = game.split_whitespace().filter(|w| w.chars().any(char::is_alphanumeric)).collect();
     for keep in (words.len().saturating_sub(2).max(1)..=words.len()).rev() {
         let term: String = words[..keep]
             .join(" ")
@@ -376,7 +377,8 @@ pub fn icon(game: &str, online: bool) -> Option<PathBuf> {
             return Some(steam);
         }
         // Never while a game is running; a miss is asked again after a week.
-        let miss = dir.join(format!("{key}.steam2-none"));
+        // "steam3": asked again after the search learned to skip punctuation words.
+        let miss = dir.join(format!("{key}.steam3-none"));
         if !crate::games::game_running() && !tried_recently(&miss, 7 * 86_400) {
             // "SpeciesUnknown-Win64-Shipping" is looked up as "Species Unknown".
             let title = crate::games::tidy_program_name(game).unwrap_or_else(|| game.to_string());
@@ -454,7 +456,7 @@ mod tests {
     fn live_game_icons() {
         let dir = std::env::temp_dir().join("rewind-live-icons");
         init(dir.clone());
-        for g in ["Payday The Heist", "Battlefield 6", "Minecraft", "Render", "Hitman 3", "Rocket League", "Apex Legends", "SpeciesUnknown-Win64-Shipping", "Species Unknown", "Escape From Tarkov", "Resident Evil 3 Remake", "Edits", "funny not cool", "VALORANT", "League of Legends", "Counter-strike 2", "Marvel Rivals", "Overwatch 2", "Tom Clancys Rainbow Six Siege", "Hunt Showdown", "Payday The Heist", "Resident Evil Requiem", "The Outlast Trials", "Desktop"] {
+        for g in ["Payday The Heist", "Battlefield 6", "Minecraft", "Render", "Hitman 3", "Rocket League", "Apex Legends", "SpeciesUnknown-Win64-Shipping", "Species Unknown", "Escape From Tarkov", "Resident Evil 3 Remake", "Edits", "funny not cool", "VALORANT", "League of Legends", "Counter-strike 2", "Marvel Rivals", "Overwatch 2", "Tom Clancys Rainbow Six Siege", "Hunt Showdown", "Payday The Heist", "Resident Evil Requiem", "The Outlast Trials", "Empyrion - Galactic Survival", "Desktop"] {
             println!("{g}: {:?} -> {:?}", find_program(g), icon(g, true));
         }
     }

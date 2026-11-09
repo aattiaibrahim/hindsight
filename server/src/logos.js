@@ -82,7 +82,8 @@ export async function steamApp(game, fetchJson) {
   const key = gameKey(game);
   if (STEAM_ALIASES[key]) return STEAM_ALIASES[key];
   // "Resident Evil 3 Remake" finds nothing, "Resident Evil 3" does: drop up to two words from the end.
-  const words = game.split(/\s+/).filter(Boolean);
+  // A word that's only punctuation ("Empyrion - Galactic Survival") makes Steam find nothing.
+  const words = game.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w));
   for (let keep = words.length; keep >= Math.max(1, words.length - 2); keep--) {
     const j = await fetchJson(`https://store.steampowered.com/api/storesearch/?term=${term(words.slice(0, keep).join(" "))}&l=english&cc=US`);
     if (!j) return null;
@@ -124,7 +125,8 @@ export class Logos {
     if (!key || !this.online || notAGame(key)) return null;
     const file = path.join(this.dir, `${key}.steam2.jpg`);
     if ((await mtime(file)) !== null) return file;
-    const miss = path.join(this.dir, `${key}.steam2-none`);
+    // "steam3": asked again after the search learned to skip punctuation words.
+    const miss = path.join(this.dir, `${key}.steam3-none`);
     const missAt = await mtime(miss);
     if (missAt !== null && Date.now() - missAt < 7 * DAY) return null;
     if (!this.pending.has(key)) {
