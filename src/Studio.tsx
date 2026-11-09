@@ -632,7 +632,11 @@ export function Studio({
         video.current?.pause();
         onOpen(out);
         setReload((k) => k + 1);
-        setResult({ text: `Replaced the original with your edit (old file is in the Recycle Bin).` });
+        setResult({
+          text: inNas
+            ? "Replaced the original on the NAS with your edit (the old file is kept in the NAS's .hindsight-replaced folder for 30 days)."
+            : "Replaced the original with your edit (old file is in the Recycle Bin).",
+        });
         return;
       }
       setResult({ text: `Saved ${out.split("\\").pop()}`, path: out });
