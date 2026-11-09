@@ -3,25 +3,8 @@ import { RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } 
 /** One day section in the library: its date, and how many clips. */
 export type TimelineDay = { key: string; ts: number; count: number };
 
-/** `month` / `year`: labels shown normally; `monthAt`: this day starts a month (labelled under the lens). */
+/** `month` / `year`: the labels it may show; `monthAt`: this day starts a month. */
 type Mark = { key: string; ts: number; y: number; month?: string; year?: string; monthAt?: string };
-
-/** The lens around the pointer: how far it reaches (px) and how much it spreads the middle. */
-const LENS_R = 90;
-const LENS_M = 2.2;
-
-/**
- * Fisheye (Sarkar-Brown): marks near `c` spread out, up to (M + 1)× in the
- * middle, easing to no change at the edge, so nothing jumps. The point under the
- * pointer stays put, so clicks and drags land where they did. `k`: 1 in the middle, 0 at the edge.
- */
-function lensed(y: number, c: number | null) {
-  if (c == null) return { y, k: 0 };
-  const d = y - c;
-  const t = Math.abs(d) / LENS_R;
-  if (t >= 1) return { y, k: 0 };
-  return { y: c + Math.sign(d) * LENS_R * (((LENS_M + 1) * t) / (LENS_M * t + 1)), k: 1 - t };
-}
 
 /**
  * Immich-style date scrubber down the right edge of the library: a tick per
@@ -44,7 +27,7 @@ export function Timeline({ scroller, days }: { scroller: RefObject<HTMLDivElemen
     v.style.transform = `translateY(${(sc.scrollTop / total) * h}px)`;
     v.style.height = `${Math.max(3, (sc.clientHeight / total) * h)}px`;
   }, [scroller]);
-  const [hover, setHover] = useState<{ y: number; label: string } | null>(null);
+  const [hover, setHover] = useState<{ y: number; label: string; count: number } | null>(null);
   const dragging = useRef(false);
 
   // Where each day section sits, as a share of the whole scroll height.
@@ -150,34 +133,27 @@ export function Timeline({ scroller, days }: { scroller: RefObject<HTMLDivElemen
     const rect = rail.current!.getBoundingClientRect();
     const y = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
     const d = dayAt(y);
-    setHover(d ? { y, label: label(d.ts) } : null);
+    setHover(d ? { y, label: label(d.ts), count: days.find((x) => x.key === d.key)?.count ?? 0 } : null);
     if (dragging.current) jump(e.clientY, false);
   };
 
   if (days.length < 2) return <div className="timeline-rail empty-rail" ref={rail} />;
 
-  // Under the lens every month gets its label (bigger near the pointer), as long
-  // as it doesn't overlap the one above; elsewhere only the labels that fit.
-  const lens = hover?.y ?? null;
-  let lastY = -99;
-  const shown = marks.map((m) => {
-    const p = lensed(m.y, lens);
-    const scale = 1 + 0.45 * p.k;
-    const text = p.k > 0 ? (m.month ?? m.monthAt) : m.month;
-    // A label too close to the one above is skipped (years always win room outside the lens).
-    let label = !!(text || m.year);
-    if (label && p.y - lastY < (m.year ? 22 : 13) * scale && !(m.year && p.k === 0)) label = false;
-    if (label) lastY = p.y;
-    return { m, y: p.y, k: p.k, scale, text, label, dayNum: null as string | null };
+  // Labels never move. Years always get theirs (a month just above one gives way);
+  // months only where there's room, so nothing piles up at the ends.
+  const GAP = 14;
+  const shown: { m: Mark; text: string | null }[] = marks.map((m) => ({ m, text: null }));
+  let last = -1;
+  shown.forEach((x, i) => {
+    const want = x.m.year ?? x.m.month;
+    if (!want) return;
+    if (last >= 0 && x.m.y - shown[last].m.y < GAP) {
+      if (!x.m.year || shown[last].m.year) return; // no room
+      shown[last].text = null; // a year beats the month above it
+    }
+    x.text = want;
+    last = i;
   });
-  // Then, right under the pointer, plain days get their number in the gaps
-  // (months and years keep their room).
-  const taken = shown.filter((x) => x.label).map((x) => x.y);
-  for (const x of shown) {
-    if (x.label || x.k <= 0.4 || taken.some((y) => Math.abs(y - x.y) < 11)) continue;
-    x.dayNum = String(new Date(x.m.ts).getDate());
-    taken.push(x.y);
-  }
   return (
     <div
       className={`timeline-rail ${hover ? "active" : ""}`}
@@ -197,24 +173,15 @@ export function Timeline({ scroller, days }: { scroller: RefObject<HTMLDivElemen
       aria-orientation="vertical"
     >
       <div className="tl-view" ref={viewBox} />
-      {shown.map(({ m, y, k, scale, text, label, dayNum }) => (
-        <span
-          key={m.key}
-          className={`tl-day ${text || m.year ? "month" : ""} ${m.year ? "year" : ""} ${k > 0 ? "in-lens" : ""}`}
-          style={{ top: y, ...(k > 0 ? { width: 5 + 7 * k } : {}) }}
-        >
-          {label && (
-            <em style={k > 0 ? { transform: `scale(${scale})`, opacity: 0.75 + 0.25 * k } : undefined}>
-              {m.year && <b>{m.year}</b>}
-              {text}
-            </em>
-          )}
-          {dayNum && <i className="tl-num">{dayNum}</i>}
+      {shown.map(({ m, text }) => (
+        <span key={m.key} className={`tl-day ${text ? "month" : ""} ${m.year && text ? "year" : ""}`} style={{ top: m.y }}>
+          {text && <em>{m.year && text === m.year ? <b>{text}</b> : text}</em>}
         </span>
       ))}
       {hover && (
         <div className="tl-bubble" style={{ top: hover.y }}>
           {hover.label}
+          {hover.count > 0 && <small>{hover.count} clip{hover.count === 1 ? "" : "s"}</small>}
         </div>
       )}
     </div>

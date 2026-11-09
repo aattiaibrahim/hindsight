@@ -1304,12 +1304,15 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
 .nas-sure input { margin-top: 2px; }
 .ok-text { color: var(--ok, #3ccf7a); font-size: 13px; }
 
-/* Timeline magnifier: near the pointer the ticks spread out and every month is labelled. */
-.tl-day em { transform-origin: right center; }
-.tl-day.in-lens { background: color-mix(in srgb, var(--text) 70%, transparent); }
-.tl-day.in-lens em { color: var(--text); }
-.timeline-rail.active .tl-day:not(.in-lens) em { opacity: 0.45; }
-.tl-num { position: absolute; right: 14px; top: -6px; font-style: normal; font-size: 10px; line-height: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+/* Timeline: labels stay put; a bubble by the pointer names the day and its clips. */
+.tl-bubble {
+  right: 26px; display: flex; align-items: baseline; gap: 6px; padding: 5px 10px; border-radius: 8px;
+  font-size: 12px; font-weight: 600; color: var(--text); background: var(--raised);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+}
+.tl-bubble small { font-size: 11px; font-weight: 500; color: var(--text-2); }
+.tl-bubble::after { right: -18px; width: 18px; }
+.timeline-rail.active .tl-day em { opacity: 0.55; }
 
 /* Status bar: NAS activity with a small progress bar, and Stop / Resume */
 .sb-meter { width: 64px; height: 4px; border-radius: 2px; background: var(--raised); overflow: hidden; }
