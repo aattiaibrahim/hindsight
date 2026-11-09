@@ -440,6 +440,48 @@ pub fn thumbnail_exists(path: &str, cache: &Path) -> bool {
     thumbnail_path(path, cache).is_ok_and(|p| p.exists()) || twin_thumbnail(path, cache).is_some()
 }
 
+/// The NAS folder (lowercase, ending in \\) and the paired NAS app's address, so a
+/// NAS clip's thumbnail can come ready-made from the NAS app.
+static NAS_APP: std::sync::Mutex<Option<(String, String)>> = std::sync::Mutex::new(None);
+
+pub fn set_nas_app(nas_dir: &str, server: &str) {
+    let server = server.trim().trim_end_matches('/');
+    *NAS_APP.lock().unwrap() = (!nas_dir.is_empty() && !server.is_empty())
+        .then(|| (format!("{}\\", nas_dir.replace('/', "\\").trim_end_matches('\\').to_lowercase()), server.to_string()));
+}
+
+/// Percent-encode for a URL query value (UTF-8 bytes; letters, digits and -._~ stay).
+fn url_encode(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-._~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
+/// A NAS clip's thumbnail from the NAS app (about 40 ms, against 150 ms+ for ffmpeg
+/// reading the video over the network). False when it isn't a NAS clip, the NAS
+/// app isn't paired, or it can't give one: then ffmpeg makes it as before.
+fn nas_app_thumbnail(path: &str, out: &Path) -> bool {
+    let Some((root, server)) = NAS_APP.lock().unwrap().clone() else { return false };
+    let p = path.replace('/', "\\");
+    let Some(rest) = p.to_lowercase().starts_with(&root).then(|| p.get(root.len()..)).flatten() else { return false };
+    let rel = rest.replace('\\', "/");
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let Ok(client) = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(15)).build() else { return false };
+    let Some(bytes) = client
+        .get(format!("{server}/api/thumb?rel={}", url_encode(&rel)))
+        .send()
+        .ok()
+        .filter(|r| r.status().is_success())
+        .and_then(|r| r.bytes().ok())
+    else {
+        return false;
+    };
+    // A real JPEG, not an error page.
+    if bytes.len() < 200 || bytes[..2] != [0xff, 0xd8] {
+        return false;
+    }
+    let tmp = out.with_extension("part");
+    fs::write(&tmp, &bytes).is_ok() && fs::rename(&tmp, out).is_ok()
+}
+
 pub fn thumbnail(path: &str, cache: &Path) -> Result<String, String> {
     let out = thumbnail_path(path, cache)?;
     if out.exists() {
@@ -449,6 +491,9 @@ pub fn thumbnail(path: &str, cache: &Path) -> Result<String, String> {
         return Ok(old.to_string_lossy().into_owned());
     }
     fs::create_dir_all(cache).map_err(|e| e.to_string())?;
+    if nas_app_thumbnail(path, &out) {
+        return Ok(out.to_string_lossy().into_owned());
+    }
     for seek in ["1", "0"] {
         let mut args = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y", "-ss", seek, "-i"]);
         args.push(path.into());
@@ -1292,6 +1337,26 @@ mod tests {
         assert_eq!(n(serde_json::json!({})), "");
     }
 
+
+    /// Against a running NAS app: REWIND_TEST_NAS_APP=http://localhost:8421 and
+    /// REWIND_TEST_NAS_DIR=its clips folder (with at least one clip in a game folder).
+    #[test]
+    #[ignore]
+    fn live_nas_app_thumbnail() {
+        let app = std::env::var("REWIND_TEST_NAS_APP").unwrap();
+        let dir = std::env::var("REWIND_TEST_NAS_DIR").unwrap();
+        let clip = fs::read_dir(&dir).unwrap().flatten().filter(|e| e.path().is_dir()).flat_map(|g| fs::read_dir(g.path()).unwrap().flatten()).map(|e| e.path()).find(|p| is_video(p)).unwrap();
+        set_nas_app(&dir, &app);
+        let cache = std::env::temp_dir().join(format!("rewind-nasthumb-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&cache);
+        let t = std::time::Instant::now();
+        let out = thumbnail(&clip.to_string_lossy(), &cache).unwrap();
+        let b = fs::read(&out).unwrap();
+        println!("{} from the NAS app in {:?}: {} bytes", clip.display(), t.elapsed(), b.len());
+        assert_eq!(&b[..2], &[0xff, 0xd8]);
+        set_nas_app("", "");
+        let _ = fs::remove_dir_all(&cache);
+    }
     #[test]
     fn a_track_that_mixes_the_others_is_found_by_name() {
         let t = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();

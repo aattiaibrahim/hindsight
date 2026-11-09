@@ -160,6 +160,19 @@ export async function createServer({ library, media, cleanup = null, shares = nu
         return fail(res, e);
       }
     }
+    // A clip's thumbnail by its place in the clips folder, for the desktop app: a
+    // ready-made 17 KB picture is much quicker than ffmpeg reading the video over the network.
+    if (url.pathname === "/api/thumb" && (req.method === "GET" || req.method === "HEAD")) {
+      const clip = library.clips.find((c) => c.rel === url.searchParams.get("rel"));
+      if (!clip) return send(res, 404, { error: "not in the library" });
+      if (media.meta(clip)?.damaged) return send(res, 404, "no thumbnail: the clip can't be read");
+      try {
+        const out = await media.thumbnail(clip, path.join(library.root, ...clip.rel.split("/")));
+        return sendFile(req, res, out, { type: "image/jpeg", cache: "public, max-age=86400" });
+      } catch (e) {
+        return fail(res, e);
+      }
+    }
     // The desktop app deletes (or replaces) a NAS clip by its place in the clips
     // folder, so it lands in this trash too; Undo there brings it back the same way.
     if (cleanup && (url.pathname === "/api/trash/add" || url.pathname === "/api/trash/restore-rel") && post(req)) {

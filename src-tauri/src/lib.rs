@@ -250,6 +250,7 @@ fn set_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
     settings::save(&st.settings_path, &settings)?;
     *st.settings.lock().unwrap() = settings.clone();
     library::set_twin(&settings.nas_dir, &settings.clips_dir);
+    library::set_nas_app(&settings.nas_dir, &settings.nas_server);
     if old.launch_on_startup != settings.launch_on_startup {
         apply_autostart(&app, settings.launch_on_startup);
     }
@@ -1680,6 +1681,7 @@ pub fn run() {
                 {
                     let s = settings_of(&handle);
                     library::set_twin(&s.nas_dir, &s.clips_dir);
+                    library::set_nas_app(&s.nas_dir, &s.nas_server);
                 }
                 let thumbs = handle.state::<AppState>().thumbs_dir.clone();
                 let preview = thumbs.with_file_name("preview");

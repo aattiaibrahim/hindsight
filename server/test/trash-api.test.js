@@ -56,6 +56,11 @@ describe("trash by path (from the desktop app)", () => {
     assert.equal((await post("/api/trash/restore-rel", { rel })).json.restored, false);
   });
 
+  test("a thumbnail by path is only for clips in the library", async () => {
+    assert.equal((await fetch(`${base}/api/thumb?rel=${encodeURIComponent("../secret.mkv")}`)).status, 404);
+    assert.equal((await fetch(`${base}/api/thumb?rel=nope.mkv`)).status, 404);
+  });
+
   test("paths outside the clips folder are refused", async () => {
     for (const rel of ["../x.mkv", "/etc/passwd", ".hindsight-trash/a.mkv", "a\\b.mkv", "", "VALORANT/../x.mkv"]) {
       assert.equal((await post("/api/trash/add", { rel })).status, 400, rel);
