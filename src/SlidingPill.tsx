@@ -7,7 +7,7 @@ import { useLayoutEffect, useRef } from "react";
  * control, chips, the sidebar. It follows the selection by watching class
  * changes, so the options themselves don't change at all.
  */
-export function SlidingPill({ selector = ".on" }: { selector?: string }) {
+export function SlidingPill({ selector = ".on", glideFar = false }: { selector?: string; glideFar?: boolean }) {
   const ref = useRef<HTMLSpanElement>(null);
   useLayoutEffect(() => {
     const pill = ref.current;
@@ -29,7 +29,8 @@ export function SlidingPill({ selector = ".on" }: { selector?: string }) {
       // The first placement jumps straight there; after that it glides to a
       // neighbour. A long jump (the sidebar from the top to Settings) snaps
       // instead: gliding across a gap looks like something going wrong.
-      const far = !!last && Math.abs(x - last.x) + Math.abs(y - last.y) > 150;
+      // (A thin bar, like the sidebar's, glides any distance: it's small enough to.)
+      const far = !glideFar && !!last && Math.abs(x - last.x) + Math.abs(y - last.y) > 150;
       const jump = first || far;
       if (jump) pill.style.transition = "none";
       pill.style.opacity = "1";
@@ -59,6 +60,6 @@ export function SlidingPill({ selector = ".on" }: { selector?: string }) {
       cancelAnimationFrame(frame);
       box.classList.remove("has-pill");
     };
-  }, [selector]);
+  }, [selector, glideFar]);
   return <span ref={ref} className="slide-pill" aria-hidden="true" />;
 }

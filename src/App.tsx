@@ -394,7 +394,7 @@ export default function App() {
     <div className="shell">
       {/* A slim rail of icons; each one's name shows on hover or keyboard focus. */}
       <nav className="nav" aria-label="Hindsight">
-        <SlidingPill selector=".nav-item.on" />
+        <SlidingPill selector=".nav-item.on" glideFar />
         <div className="brand" title={`Hindsight${upd?.current ? ` ${upd.current}` : ""} (beta)`}>
           <img src={logo} alt="Hindsight" width={28} height={28} />
         </div>

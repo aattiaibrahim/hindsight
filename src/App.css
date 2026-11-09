@@ -972,7 +972,17 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
 .chips > .slide-pill, .fgroup > .slide-pill, .row > .slide-pill,
 .tabs > .slide-pill, .seg > .slide-pill { background: var(--pill-on); }
 .has-pill > .chip.on, .has-pill > .tab.on, .seg > button.on { color: var(--text) !important; font-weight: 600; }
-.nav > .slide-pill { background: var(--raised); }
+/* Sidebar: the selected icon's square stays put (it fades in), and only a thin
+   accent bar slides along the left edge to it. */
+.nav > .slide-pill {
+  background: var(--accent); width: 3px !important; height: 20px !important; border-radius: 2px !important;
+  margin: 11px 0 0 -7px;
+  transition: transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s;
+}
+.nav.has-pill > .nav-item { transition: background-color 0.14s ease-out, color 0.14s ease-out; }
+.nav.has-pill > .nav-item.on { background: var(--raised) !important; }
+/* The bar already marks the selected icon; keyboard focus still rings the others. */
+.nav-item.on:focus-visible { outline: none; }
 /* Options keep their colours; only the moving background is shared. */
 .chips > .chip, .fgroup > .chip, .row > .chip { transition: color 0.2s, border-color 0.2s; }
 
