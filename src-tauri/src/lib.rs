@@ -892,7 +892,8 @@ async fn rescue_clip(app: AppHandle, path: String) -> Result<String, String> {
 /// Try to recover a damaged clip at full length into "<name> (repaired)"; the original stays.
 #[tauri::command]
 async fn repair_clip(app: AppHandle, path: String) -> Result<String, String> {
-    let out = blocking(move || health::repair(&path)).await?;
+    let report = progress_to(&app, &path, duration_of(&path));
+    let out = blocking(move || ffmpeg::with_progress(report, || health::repair(&path))).await?;
     let _ = app.emit("clips-changed", ());
     Ok(out)
 }
@@ -902,10 +903,11 @@ async fn repair_clip(app: AppHandle, path: String) -> Result<String, String> {
 async fn heal_clip(app: AppHandle, path: String) -> Result<String, String> {
     let cache = data_file(&app, "health.json")?;
     let app2 = app.clone();
+    let report = progress_to(&app, &path, duration_of(&path));
     let out = blocking(move || {
         let h = health::results(&cache, std::slice::from_ref(&path)).remove(&path).ok_or("Check the clip first.")?;
         let best = h.best.ok_or("There's no undamaged part long enough to keep.")?;
-        let healed = health::heal(&path, best)?;
+        let healed = ffmpeg::with_progress(report, || health::heal(&path, best))?;
         nas::edited(&settings_of(&app2), std::path::Path::new(&path), std::path::Path::new(&healed));
         // The healed file gets checked again in the background like any new clip.
         health::forget(&cache, &path);
@@ -956,7 +958,20 @@ async fn preview_audio(app: AppHandle, path: String) -> Result<PreviewAudio, Str
 #[tauri::command]
 async fn remux_mp4(app: AppHandle, path: String) -> Result<String, String> {
     let keep = settings_of(&app).keep_original_after_remux;
-    blocking(move || library::remux_mp4(&path, keep)).await
+    let report = progress_to(&app, &path, duration_of(&path));
+    blocking(move || ffmpeg::with_progress(report, || library::remux_mp4(&path, keep))).await
+}
+
+/// Report an ffmpeg job's progress on `path` to the page, as "edit-progress"
+/// { path, pct } (Studio, Cleanup and the repair review show it). `total`: seconds of output.
+fn progress_to(app: &AppHandle, path: &str, total: Option<f64>) -> impl Fn(f64) + 'static {
+    let (a, which, total) = (app.clone(), path.to_string(), total.filter(|t| *t > 0.0));
+    move |secs| {
+        if let Some(t) = total {
+            let pct = (secs / t * 100.0).clamp(0.0, 99.0).round() as u32;
+            let _ = a.emit("edit-progress", serde_json::json!({ "path": which, "pct": pct }));
+        }
+    }
 }
 
 /// Run an edit; if `replace`, swap the checked result in for the original.
@@ -978,20 +993,8 @@ async fn edit(
     // Edits keep the clip's date: a trim stays where the clip was, not under today.
     let dates = library::dates_of(std::path::Path::new(&original));
     // Progress for Studio: seconds written so far, out of the edit's length.
-    let total = expected_secs.or_else(|| duration_of(&path)).filter(|t| *t > 0.0);
-    let (a, which) = (app.clone(), original.clone());
-    let out = blocking(move || {
-        ffmpeg::with_progress(
-            move |secs| {
-                if let Some(t) = total {
-                    let pct = (secs / t * 100.0).clamp(0.0, 99.0).round() as u32;
-                    let _ = a.emit("edit-progress", serde_json::json!({ "path": which, "pct": pct }));
-                }
-            },
-            || f(&path),
-        )
-    })
-    .await?;
+    let report = progress_to(&app, &original, expected_secs.or_else(|| duration_of(&path)));
+    let out = blocking(move || ffmpeg::with_progress(report, || f(&path))).await?;
     if !replace {
         if let Some(d) = dates {
             library::set_dates(std::path::Path::new(&out), d);
@@ -1235,11 +1238,14 @@ async fn game_suggestions(app: AppHandle) -> Result<Vec<game_detect::Suggestion>
 async fn apply_game_sort(app: AppHandle, picks: Vec<(String, String)>) -> Result<consolidate::Outcome, String> {
     let s = settings_of(&app);
     let dir = moves_dir(&app)?;
+    let a = app.clone();
     let out = blocking(move || {
         let plan = game_detect::plan(std::path::Path::new(&s.clips_dir), &picks);
         let _ = std::fs::create_dir_all(&dir);
         let log = dir.join(format!("{}-Sorted_by_game.jsonl", chrono::Local::now().format("%Y%m%d-%H%M%S")));
-        Ok(consolidate::run(&plan, &log, |_, _| {}))
+        Ok(consolidate::run(&plan, &log, |done, total| {
+            let _ = a.emit("move-progress", (done, total));
+        }))
     })
     .await?;
     let _ = app.emit("clips-changed", ());
@@ -1284,7 +1290,14 @@ async fn find_duplicates(app: AppHandle) -> Result<Vec<DupeSet>, String> {
             .filter(|c| c.location != "nas" && !c.path.starts_with(r"\\") && !health::on_network(&c.path))
             .map(|c| (c.path, c.size))
             .collect();
-        let copies = duplicates::find(&list);
+        // Progress for Cleanup: files checked so far (the slow part is reading them).
+        let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        let copies = duplicates::find_with(&list, &mut |done, total| {
+            if done == total || last.elapsed() >= std::time::Duration::from_millis(150) {
+                last = std::time::Instant::now();
+                let _ = app.emit("dupes-progress", (done, total));
+            }
+        });
         // A remux copies the streams untouched: nearly the same size (only the container
         // differs), length, picture and tracks. A re-encode of the same recording (an
         // export at a third of the size, say) isn't one: removing its original would lose quality.

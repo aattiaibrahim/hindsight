@@ -1335,3 +1335,7 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
 .job-progress { display: flex; flex-direction: column; gap: 6px; font-variant-numeric: tabular-nums; }
 .job-bar { display: block; height: 4px; border-radius: 2px; background: var(--raised); overflow: hidden; }
 .job-bar > span { display: block; height: 100%; background: var(--accent); transition: width 0.25s; }
+/* Before the first report: a short stripe sliding across, so it's clearly working. */
+.job-bar.unknown > span { width: 30%; animation: job-slide 1.1s ease-in-out infinite; }
+@keyframes job-slide { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+:root[data-motion="reduce"] .job-bar.unknown > span { animation: none; width: 100%; opacity: 0.4; }

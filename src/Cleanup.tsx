@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, ClipFile, errText, fmtSize, Settings, DupeSet } from "./api";
 import { ConfirmDialog } from "./ConfirmUpdate";
 import { useThumb } from "./hooks";
+import { ProgressBar, useCountProgress, useEditProgress } from "./Progress";
 
 const LIMIT = 40;
 
@@ -30,6 +31,8 @@ function Row({
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const nasOnly = clip.location === "nas";
+  // Shrinking re-encodes the whole clip: show how far it's got.
+  const pct = useEditProgress(clip.path, !!busy && busy.startsWith("Shrinking"));
   const run = (label: string, f: () => Promise<unknown>) => async () => {
     setBusy(label);
     setErr(null);
@@ -54,7 +57,12 @@ function Row({
           {nasOnly && " · only on the NAS"}
           {clip.onNas && " · also on the NAS"}
         </div>
-        {(busy || err) && <small className={err ? "err-text" : "muted"}>{err ?? busy}</small>}
+        {(busy || err) && (
+          <small className={err ? "err-text" : "muted"}>
+            {err ?? (busy?.startsWith("Shrinking") ? `Shrinking… ${pct ?? 0}%` : busy)}
+          </small>
+        )}
+        {busy?.startsWith("Shrinking") && !err && <ProgressBar pct={pct} />}
       </div>
       <div className="clean-size">{fmtSize(clip.size)}</div>
       <div className="row" style={{ flexWrap: "nowrap" }}>
@@ -92,7 +100,7 @@ function Row({
           onCancel={() => setAsk(null)}
           onConfirm={() => {
             setAsk(null);
-            run("Shrinking… this can take a minute", onShrink)();
+            run("Shrinking", onShrink)();
           }}
         >
           <ul className="modal-list wrap">
@@ -141,18 +149,28 @@ function bestCopy(set: ClipFile[], kind: DupeSet["kind"] = "copy") {
 const extOf = (p: string) => (p.split(".").pop() ?? "").toUpperCase();
 
 /** The same clip saved more than once: pick the copy to keep, the rest go to the Recycle Bin. */
-function Duplicates({ clips, onDelete, onChanged }: { clips: ClipFile[]; onDelete: (paths: string[]) => Promise<boolean>; onChanged: () => void }) {
+function Duplicates({ clips, onDelete, onChanged, run = 0 }: { clips: ClipFile[]; onDelete: (paths: string[]) => Promise<boolean>; onChanged: () => void; run?: number }) {
   const [sets, setSets] = useState<DupeSet[] | null>(null);
+  const progress = useCountProgress("dupes-progress", sets === null);
   const [keep, setKeep] = useState<Record<number, string>>({});
   const byPath = useMemo(() => new Map(clips.map((c) => [c.path, c])), [clips]);
   useEffect(() => {
     let alive = true;
+    setSets(null);
     api.findDuplicates().then((s) => alive && setSets(s)).catch(() => alive && setSets([]));
     return () => {
       alive = false;
     };
-  }, [clips]);
-  if (!sets) return <p className="muted">Looking for duplicates…</p>;
+  }, [clips, run]);
+  if (!sets) {
+    const pct = progress && progress[1] > 0 ? Math.round((progress[0] / progress[1]) * 100) : null;
+    return (
+      <div className="job-progress muted">
+        {progress && progress[1] > 0 ? `Looking for duplicates… ${progress[0]} of ${progress[1]} clips checked (${pct}%)` : "Looking for duplicates…"}
+        <ProgressBar pct={pct} />
+      </div>
+    );
+  }
   const found = sets
     .map((s) => ({ kind: s.kind, clips: s.paths.map((p) => byPath.get(p)).filter((c): c is ClipFile => !!c) }))
     .filter((s) => s.clips.length > 1);
@@ -254,12 +272,21 @@ export function Cleanup({
   );
   const shown = biggest.reduce((n, c) => n + c.size, 0);
   const here = all.filter((c) => c.location !== "nas").reduce((n, c) => n + c.size, 0);
+  // "Run cleanup check" also looks for duplicates again.
+  const [checkRun, setCheckRun] = useState(0);
 
   return (
     <div className="page cleanup-page">
       <div className="toolbar">
         <h1 style={{ flex: 1 }}>Cleanup</h1>
-        <button className="btn primary" onClick={() => update({ cleanupKept: {} })} title="List every clip again, including the ones you kept">
+        <button
+          className="btn primary"
+          onClick={() => {
+            update({ cleanupKept: {} });
+            setCheckRun((n) => n + 1);
+          }}
+          title="List every clip again, including the ones you kept, and look for duplicates again"
+        >
           Run cleanup check
         </button>
       </div>
@@ -274,7 +301,7 @@ export function Cleanup({
         cleanup check. Nothing is deleted if it couldn't really go to the Recycle Bin.
         {keptCount > 0 && ` ${keptCount} kept since the last check.`}
       </p>
-      <Duplicates clips={all} onDelete={onDelete} onChanged={onChanged} />
+      <Duplicates clips={all} onDelete={onDelete} onChanged={onChanged} run={checkRun} />
       {biggest.length > 0 && <h2 style={{ marginBottom: 0 }}>Biggest clips</h2>}
       <div className="clean-list">
         {biggest.map((c) => (

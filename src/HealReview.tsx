@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, ClipFile, errText, fmtTime, Health, mediaSrc } from "./api";
 import { useThumb } from "./hooks";
+import { ProgressBar, useEditProgress } from "./Progress";
 import { Icon } from "./icons";
 
 const t = (s: number) => fmtTime(s).replace(/\.\d+$/, "");
@@ -59,6 +60,9 @@ export function HealReview({
   const [seen, setSeen] = useState<Set<string>>(new Set());
   const n = list.length;
   const clip = list[Math.min(i, n - 1)];
+  // Repairing and healing re-encode the clip: show how far they've got.
+  const repairPct = useEditProgress(clip?.path, repairing);
+  const healPct = useEditProgress(clip?.path, busy);
   const h = clip ? health[clip.path] : undefined;
   const go = useCallback(
     (d: number) => {
@@ -161,6 +165,7 @@ export function HealReview({
             smoothed over rather than perfect. Compare it in the library, then keep whichever you like. The original is untouched.
           </small>
         )}
+        {(repairing || busy) && <ProgressBar pct={repairing ? repairPct : healPct} />}
         <div className="row" style={{ justifyContent: "flex-end" }}>
           <span className="muted" style={{ fontSize: 12, marginRight: "auto" }}>
             {seen.has(clip.path) || done
@@ -190,10 +195,10 @@ export function HealReview({
               }
             }}
           >
-            {repairing ? "Repairing…" : repaired[clip.path] ? "Repaired copy saved" : "Try repair (keep it all)"}
+            {repairing ? `Repairing… ${repairPct ?? 0}%` : repaired[clip.path] ? "Repaired copy saved" : "Try repair (keep it all)"}
           </button>
           <button className="btn primary" disabled={busy || done || remote || !h.best || !seen.has(clip.path)} onClick={heal}>
-            {busy ? "Healing…" : "Heal this clip"}
+            {busy ? `Healing… ${healPct ?? 0}%` : "Heal this clip"}
           </button>
         </div>
       </div>

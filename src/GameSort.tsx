@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { api, ClipFile, DetectStatus, errText, GameSuggestion } from "./api";
 import { GameIcon } from "./GameIcon";
 import { useThumb } from "./hooks";
+import { ProgressBar, useCountProgress } from "./Progress";
 
 /** Suggestions for unsorted clips, kept fresh as the background job looks at more. */
 export function useGameSuggestions(on: boolean) {
@@ -87,6 +88,7 @@ export function GameSortDialog({
   const [err, setErr] = useState<string | null>(null);
   const known = [...new Set(clips.map((c) => c.folder).filter((f) => !["Desktop", "OBS", "Other", "Imports", "Imported"].includes(f)))].sort();
   const chosen = list.filter((s) => !off.has(s.path));
+  const moved = useCountProgress("move-progress", busy);
   const move = async () => {
     setBusy(true);
     setErr(null);
@@ -129,12 +131,13 @@ export function GameSortDialog({
           ))}
         </div>
         {err && <small className="err-text">{err}</small>}
+        {busy && <ProgressBar pct={moved && moved[1] ? Math.round((moved[0] / moved[1]) * 100) : null} />}
         <div className="row" style={{ justifyContent: "flex-end" }}>
           <button className="btn" disabled={busy} onClick={onClose}>
             Later
           </button>
           <button className="btn primary" disabled={busy || chosen.length === 0} onClick={move}>
-            {busy ? "Moving…" : `Move ${chosen.length} clip${chosen.length === 1 ? "" : "s"}`}
+            {busy ? (moved ? `Moving ${moved[0]} of ${moved[1]}…` : "Moving…") : `Move ${chosen.length} clip${chosen.length === 1 ? "" : "s"}`}
           </button>
         </div>
       </div>

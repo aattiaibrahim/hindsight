@@ -70,12 +70,21 @@ fn fingerprint(path: &str, size: u64) -> Option<[u8; 32]> {
 /// (path, size). Network paths are compared too, but read only when another
 /// clip has their exact size.
 pub fn find(clips: &[(String, u64)]) -> Vec<Vec<String>> {
+    find_with(clips, &mut |_, _| {})
+}
+
+/// `find`, telling `progress` (files checked, files to check) as it goes.
+pub fn find_with(clips: &[(String, u64)], progress: &mut dyn FnMut(usize, usize)) -> Vec<Vec<String>> {
     let mut by_size: HashMap<u64, Vec<&str>> = HashMap::new();
     for (p, s) in clips {
         if *s > 0 {
             by_size.entry(*s).or_default().push(p);
         }
     }
+    // Only files that share their size with another are read at all.
+    let total: usize = by_size.values().filter(|v| v.len() > 1).map(|v| v.len()).sum();
+    let mut done = 0;
+    progress(0, total);
     let mut out = Vec::new();
     for (size, paths) in by_size {
         if paths.len() < 2 {
@@ -86,6 +95,8 @@ pub fn find(clips: &[(String, u64)]) -> Vec<Vec<String>> {
             if let Some(fp) = remembered(p, size, false, || fingerprint(p, size)) {
                 by_print.entry(fp).or_default().push(p.to_string());
             }
+            done += 1;
+            progress(done, total);
         }
         // Same edges: confirm by reading them whole.
         for candidates in by_print.into_values().filter(|v| v.len() > 1) {
