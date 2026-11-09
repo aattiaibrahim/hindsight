@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { useState } from "react";
 import { api, ClipFile, errText, fmtDuration, Settings } from "./api";
 import { audioLine, folderLine, RecordButton, statusLine } from "./BufferCard";
@@ -99,7 +100,7 @@ export function Flyout() {
         <div className="label">Capturing</div>
         <label className="fly-row">
           <span className="muted">Monitor</span>
-          <select
+          <Select
             className="select"
             value={settings?.monitorMode ?? "primary"}
             onChange={(e) => update({ monitorMode: e.target.value as Settings["monitorMode"] })}
@@ -107,7 +108,7 @@ export function Flyout() {
             <option value="primary">Follow primary (Win+P safe)</option>
             <option value="cursor">Follow cursor</option>
             <option value="fixed">One fixed monitor</option>
-          </select>
+          </Select>
         </label>
       </div>
 

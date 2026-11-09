@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -1140,14 +1141,14 @@ export function Studio({
               >
                 Audio only (MP3)
               </button>
-              <select className="select" aria-label="Which audio" value={audioOnly} onChange={(e) => setAudioOnly(e.target.value)}>
+              <Select className="select" aria-label="Which audio" value={audioOnly} onChange={(e) => setAudioOnly(e.target.value)}>
                 <option value="all">All tracks</option>
                 {trackTitles.map((t, k) => (
                   <option key={k} value={String(k)}>
                     {t.replace(/ audio$/i, "")}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
             <div className="row">
               <button
@@ -1158,7 +1159,7 @@ export function Studio({
               >
                 Compress to
               </button>
-              <select
+              <Select
                 className="select"
                 aria-label="Target size"
                 value={targetMb}
@@ -1168,7 +1169,7 @@ export function Studio({
                 <option value={25}>25 MB</option>
                 <option value={50}>50 MB</option>
                 <option value={100}>100 MB</option>
-              </select>
+              </Select>
             </div>
             <button className="btn block" onClick={() => api.reveal(path)}>
               Show in Explorer

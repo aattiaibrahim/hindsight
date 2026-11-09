@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -547,15 +548,15 @@ function Editor({
           )}
           <div className="label">Export</div>
           <div className="row">
-            <select className="select" value={height} onChange={(e) => setHeight(Number(e.target.value))} aria-label="Size">
+            <Select className="select" value={height} onChange={(e) => setHeight(Number(e.target.value))} aria-label="Size">
               <option value={720}>720p</option>
               <option value={1080}>1080p</option>
               <option value={1440}>1440p</option>
-            </select>
-            <select className="select" value={fps} onChange={(e) => setFps(Number(e.target.value))} aria-label="Frame rate">
+            </Select>
+            <Select className="select" value={fps} onChange={(e) => setFps(Number(e.target.value))} aria-label="Frame rate">
               <option value={30}>30 fps</option>
               <option value={60}>60 fps</option>
-            </select>
+            </Select>
           </div>
         </div>
       </div>

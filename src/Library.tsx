@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { open } from "@tauri-apps/plugin-dialog";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ClipFile, codecLabel, errText, fmtDuration, fmtSize, Health, Probe, Upload, UploadProgress, VIDEO_EXTENSIONS, want } from "./api";
@@ -891,11 +892,11 @@ clips === null ? null : clips.length === 0 && trimMode ? (
         <button className={`btn ${showFilters ? "on" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}>
           Filters{activeFilters > 0 && <span className="count">{activeFilters}</span>}
         </button>
-        <select className="select" value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label="Sort">
+        <Select className="select" value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label="Sort">
           <option value="new">Newest first</option>
           <option value="old">Oldest first</option>
           <option value="big">Biggest first</option>
-        </select>
+        </Select>
         {mode === "clips" && (
           <button className="btn" onClick={openAny}>
             Open any video…

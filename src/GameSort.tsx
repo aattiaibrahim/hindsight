@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
@@ -54,13 +55,13 @@ function Row({ s, on, game, games, onToggle, onGame }: { s: GameSuggestion; on: 
       </span>
       <span className="sort-game">
         <GameIcon name={game} size={18} />
-        <select className="select" value={game} onChange={(e) => onGame(e.target.value)} aria-label="Game">
+        <Select className="select" value={game} onChange={(e) => onGame(e.target.value)} aria-label="Game">
           {games.map((g) => (
             <option key={g} value={g}>
               {g}
             </option>
           ))}
-        </select>
+        </Select>
       </span>
     </label>
   );

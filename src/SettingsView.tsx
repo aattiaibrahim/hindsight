@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { open } from "@tauri-apps/plugin-dialog";
 import { RecordingArea } from "./RecordingArea";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -360,7 +361,7 @@ export function SettingsView({
                 <small className="err-text">Your GPU can't record {s.encoder.toUpperCase()}, so it records {enc.auto.toUpperCase()} instead.</small>
               )}
             </span>
-            <select className="select" value={s.encoder} onChange={(e) => set({ encoder: e.target.value as Settings["encoder"] })}>
+            <Select className="select" value={s.encoder} onChange={(e) => set({ encoder: e.target.value as Settings["encoder"] })}>
               <option value="auto">Auto{enc ? ` (${({ av1: "AV1", hevc: "HEVC", h264: "H.264" } as const)[enc.auto]})` : ""}</option>
               {(
                 [
@@ -377,14 +378,14 @@ export function SettingsView({
                   </option>
                 );
               })}
-            </select>
+            </Select>
           </label>
           <label className="setting">
             <span>
               Clip resolution
               <small>{resolutionHint}</small>
             </span>
-            <select className="select" value={s.outputHeight} onChange={(e) => set({ outputHeight: Number(e.target.value) })}>
+            <Select className="select" value={s.outputHeight} onChange={(e) => set({ outputHeight: Number(e.target.value) })}>
               <option value={0}>Same as screen{screenH ? ` (${screenH}p)` : ""}</option>
               {[2160, 1440, 1080, 720].map((h) => (
                 <option key={h} value={h}>
@@ -392,7 +393,7 @@ export function SettingsView({
                   {screenH && h > screenH ? " · upscaled" : ""}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <div className="setting">
             <span>
@@ -422,13 +423,13 @@ export function SettingsView({
           </label>
           <label className="setting">
             <span>Frame rate</span>
-            <select className="select" value={s.fps} onChange={(e) => set({ fps: Number(e.target.value) })}>
+            <Select className="select" value={s.fps} onChange={(e) => set({ fps: Number(e.target.value) })}>
               {[30, 60, 120, 144].map((f) => (
                 <option key={f} value={f}>
                   {f} fps
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="setting">
             <span>
@@ -478,13 +479,13 @@ export function SettingsView({
               Replay length
               <small>How far back a saved clip reaches</small>
             </span>
-            <select className="select" value={s.bufferSeconds} onChange={(e) => set({ bufferSeconds: Number(e.target.value) })}>
+            <Select className="select" value={s.bufferSeconds} onChange={(e) => set({ bufferSeconds: Number(e.target.value) })}>
               {[15, 30, 60, 120, 180, 300, 600, 1200].map((v) => (
                 <option key={v} value={v}>
                   {v < 60 ? `${v} seconds` : `${v / 60} min`}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
         </section>
 
@@ -550,14 +551,14 @@ export function SettingsView({
             <>
               <label className="setting">
                 <span>Mic device</span>
-                <select className="select" value={s.micDevice} onChange={(e) => set({ micDevice: e.target.value })}>
+                <Select className="select" value={s.micDevice} onChange={(e) => set({ micDevice: e.target.value })}>
                   <option value="">Windows default</option>
                   {mics.map((m) => (
                     <option key={m} value={m}>
                       {m}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label className="setting">
                 <span>
@@ -612,21 +613,21 @@ export function SettingsView({
                   : "Older FFmpeg-based capture. Use only if Native gives you trouble."}
               </small>
             </span>
-            <select
+            <Select
               className="select"
               value={s.captureEngine}
               onChange={(e) => set({ captureEngine: e.target.value as Settings["captureEngine"] })}
             >
               <option value="native">Native (recommended)</option>
               <option value="ffmpeg">Compatibility</option>
-            </select>
+            </Select>
           </label>
           <label className="setting">
             <span>
               Which monitor
               <small>{MONITOR_MODE_HINT[s.monitorMode]}</small>
             </span>
-            <select
+            <Select
               className="select"
               value={s.monitorMode}
               onChange={(e) => set({ monitorMode: e.target.value as Settings["monitorMode"] })}
@@ -634,12 +635,12 @@ export function SettingsView({
               <option value="primary">Follow main display (Win+P safe)</option>
               <option value="cursor">Follow my cursor</option>
               <option value="fixed">Always one monitor</option>
-            </select>
+            </Select>
           </label>
           {s.monitorMode === "fixed" && (
             <label className="setting">
               <span>Monitor</span>
-              <select className="select" value={s.fixedMonitor} onChange={(e) => set({ fixedMonitor: e.target.value })}>
+              <Select className="select" value={s.fixedMonitor} onChange={(e) => set({ fixedMonitor: e.target.value })}>
                 <option value="">Choose…</option>
                 {monitors.map((m) => (
                   <option key={m.name} value={m.name}>
@@ -647,7 +648,7 @@ export function SettingsView({
                     {m.primary ? " (primary)" : ""}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
           )}
           <div className="setting stacked">

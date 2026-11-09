@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useState } from "react";
@@ -113,13 +114,13 @@ export function ShareConfirm({
     >
       <label className="setting" style={{ borderTop: 0, minHeight: 0 }}>
         <span>Upload to</span>
-        <select className="select" value={host} onChange={(e) => setHost(e.target.value as UploadHost)}>
+        <Select className="select" value={host} onChange={(e) => setHost(e.target.value as UploadHost)}>
           {UPLOAD_HOSTS.map((h) => (
             <option key={h.id} value={h.id}>
               {h.label}
             </option>
           ))}
-        </select>
+        </Select>
       </label>
       <ul className="modal-list wrap">
         <li>{UPLOAD_HOSTS.find((h) => h.id === host)?.hint}</li>
@@ -177,13 +178,13 @@ export function SharePanel({
   return (
     <div className="share-box">
       <div className="row" style={{ gap: 8, flexWrap: "nowrap" }}>
-        <select className="select" value={host} onChange={(e) => setHost(e.target.value as UploadHost)} aria-label="Upload to" disabled={!!busy}>
+        <Select className="select" value={host} onChange={(e) => setHost(e.target.value as UploadHost)} aria-label="Upload to" disabled={!!busy}>
           {UPLOAD_HOSTS.map((h) => (
             <option key={h.id} value={h.id}>
               {h.label}
             </option>
           ))}
-        </select>
+        </Select>
         <button className="btn primary" style={{ flex: 1, minWidth: 0 }} disabled={!!busy} onClick={() => onShare({ path, host })}>
           {busy ? progressText(progress!) : "Upload & copy link"}
         </button>
@@ -285,23 +286,23 @@ export function SharingSettings({
           Upload to
           <small>{host?.hint}</small>
         </span>
-        <select className="select" value={s.uploadHost} onChange={(e) => set({ uploadHost: e.target.value as UploadHost })}>
+        <Select className="select" value={s.uploadHost} onChange={(e) => set({ uploadHost: e.target.value as UploadHost })}>
           {UPLOAD_HOSTS.map((h) => (
             <option key={h.id} value={h.id}>
               {h.label}
             </option>
           ))}
-        </select>
+        </Select>
       </label>
       {s.uploadHost === "litterbox" && (
         <label className="setting sub">
           <span>Keep clips on Litterbox for</span>
-          <select className="select" value={s.litterboxTime} onChange={(e) => set({ litterboxTime: e.target.value as Settings["litterboxTime"] })}>
+          <Select className="select" value={s.litterboxTime} onChange={(e) => set({ litterboxTime: e.target.value as Settings["litterboxTime"] })}>
             <option value="1h">1 hour</option>
             <option value="12h">12 hours</option>
             <option value="24h">1 day</option>
             <option value="72h">3 days</option>
-          </select>
+          </Select>
         </label>
       )}
       <label className="setting">

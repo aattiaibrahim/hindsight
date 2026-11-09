@@ -1,3 +1,4 @@
+import { Select } from "./Select";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useState } from "react";
@@ -194,22 +195,22 @@ export function Performance() {
               Rounds
               <small>How many times each recorder is measured. 3 or more gives a confidence range worth trusting.</small>
             </span>
-            <select className="select" value={rounds} onChange={(e) => setRounds(Number(e.target.value))}>
+            <Select className="select" value={rounds} onChange={(e) => setRounds(Number(e.target.value))}>
               <option value={2}>2</option>
               <option value={3}>3</option>
               <option value={5}>5</option>
-            </select>
+            </Select>
           </label>
           <label className="setting">
             <span>
               Length of each run
               <small>The whole test takes about {minutes} min</small>
             </span>
-            <select className="select" value={seconds} onChange={(e) => setSeconds(Number(e.target.value))}>
+            <Select className="select" value={seconds} onChange={(e) => setSeconds(Number(e.target.value))}>
               <option value={15}>15 seconds</option>
               <option value={20}>20 seconds</option>
               <option value={30}>30 seconds</option>
-            </select>
+            </Select>
           </label>
           <h2 style={{ marginTop: 16 }}>How to run it</h2>
           <ol className="muted bench-tips">
