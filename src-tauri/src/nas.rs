@@ -1009,7 +1009,15 @@ pub fn start(app: AppHandle) {
             // Only sync into the folder that was checked and confirmed: if the path
             // now leads somewhere else (a remapped drive, a different share), stop.
             let nas_root = PathBuf::from(&s.nas_dir);
-            if nas_root.is_dir() {
+            // Say so the moment the NAS answers (or doesn't), not when the pass ends:
+            // a pass can take a long time, and one failed check (the network not up
+            // yet right after a restart) used to show "Can't reach" all through it.
+            let here = nas_root.is_dir();
+            publish(&app, |st| {
+                st.enabled = true;
+                st.reachable = here;
+            });
+            if here {
                 match read_marker(&nas_root) {
                     Some(id) if id == s.nas_library_id => {}
                     found if s.nas_library_id.is_empty() => {
@@ -1102,6 +1110,7 @@ pub fn start(app: AppHandle) {
                 let rate = if secs > 2.0 { step.done_bytes as f64 / secs } else { 0.0 };
                 let left = step.total_bytes.saturating_sub(step.done_bytes);
                 publish(&a, |st| {
+                    st.reachable = true; // it's working with the NAS right now
                     st.copying = file;
                     st.checking = step.checking;
                     st.freeing = step.freeing;
