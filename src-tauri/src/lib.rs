@@ -970,7 +970,7 @@ async fn edit(
     let original = path.clone();
     // A network folder has no Recycle Bin. A clip in your NAS folder is replaced by
     // setting the original aside there (kept 30 days); other network folders can't be.
-    let nas_dir = settings_of(&app).nas_dir;
+    let (nas_dir, nas_server) = { let s = settings_of(&app); (s.nas_dir, s.nas_server) };
     let on_nas = nas::rel_on_nas(&nas_dir, &path).is_some();
     if replace && health::on_network(&path) && !on_nas {
         return Err("This clip is on a network folder, which has no Recycle Bin, so it can't be replaced. Turn off \"Replace the original\" to save your edit as a new file.".into());
@@ -1001,7 +1001,7 @@ async fn edit(
     }
     let o = original.clone();
     let final_path = if on_nas {
-        blocking(move || nas::replace_on_nas(&nas_dir, &o, &out, expected_secs)).await?
+        blocking(move || nas::replace_on_nas(&nas_dir, &nas_server, &o, &out, expected_secs)).await?
     } else {
         blocking(move || library::replace_original(&o, &out, expected_secs)).await?
     };
@@ -1383,7 +1383,7 @@ async fn delete_clips(app: AppHandle, paths: Vec<String>) -> Result<library::Del
         let mut extra_failed = Vec::new();
         for p in &res.deleted {
             if let Some(rel) = library::rel_in(&clips_dir, p)
-                && let Err(e) = nas::delete_on_nas(&s.nas_dir, &rel)
+                && let Err(e) = nas::delete_on_nas(&s.nas_dir, &s.nas_server, &rel)
             {
                 extra_failed.push((p.clone(), format!("Deleted from this PC, but {e}")));
             }
@@ -1391,7 +1391,7 @@ async fn delete_clips(app: AppHandle, paths: Vec<String>) -> Result<library::Del
         res.failed.extend(extra_failed);
         for p in on_nas {
             let rel = nas::rel_on_nas(&s.nas_dir, &p).unwrap_or_default();
-            match nas::delete_on_nas(&s.nas_dir, &rel) {
+            match nas::delete_on_nas(&s.nas_dir, &s.nas_server, &rel) {
                 Ok(_) => res.deleted.push(p),
                 Err(e) => res.failed.push((p, e)),
             }
@@ -1413,11 +1413,11 @@ async fn restore_clips(app: AppHandle, paths: Vec<String>) -> Result<usize, Stri
         let clips_dir = PathBuf::from(&s.clips_dir);
         for p in &here {
             if let Some(rel) = library::rel_in(&clips_dir, p) {
-                let _ = nas::undelete_on_nas(&s.nas_dir, &rel);
+                let _ = nas::undelete_on_nas(&s.nas_dir, &s.nas_server, &rel);
             }
         }
         for p in &on_nas {
-            if nas::undelete_on_nas(&s.nas_dir, &nas::rel_on_nas(&s.nas_dir, p).unwrap_or_default())? {
+            if nas::undelete_on_nas(&s.nas_dir, &s.nas_server, &nas::rel_on_nas(&s.nas_dir, p).unwrap_or_default())? {
                 n += 1;
             }
         }

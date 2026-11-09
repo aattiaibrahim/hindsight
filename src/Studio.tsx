@@ -641,7 +641,7 @@ export function Studio({
         setReload((k) => k + 1);
         setResult({
           text: inNas
-            ? "Replaced the original on the NAS with your edit (the old file is kept in the NAS's .hindsight-replaced folder for 30 days)."
+            ? "Replaced the original on the NAS with your edit (the old file is in the NAS app's Trash for 30 days)."
             : "Replaced the original with your edit (old file is in the Recycle Bin).",
         });
         return;
@@ -1202,7 +1202,7 @@ export function Studio({
             {noReplace
               ? "This clip is on a network folder, which has no Recycle Bin, so edits are always saved as new files next to it."
               : replace && inNas
-              ? "Trims, exports and compresses replace this clip on the NAS and keep its date. The old version is kept in the NAS's .hindsight-replaced folder for 30 days."
+              ? "Trims, exports and compresses replace this clip on the NAS and keep its date. The old version goes to the NAS app's Trash for 30 days."
               : replace
               ? "Trims, exports and compresses overwrite this file and keep its date. The old version goes to the Recycle Bin."
               : "The original is kept. Edits are saved as new files next to it."}

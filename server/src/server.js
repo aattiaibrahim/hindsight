@@ -3,6 +3,7 @@
 
 import { createReadStream } from "node:fs";
 import { tracksToMix } from "./tracks.js";
+import { makeClip } from "./library.js";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, statfs } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -155,6 +156,35 @@ export async function createServer({ library, media, cleanup = null, shares = nu
     if (cleanup && url.pathname === "/api/trash/empty" && post(req)) {
       try {
         return send(res, 200, { removed: await cleanup.purge(true) });
+      } catch (e) {
+        return fail(res, e);
+      }
+    }
+    // The desktop app deletes (or replaces) a NAS clip by its place in the clips
+    // folder, so it lands in this trash too; Undo there brings it back the same way.
+    if (cleanup && (url.pathname === "/api/trash/add" || url.pathname === "/api/trash/restore-rel") && post(req)) {
+      try {
+        const body = await jsonBody(req);
+        const rel = String(body.rel ?? "");
+        const segs = rel.split("/");
+        if (!rel || rel.includes("\\") || segs.some((p) => !p || p === "." || p === ".." || p.startsWith(".")) || path.isAbsolute(rel)) {
+          return send(res, 400, { error: "Not a clip in the clips folder." });
+        }
+        if (url.pathname === "/api/trash/restore-rel") {
+          const entry = cleanup.trash.filter((e) => e.rel === rel).sort((a, b) => b.trashedAt - a.trashedAt)[0];
+          if (!entry) return send(res, 200, { restored: false });
+          await cleanup.restore(entry.id);
+          await library.rescan();
+          return send(res, 200, { restored: true });
+        }
+        const file = path.join(library.root, ...segs);
+        const st = await stat(file).catch(() => null);
+        if (!st?.isFile()) return send(res, 200, { trashed: false });
+        const clip = library.clips.find((c) => c.rel === rel) ?? makeClip(rel, { size: st.size, mtime: st.mtime });
+        const why = String(body.why || "deleted").slice(0, 80);
+        const entry = await cleanup.toTrash(clip, why);
+        await library.rescan();
+        return send(res, 200, { trashed: true, entry });
       } catch (e) {
         return fail(res, e);
       }

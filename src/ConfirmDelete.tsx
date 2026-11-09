@@ -39,7 +39,7 @@ export function ConfirmDelete({
         <h2 id="del-title">{n === 1 ? "Delete this clip?" : `Delete ${n} clips?`}</h2>
         <p className="muted">
           {nas
-            ? `${n === 1 ? "It's" : "They're"} deleted from this PC and the NAS. Copies on this PC go to the Recycle Bin, and the NAS keeps its copies for 30 days in its hidden .hindsight-deleted folder, so you can still undo this.`
+            ? `${n === 1 ? "It's" : "They're"} deleted from this PC and the NAS. Copies on this PC go to the Recycle Bin, and the NAS copies go to the NAS app's Trash for 30 days, so you can still undo this.`
             : `${n === 1 ? "It goes" : "They go"} to the Recycle Bin, so you can still undo this.`}
         </p>
         <ul className="modal-list">

@@ -369,12 +369,45 @@ fn set_aside(nas: &Path, rel: &str) -> Result<(), String> {
 /// Bin), by day, so Undo can bring them back. Removed after 30 days, like replaced versions.
 const DELETED: &str = ".hindsight-deleted";
 
-/// Delete a clip's NAS copy: it moves to today's `.hindsight-deleted` folder.
-/// Ok(false) when there was no NAS copy.
-pub fn delete_on_nas(nas_dir: &str, rel: &str) -> Result<bool, String> {
+/// Ask the paired NAS app to do something with a clip (by its place in the clips
+/// folder). Err when it can't be reached or says no, so the caller can fall back.
+fn ask_app(server: &str, route: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
+    let server = server.trim().trim_end_matches('/');
+    if server.is_empty() {
+        return Err("not paired".into());
+    }
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let res = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?
+        .post(format!("{server}{route}"))
+        .json(&body)
+        .send()
+        .map_err(|e| e.to_string())?;
+    let ok = res.status().is_success();
+    let v: serde_json::Value = res.json().unwrap_or_default();
+    if ok { Ok(v) } else { Err(v["error"].as_str().unwrap_or("the NAS app said no").to_string()) }
+}
+
+/// "deleted on DESKTOP-1", as the NAS app's Trash shows it.
+fn on_this_pc(what: &str) -> String {
+    format!("{what} on {}", std::env::var("COMPUTERNAME").unwrap_or_else(|_| "a PC".into()))
+}
+
+/// Delete a clip's NAS copy. With the NAS app paired, it goes to the NAS app's
+/// Trash (kept there for its trash days, restorable there or with Undo here);
+/// otherwise to today's `.hindsight-deleted` folder. Ok(false) when there was no NAS copy.
+pub fn delete_on_nas(nas_dir: &str, server: &str, rel: &str) -> Result<bool, String> {
     let nas = Path::new(nas_dir);
     if nas_dir.is_empty() || !nas.join(rel.replace('/', "\\")).is_file() {
         return Ok(false);
+    }
+    if let Ok(v) = ask_app(server, "/api/trash/add", serde_json::json!({ "rel": rel, "why": on_this_pc("deleted") }))
+        && v["trashed"].as_bool() == Some(true)
+    {
+        forget(nas_dir, rel);
+        return Ok(true);
     }
     set_aside_in(nas, rel, DELETED).map_err(|e| e.replace("the old NAS version", "the NAS copy"))?;
     forget(nas_dir, rel);
@@ -383,11 +416,17 @@ pub fn delete_on_nas(nas_dir: &str, rel: &str) -> Result<bool, String> {
 
 /// Undo `delete_on_nas`: put the newest deleted copy of `rel` back, unless
 /// something already took its place. Ok(false) when there was nothing to bring back.
-pub fn undelete_on_nas(nas_dir: &str, rel: &str) -> Result<bool, String> {
+pub fn undelete_on_nas(nas_dir: &str, server: &str, rel: &str) -> Result<bool, String> {
     let nas = Path::new(nas_dir);
     let dest = nas.join(rel.replace('/', "\\"));
     if nas_dir.is_empty() || dest.exists() {
         return Ok(false);
+    }
+    if let Ok(v) = ask_app(server, "/api/trash/restore-rel", serde_json::json!({ "rel": rel }))
+        && v["restored"].as_bool() == Some(true)
+    {
+        wake();
+        return Ok(true);
     }
     let Ok(days) = fs::read_dir(nas.join(DELETED)) else { return Ok(false) };
     let mut days: Vec<PathBuf> = days.flatten().map(|d| d.path()).collect();
@@ -451,14 +490,19 @@ pub fn rel_on_nas(nas_dir: &str, path: &str) -> Option<String> {
 /// Replace a clip that lives on the NAS with its edit. There's no Recycle Bin on a
 /// network folder, so the original isn't deleted: it moves to
 /// `.hindsight-replaced/<today>/` (kept 30 days, like replaced versions from syncing).
-pub fn replace_on_nas(nas_dir: &str, original: &str, edited: &str, expected_secs: Option<f64>) -> Result<String, String> {
+pub fn replace_on_nas(nas_dir: &str, server: &str, original: &str, edited: &str, expected_secs: Option<f64>) -> Result<String, String> {
     let nas = Path::new(nas_dir);
     let rel = rel_on_nas(nas_dir, original).ok_or("This clip isn't in your NAS folder, so it can't be replaced safely.")?;
     let edited_p = Path::new(edited);
     crate::library::verify_output(edited_p, expected_secs)?;
     let orig = Path::new(original);
     let target = orig.with_extension(crate::library::ext_of(edited_p));
-    set_aside(nas, &rel).map_err(|e| format!("Saved the edit as a new file, but {e}"))?;
+    // The original goes to the NAS app's Trash when it's paired, else aside in .hindsight-replaced.
+    let in_app_trash = ask_app(server, "/api/trash/add", serde_json::json!({ "rel": rel, "why": on_this_pc("replaced by an edit") }))
+        .is_ok_and(|v| v["trashed"].as_bool() == Some(true));
+    if !in_app_trash {
+        set_aside(nas, &rel).map_err(|e| format!("Saved the edit as a new file, but {e}"))?;
+    }
     // An export can change the extension; a file already using that name is set aside too.
     if target != orig && target.exists()
         && let Some(r) = rel_on_nas(nas_dir, &target.to_string_lossy())
@@ -1266,6 +1310,25 @@ pub fn start(app: AppHandle) {
 mod tests {
     use super::*;
 
+
+    /// Against a running NAS app: REWIND_TEST_NAS_APP=http://127.0.0.1:8431 and
+    /// REWIND_TEST_NAS_DIR=its clips folder (a throwaway one).
+    #[test]
+    #[ignore]
+    fn live_app_trash() {
+        let app = std::env::var("REWIND_TEST_NAS_APP").unwrap();
+        let dir = std::env::var("REWIND_TEST_NAS_DIR").unwrap();
+        let rel = "VALORANT/VALORANT 2026-11-03 10-00-00 - PC1.mkv";
+        let file = Path::new(&dir).join("VALORANT").join("VALORANT 2026-11-03 10-00-00 - PC1.mkv");
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, b"clip").unwrap();
+        assert_eq!(delete_on_nas(&dir, &app, rel), Ok(true));
+        assert!(!file.exists());
+        assert!(Path::new(&dir).join(".hindsight-trash").join("trash.json").exists(), "went to the NAS app's trash");
+        assert!(!Path::new(&dir).join(DELETED).exists(), "not the fallback folder");
+        assert_eq!(undelete_on_nas(&dir, &app, rel), Ok(true));
+        assert!(file.exists());
+    }
     #[test]
     fn deleting_moves_the_nas_copy_aside_and_undo_brings_it_back() {
         let nas = std::env::temp_dir().join(format!("rewind-nas-delete-{}", std::process::id()));
@@ -1274,17 +1337,17 @@ mod tests {
         let clip = nas.join("VALORANT").join("a.mp4");
         fs::write(&clip, b"clip").unwrap();
         let dir = nas.to_string_lossy().into_owned();
-        assert_eq!(delete_on_nas(&dir, "VALORANT/a.mp4"), Ok(true));
+        assert_eq!(delete_on_nas(&dir, "", "VALORANT/a.mp4"), Ok(true));
         assert!(!clip.exists());
         let day = chrono::Local::now().format("%Y-%m-%d").to_string();
         assert_eq!(fs::read(nas.join(DELETED).join(&day).join("VALORANT").join("a.mp4")).unwrap(), b"clip");
         assert_eq!(rel_on_nas(&dir, &nas.join(DELETED).join(&day).join("VALORANT").join("a.mp4").to_string_lossy()), None);
-        assert_eq!(delete_on_nas(&dir, "VALORANT/a.mp4"), Ok(false), "nothing left to delete");
-        assert_eq!(undelete_on_nas(&dir, "VALORANT/a.mp4"), Ok(true));
+        assert_eq!(delete_on_nas(&dir, "", "VALORANT/a.mp4"), Ok(false), "nothing left to delete");
+        assert_eq!(undelete_on_nas(&dir, "", "VALORANT/a.mp4"), Ok(true));
         assert_eq!(fs::read(&clip).unwrap(), b"clip");
-        assert_eq!(undelete_on_nas(&dir, "VALORANT/a.mp4"), Ok(false), "already back");
+        assert_eq!(undelete_on_nas(&dir, "", "VALORANT/a.mp4"), Ok(false), "already back");
         // Deleted copies go after 30 days, like replaced versions.
-        delete_on_nas(&dir, "VALORANT/a.mp4").unwrap();
+        delete_on_nas(&dir, "", "VALORANT/a.mp4").unwrap();
         prune_replaced(&nas, chrono::Local::now().date_naive() + chrono::Duration::days(31));
         assert!(!nas.join(DELETED).join(&day).exists());
         let _ = fs::remove_dir_all(&nas);
@@ -1317,7 +1380,7 @@ mod tests {
         let old = fs::read(&orig).unwrap();
         let taken = crate::library::dates_of(&orig).unwrap();
         let nas_dir = nas.to_string_lossy().into_owned();
-        let out = replace_on_nas(&nas_dir, &orig.to_string_lossy(), &edit.to_string_lossy(), Some(2.0)).unwrap();
+        let out = replace_on_nas(&nas_dir, "", &orig.to_string_lossy(), &edit.to_string_lossy(), Some(2.0)).unwrap();
         crate::library::set_dates(Path::new(&out), taken);
         assert_eq!(Path::new(&out), orig);
         assert!(!edit.exists(), "the edit moved into the clip's place");
@@ -1329,7 +1392,7 @@ mod tests {
         let ms = |t: std::time::SystemTime| t.duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
         assert!((ms(now.0) - ms(taken.0)).abs() < 1000, "keeps the date it was taken");
         // A path outside the NAS folder is refused, not replaced.
-        assert!(replace_on_nas(&nas_dir, "C:\\elsewhere\\a.mp4", &edit.to_string_lossy(), None).is_err());
+        assert!(replace_on_nas(&nas_dir, "", "C:\\elsewhere\\a.mp4", &edit.to_string_lossy(), None).is_err());
         let _ = fs::remove_dir_all(&nas);
     }
 
