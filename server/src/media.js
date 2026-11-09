@@ -6,6 +6,10 @@ import { trackName, tracksToMix } from "./tracks.js";
 import { mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+/** Bumped when phone versions are made differently: a2 = a track that already mixes the others
+ *  (Medal's "All Audio") is left out, so the sound isn't doubled. Older ones are made again. */
+const WEB_VERSION = "a2";
+
 const FFMPEG = process.env.FFMPEG || "ffmpeg";
 const FFPROBE = process.env.FFPROBE || "ffprobe";
 const H264 = process.env.H264_ENCODER || "libx264";
@@ -73,9 +77,13 @@ export class Media {
   async init() {
     await mkdir(this.thumbDir, { recursive: true });
     await mkdir(this.webDir, { recursive: true });
-    // Leftovers from a run that stopped mid-transcode.
+    // Leftovers from a run that stopped mid-transcode, and phone versions made the
+    // old way (see WEB_VERSION), which are made again when next played.
     for (const dir of [this.thumbDir, this.webDir]) {
-      for (const f of await readdir(dir)) if (f.includes(".tmp")) await rm(path.join(dir, f), { force: true });
+      for (const f of await readdir(dir)) {
+        const old = dir === this.webDir && f.endsWith(".mp4") && !f.endsWith(`-${WEB_VERSION}.mp4`);
+        if (f.includes(".tmp") || old) await rm(path.join(dir, f), { force: true });
+      }
     }
     await this.loadMeta();
   }
@@ -222,7 +230,7 @@ export class Media {
   }
 
   webPath(clip) {
-    return path.join(this.webDir, `${this.key(clip)}.mp4`);
+    return path.join(this.webDir, `${this.key(clip)}-${WEB_VERSION}.mp4`);
   }
 
   /** State of the phone-friendly copy: none | queued | working | ready | failed. */

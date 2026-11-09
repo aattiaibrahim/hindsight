@@ -332,6 +332,19 @@ pub fn track_titles(path: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// `-metadata:s:a:N title=…` for each named track, for saves that keep every track
+/// in order. Medal names tracks with a tag ffmpeg doesn't write back, so without
+/// this a trimmed clip loses "All Audio" / "Game" / "Mic" (and its mix copy could
+/// no longer be told apart, doubling the sound in later exports).
+pub fn keep_track_names(path: &str) -> Vec<OsString> {
+    let mut out = Vec::new();
+    for (i, t) in track_titles(path).iter().enumerate().filter(|(_, t)| !t.is_empty()) {
+        out.push(format!("-metadata:s:a:{i}").into());
+        out.push(format!("title={t}").into());
+    }
+    out
+}
+
 /// Which track is a mix of the others, if exactly one is (and there are others).
 pub fn mix_copy(titles: &[String]) -> Option<usize> {
     if titles.len() < 2 {
@@ -506,6 +519,7 @@ fn audio_only(path: &str, out: &Path, audio: &AudioEdit) -> Result<String, Strin
         args.extend(ffmpeg::args(&["-map", &format!("[a{i}]"), &format!("-map_metadata:s:a:{i}"), &format!("0:s:a:{i}")]));
     }
     args.extend(ffmpeg::args(&["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"]));
+    args.extend(keep_track_names(path));
     if ext_of(out) == "mp4" {
         args.extend(ffmpeg::args(&["-movflags", "+faststart"]));
     }
@@ -520,6 +534,7 @@ pub fn remux_mp4(path: &str, keep_original: bool) -> Result<String, String> {
     let mut args = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-i"]);
     args.push(path.into());
     args.extend(ffmpeg::args(&["-map", "0", "-c", "copy", "-movflags", "+faststart"]));
+    args.extend(keep_track_names(path));
     args.push(out.clone().into());
     let result = finish(args, out)?;
     if !keep_original {
@@ -592,6 +607,7 @@ pub fn trim(path: &str, start: f64, end: f64, exact: bool, audio: &AudioEdit) ->
     } else {
         args.extend(ffmpeg::args(&["-c", "copy", "-avoid_negative_ts", "make_zero"]));
     }
+    args.extend(keep_track_names(path));
     if ext == "mp4" {
         args.extend(ffmpeg::args(&["-movflags", "+faststart"]));
     }
@@ -805,6 +821,9 @@ fn smart_trim(path: &str, start: f64, end: f64, out: &Path, audio: &AudioEdit) -
             a.extend(ffmpeg::args(&["-map", "1:a"]));
         }
         a.extend(ffmpeg::args(&["-c", "copy"]));
+        if ci.audio > 0 {
+            a.extend(keep_track_names(path));
+        }
         if ext_of(out) == "mp4" {
             a.extend(ffmpeg::args(&["-movflags", "+faststart"]));
         }
@@ -1120,6 +1139,7 @@ pub fn trim_cropped(path: &str, start: f64, end: f64, audio: &AudioEdit, crop: C
     args.extend(ffmpeg::args(&[
         "-c:v", nvenc_for(&p.codec), "-preset", "p5", "-cq", "20", "-b:v", "0", "-g", &gop, "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
     ]));
+    args.extend(keep_track_names(path));
     if ext == "mp4" {
         args.extend(ffmpeg::args(&["-movflags", "+faststart"]));
     }
@@ -1226,6 +1246,29 @@ fn compress_vf(path: &str, target_mb: u32, out: PathBuf, audio: &AudioEdit, crop
 mod tests {
     use super::*;
 
+
+    /// A real Medal clip (REWIND_MEDAL_CLIP=path): a copy is trimmed (keyframe and
+    /// exact) and keeps its track names, so its "All Audio" copy is still found.
+    #[test]
+    #[ignore]
+    fn live_medal_trim_keeps_track_names() {
+        crate::ffmpeg::init(None);
+        let src = std::env::var("REWIND_MEDAL_CLIP").unwrap();
+        let dir = std::env::temp_dir().join(format!("rewind-medal-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let copy = dir.join("medal.mp4");
+        fs::copy(&src, &copy).unwrap();
+        let p = copy.to_string_lossy().into_owned();
+        assert_eq!(track_titles(&p), vec!["All Audio", "Game", "Mic"]);
+        for exact in [false, true] {
+            let out = trim(&p, 2.0, 6.0, exact, &AudioEdit::default()).unwrap();
+            assert_eq!(track_titles(&out), vec!["All Audio", "Game", "Mic"], "exact: {exact}");
+            assert_eq!(tracks_to_mix(&out, 3), vec![1, 2]);
+            let _ = fs::remove_file(&out);
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
     #[test]
     fn a_track_that_mixes_the_others_is_found_by_name() {
         let t = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
