@@ -336,7 +336,7 @@ export default function App() {
     ...(syncing
       ? ([
           ["local", "Local clips", true],
-          ["synced", "Synced clips", true],
+          ["synced", "NAS clips", true],
         ] as [View, string, boolean][])
       : []),
     ["totrim", "To trim"],

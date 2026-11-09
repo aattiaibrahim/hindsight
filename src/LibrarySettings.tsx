@@ -322,7 +322,8 @@ export function LibrarySettings({
           </button>
         </span>
       </div>
-      {found.map((f) => (
+      {/* A recorder's folder that's gone isn't worth a row (unless it's still switched on, so it can be switched off). */}
+      {found.filter((f) => f.exists || linked(f.path)).map((f) => (
         <div className="setting sub" key={f.path}>
           <span>
             {f.label}

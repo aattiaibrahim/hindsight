@@ -33,7 +33,17 @@ const CARD_GAP = 6;
 const DAY_HEAD = 32;
 const PAGE_GAP = 22;
 
-const TITLES: Record<string, string> = { totrim: "To trim", clips: "Clips", local: "Local clips", synced: "Synced clips", damaged: "Damaged clips" };
+const TITLES: Record<string, string> = { totrim: "To trim", clips: "Clips", local: "Local clips", synced: "NAS clips", damaged: "Damaged clips" };
+
+/**
+ * A card's NAS badge in this view. Everything in Local clips is on this PC and everything in
+ * NAS clips is on the NAS, so there a card only shows what's still on its way (not copied, copying).
+ */
+function badgeIn(view: string | undefined, status: ReturnType<typeof nasStatus>) {
+  if (view === "local" && status === "synced") return null;
+  if (view === "synced" && (status === "synced" || status === "nas-only")) return null;
+  return status;
+}
 
 const remembered = <T extends string>(k: string, d: T): T => {
   try {
@@ -85,6 +95,7 @@ function ClipRow({
   damage,
   nasOn,
   copying,
+  view,
 }: {
   clip: ClipFile;
   selected: boolean;
@@ -92,6 +103,7 @@ function ClipRow({
   damage?: Health;
   nasOn: boolean;
   copying?: string | null;
+  view?: string;
 }) {
   const [rowRef, near] = useNearView<HTMLButtonElement>();
   const thumb = useThumb(clip.path, clip.modified, near);
@@ -105,7 +117,7 @@ function ClipRow({
           {clip.folder} · {time}
           {damage && damage.state !== "ok" && <span className="src-tag bad with-icon"><Icon name="warn" size={12} />Damaged</span>}
           {clip.location === "linked" && <span className="src-tag">{clip.source}</span>}
-          <NasBadge status={nasStatus(clip, nasOn, copying)} />
+          <NasBadge status={badgeIn(view, nasStatus(clip, nasOn, copying))} />
         </div>
       </div>
       <div className="clip-row-size">{fmtSize(clip.size)}</div>
@@ -150,7 +162,10 @@ function ClipCard({
   nasOn,
   onKeepWhole,
   copying,
+  view,
 }: {
+  /** Which list it's in (its NAS badge depends on it) */
+  view?: string;
   /** The file the NAS sync is copying right now */
   copying?: string | null;
   /** To trim: take it off the list */
@@ -194,7 +209,7 @@ function ClipCard({
   }, [near, clip.path, clip.modified]);
 
   const time = new Date(clip.modified).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-  const nasState = nasStatus(clip, nasOn, copying);
+  const nasState = badgeIn(view, nasStatus(clip, nasOn, copying));
 
   return (
     <button
@@ -762,7 +777,7 @@ clips === null ? null : clips.length === 0 && trimMode ? (
       ) : viewMode === "list" ? (
         <div className="clip-rows">
           {shownGroups.flatMap((s) => s.items).map((c) => (
-            <ClipRow key={c.path} clip={c} selected={selected.has(c.path)} onClick={clickCard(c.path)} damage={health?.[c.path]} nasOn={nasOn} copying={nas?.copying} />
+            <ClipRow key={c.path} clip={c} selected={selected.has(c.path)} onClick={clickCard(c.path)} damage={health?.[c.path]} nasOn={nasOn} copying={nas?.copying} view={mode} />
           ))}
         </div>
       ) : (
@@ -801,6 +816,7 @@ clips === null ? null : clips.length === 0 && trimMode ? (
                 <div className="grid">
                   {built.map((c) => (
                     <ClipCard
+                      view={mode}
                       nasOn={nasOn}
                       copying={nas?.copying}
                       key={c.path}
