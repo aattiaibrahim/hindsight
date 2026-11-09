@@ -129,8 +129,10 @@ function placeOf(c: ClipFile) {
 }
 
 /** Which copy to keep by default: Hindsight's own, then the NAS, then the oldest name.
- *  For a remux (the same recording as MKV and MP4), the MP4: it plays everywhere. */
+ *  For a remux (the same recording as MKV and MP4), the MP4: it plays everywhere.
+ *  For a smaller re-encode, the original (the biggest): it's the full quality. */
 function bestCopy(set: ClipFile[], kind: DupeSet["kind"] = "copy") {
+  if (kind === "smaller") return [...set].sort((a, b) => b.size - a.size)[0];
   const rank = (c: ClipFile) => (c.location === "local" ? 0 : c.location === "nas" ? 1 : 2);
   const mp4 = (c: ClipFile) => (kind === "remux" && /\.mp4$/i.test(c.path) ? 0 : 1);
   return [...set].sort((a, b) => mp4(a) - mp4(b) || rank(a) - rank(b) || a.path.length - b.path.length)[0];
@@ -161,13 +163,16 @@ function Duplicates({ clips, onDelete, onChanged }: { clips: ClipFile[]; onDelet
     return n + s.clips.reduce((m, c) => m + (c.path === kept.path ? 0 : c.size), 0);
   }, 0);
   const remuxes = found.filter((s) => s.kind === "remux").length;
+  const smaller = found.filter((s) => s.kind === "smaller").length;
   return (
     <section className="dupes">
       <h2>Duplicates</h2>
       <p className="muted" style={{ margin: 0 }}>
         {found.length} clip{found.length === 1 ? " is" : "s are"} saved more than once, using {fmtSize(extra)} extra.
         {remuxes > 0 &&
-          ` ${remuxes === found.length ? "They're" : `${remuxes} of them are`} the same recording in two formats (OBS keeps the original when it remuxes to MP4): same name, length and tracks.`}{" "}
+          ` ${remuxes === found.length ? "They're" : `${remuxes} of them are`} the same recording in two formats (OBS keeps the original when it remuxes to MP4): same name, length and tracks.`}
+        {smaller > 0 &&
+          ` ${smaller === found.length ? (smaller === 1 ? "It's" : "They're") : `${smaller} ${smaller === 1 ? "is" : "are"}`} the same recording next to a smaller re-encode of it (an export, say): the original is kept unless you pick the smaller copy.`}{" "}
         Pick the copy to keep; the others go to the Recycle Bin.
       </p>
       {found.map(({ kind, clips: set }, i) => {
@@ -179,13 +184,21 @@ function Duplicates({ clips, onDelete, onChanged }: { clips: ClipFile[]; onDelet
               <span className="muted">
                 {kind === "remux"
                   ? `Same recording as ${set.map((c) => extOf(c.path)).join(" and ")}`
-                  : `${set.length} copies · ${fmtSize(set[0].size)} each`}
+                  : kind === "smaller"
+                    ? `Same recording · the smaller copy is ${Math.round((Math.min(...set.map((c) => c.size)) / Math.max(...set.map((c) => c.size))) * 100)}% of the size`
+                    : `${set.length} copies · ${fmtSize(set[0].size)} each`}
               </span>
             </div>
             {set.map((c) => (
               <label key={c.path} className={`dupe-copy ${chosen === c.path ? "on" : ""}`}>
                 <input type="radio" name={`dupe-${i}`} checked={chosen === c.path} onChange={() => setKeep((k) => ({ ...k, [i]: c.path }))} />
-                <span className="dupe-where">{kind === "remux" ? `${extOf(c.path)} · ${fmtSize(c.size)}` : placeOf(c)}</span>
+                <span className="dupe-where">
+                  {kind === "remux"
+                    ? `${extOf(c.path)} · ${fmtSize(c.size)}`
+                    : kind === "smaller"
+                      ? `${extOf(c.path)} · ${fmtSize(c.size)}${c.size === Math.max(...set.map((x) => x.size)) ? " · original" : " · re-encoded"}`
+                      : placeOf(c)}
+                </span>
                 <small className="muted dupe-path" title={c.path}>
                   {c.path}
                 </small>

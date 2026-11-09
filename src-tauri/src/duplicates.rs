@@ -147,10 +147,16 @@ pub fn remuxes(clips: &[(String, u64)], same: impl Fn(&str, &str) -> bool) -> Ve
 /// third of the size) isn't: removing its original would lose quality.
 pub fn same_streams((x, xs): (&crate::library::Probe, u64), (y, ys): (&crate::library::Probe, u64)) -> bool {
     let near = xs > 0 && ys > 0 && (xs.max(ys) - xs.min(ys)) as f64 <= xs.max(ys) as f64 * 0.05;
-    near && x.duration > 0.0
+    near && x.codec == y.codec && same_recording(x, y)
+}
+
+/// The same recording, however it was saved: same length, picture and number of
+/// tracks. With `same_streams` false, one is a re-encode (an export, a compressed
+/// copy) of the other: smaller, and not as good.
+pub fn same_recording(x: &crate::library::Probe, y: &crate::library::Probe) -> bool {
+    x.duration > 0.0
         && (x.duration - y.duration).abs() <= 0.5_f64.max(x.duration * 0.005)
         && (x.width, x.height) == (y.width, y.height)
-        && x.codec == y.codec
         && x.audio_tracks == y.audio_tracks
 }
 
@@ -169,6 +175,10 @@ mod tests {
         assert!(!same_streams((&mkv, 100), (&p(772.9, "hevc"), 100)), "another codec");
         assert!(!same_streams((&mkv, 100), (&p(700.0, "h264"), 100)), "another length");
         assert!(!same_streams((&p(0.0, "h264"), 100), (&p(0.0, "h264"), 100)), "unreadable");
+        // ...but the export is still the same recording, in a smaller copy.
+        assert!(same_recording(&mkv, &p(772.9, "h264")));
+        assert!(same_recording(&mkv, &p(772.9, "hevc")));
+        assert!(!same_recording(&mkv, &p(700.0, "h264")));
     }
 
 
@@ -254,6 +264,31 @@ mod tests {
 
 #[cfg(test)]
 mod live {
+
+    /// Real folder: REWIND_REMUX_DIR=D:\Recordings cargo test live_remuxes -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_remuxes() {
+        crate::ffmpeg::init(None);
+        let Ok(dir) = std::env::var("REWIND_REMUX_DIR") else { return };
+        let mut list = Vec::new();
+        let mut stack = vec![std::path::PathBuf::from(dir)];
+        while let Some(p) = stack.pop() {
+            for e in std::fs::read_dir(&p).into_iter().flatten().flatten() {
+                let path = e.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if crate::library::is_video(&path) {
+                    list.push((path.to_string_lossy().into_owned(), e.metadata().map(|m| m.len()).unwrap_or(0)));
+                }
+            }
+        }
+        let size = |p: &str| list.iter().find(|(q, _)| q == p).map(|(_, s)| *s).unwrap_or(0);
+        let probe = |p: &str| crate::library::probe(p);
+        let remux = super::remuxes(&list, |a, b| matches!((probe(a), probe(b)), (Ok(x), Ok(y)) if super::same_streams((&x, size(a)), (&y, size(b)))));
+        let smaller = super::remuxes(&list, |a, b| matches!((probe(a), probe(b)), (Ok(x), Ok(y)) if super::same_recording(&x, &y)));
+        println!("{} clips; remux sets: {remux:?}; same recording: {smaller:?}", list.len());
+    }
     /// Real folders: REWIND_DUPE_DIRS="dir1;dir2" cargo test live_duplicates -- --ignored --nocapture
     #[test]
     #[ignore]

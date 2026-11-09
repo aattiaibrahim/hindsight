@@ -1264,7 +1264,8 @@ fn dismiss_game_suggestions(app: AppHandle, paths: Vec<String>) -> Result<(), St
 struct DupeSet {
     paths: Vec<String>,
     /// "copy": byte for byte the same. "remux": the same recording in another format
-    /// (OBS keeps the MKV next to the MP4 it remuxes to).
+    /// (OBS keeps the MKV next to the MP4 it remuxes to). "smaller": the same recording
+    /// re-encoded smaller (an export next to its original).
     kind: &'static str,
 }
 
@@ -1295,10 +1296,22 @@ async fn find_duplicates(app: AppHandle) -> Result<Vec<DupeSet>, String> {
         };
         let in_copies: std::collections::HashSet<&String> = copies.iter().flatten().collect();
         let remuxes: Vec<Vec<String>> = duplicates::remuxes(&list, same).into_iter().filter(|s| !s.iter().all(|p| in_copies.contains(p))).collect();
+        // The same recording re-encoded smaller (an export next to its original):
+        // offered too, keeping the original by default so no quality is lost.
+        let in_remuxes: std::collections::HashSet<&String> = remuxes.iter().flatten().collect();
+        let recording = |a: &str, b: &str| match (prepare::probe(a), prepare::probe(b)) {
+            (Ok(x), Ok(y)) => duplicates::same_recording(&x, &y),
+            _ => false,
+        };
+        let smaller: Vec<Vec<String>> = duplicates::remuxes(&list, recording)
+            .into_iter()
+            .filter(|s| !s.iter().any(|p| in_copies.contains(p) || in_remuxes.contains(p)))
+            .collect();
         Ok(copies
             .into_iter()
             .map(|paths| DupeSet { paths, kind: "copy" })
             .chain(remuxes.into_iter().map(|paths| DupeSet { paths, kind: "remux" }))
+            .chain(smaller.into_iter().map(|paths| DupeSet { paths, kind: "smaller" }))
             .collect())
     })
     .await

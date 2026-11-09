@@ -196,7 +196,7 @@ export type BenchProgress = { step: string; detail: string; waitingForUser: bool
 export type PreviewAudio ={ firstTitle: string; extra: { index: number; title: string; path: string }[]; /** a track that's the others already mixed */ mix?: number | null };
 
 /** The same clip more than once: "copy" (byte for byte) or "remux" (same recording, another format, e.g. OBS's MKV and MP4). */
-export type DupeSet = { paths: string[]; kind: "copy" | "remux" };
+export type DupeSet = { paths: string[]; kind: "copy" | "remux" | "smaller" };
 
 export type DeleteResult ={ deleted: string[]; failed: [string, string][] };
 
