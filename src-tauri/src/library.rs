@@ -406,7 +406,7 @@ fn unique(src: &Path, suffix: &str, ext: &str) -> PathBuf {
     p
 }
 
-fn ext_of(p: &Path) -> String {
+pub(crate) fn ext_of(p: &Path) -> String {
     p.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default()
 }
 
@@ -864,7 +864,7 @@ pub(crate) fn discard(p: &Path) -> Result<(), String> {
 
 /// Safety check before touching an original: the new file must be a real,
 /// playable video of a sensible length.
-fn verify_output(edited: &Path, expected_secs: Option<f64>) -> Result<(), String> {
+pub(crate) fn verify_output(edited: &Path, expected_secs: Option<f64>) -> Result<(), String> {
     let size = fs::metadata(edited).map(|m| m.len()).unwrap_or(0);
     if size == 0 {
         return Err("The edit came out empty, so the original was kept.".into());

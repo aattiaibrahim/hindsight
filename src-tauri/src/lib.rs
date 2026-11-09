@@ -965,9 +965,12 @@ async fn edit(
     f: impl FnOnce(&str) -> Result<String, String> + Send + 'static,
 ) -> Result<String, String> {
     let original = path.clone();
-    // A network folder has no Recycle Bin: replacing would lose the original for good.
-    if replace && health::on_network(&path) {
-        return Err("This clip is on the NAS, which has no Recycle Bin, so it can't be replaced. Turn off \"Replace the original\" to save your edit as a new file.".into());
+    // A network folder has no Recycle Bin. A clip in your NAS folder is replaced by
+    // setting the original aside there (kept 30 days); other network folders can't be.
+    let nas_dir = settings_of(&app).nas_dir;
+    let on_nas = nas::rel_on_nas(&nas_dir, &path).is_some();
+    if replace && health::on_network(&path) && !on_nas {
+        return Err("This clip is on a network folder, which has no Recycle Bin, so it can't be replaced. Turn off \"Replace the original\" to save your edit as a new file.".into());
     }
     // Edits keep the clip's date: a trim stays where the clip was, not under today.
     let dates = library::dates_of(std::path::Path::new(&original));
@@ -980,7 +983,11 @@ async fn edit(
         return Ok(out);
     }
     let o = original.clone();
-    let final_path = blocking(move || library::replace_original(&o, &out, expected_secs)).await?;
+    let final_path = if on_nas {
+        blocking(move || nas::replace_on_nas(&nas_dir, &o, &out, expected_secs)).await?
+    } else {
+        blocking(move || library::replace_original(&o, &out, expected_secs)).await?
+    };
     if let Some(d) = dates {
         library::set_dates(std::path::Path::new(&final_path), d);
     }

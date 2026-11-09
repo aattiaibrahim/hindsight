@@ -235,7 +235,11 @@ export function Studio({
 }) {
   // A clip only on the NAS can't be replaced: a network folder has no Recycle Bin.
   const onNetwork = !!path && (path.startsWith("\\\\") || clips?.find((c) => c.path === path)?.location === "nas");
-  const replace = !!settings?.replaceOriginalOnEdit && !onNetwork;
+  // A clip in your NAS folder can be replaced: the original is set aside on the NAS for 30 days.
+  const nasRoot = (settings?.nasDir ?? "").replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  const inNas = !!path && !!nasRoot && path.replace(/\//g, "\\").toLowerCase().startsWith(nasRoot + "\\");
+  const noReplace = onNetwork && !inNas;
+  const replace = !!settings?.replaceOriginalOnEdit && !noReplace;
   const [reload, setReload] = useState(0);
   const video = useRef<HTMLVideoElement>(null);
   const bar = useRef<HTMLDivElement>(null);
@@ -1166,16 +1170,18 @@ export function Studio({
               type="checkbox"
               className="switch"
               checked={replace}
-              disabled={onNetwork}
+              disabled={noReplace}
               onChange={(e) => update({ replaceOriginalOnEdit: e.target.checked })}
             />
             Replace the original with my edit
           </label>
           <span className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>
-            {onNetwork
-              ? "This clip is on the NAS, which has no Recycle Bin, so edits are always saved as new files next to it."
+            {noReplace
+              ? "This clip is on a network folder, which has no Recycle Bin, so edits are always saved as new files next to it."
+              : replace && inNas
+              ? "Trims, exports and compresses replace this clip on the NAS and keep its date. The old version is kept in the NAS's .hindsight-replaced folder for 30 days."
               : replace
-              ? "Trims, exports and compresses overwrite this file. The old version goes to the Recycle Bin."
+              ? "Trims, exports and compresses overwrite this file and keep its date. The old version goes to the Recycle Bin."
               : "The original is kept. Edits are saved as new files next to it."}
           </span>
           </div>

@@ -379,6 +379,43 @@ fn set_aside(nas: &Path, rel: &str) -> Result<(), String> {
     fs::rename(&from, &to).map_err(|e| format!("couldn't set the old NAS version aside ({e})"))
 }
 
+/// Where `path` sits inside the NAS folder ("Game/clip.mp4"), ignoring case
+/// (Windows shares don't care: `\\VOYAGER-1\clips` and `\\voyager-1\Clips` are one folder).
+pub fn rel_on_nas(nas_dir: &str, path: &str) -> Option<String> {
+    if nas_dir.is_empty() {
+        return None;
+    }
+    let root = nas_dir.replace('/', "\\");
+    let root = root.trim_end_matches('\\');
+    let p = path.replace('/', "\\");
+    let head = p.get(..root.len())?;
+    let rest = p.get(root.len()..)?.strip_prefix('\\')?;
+    (head.eq_ignore_ascii_case(root) && !rest.is_empty() && !rest.starts_with(REPLACED)).then(|| rest.replace('\\', "/"))
+}
+
+/// Replace a clip that lives on the NAS with its edit. There's no Recycle Bin on a
+/// network folder, so the original isn't deleted: it moves to
+/// `.hindsight-replaced/<today>/` (kept 30 days, like replaced versions from syncing).
+pub fn replace_on_nas(nas_dir: &str, original: &str, edited: &str, expected_secs: Option<f64>) -> Result<String, String> {
+    let nas = Path::new(nas_dir);
+    let rel = rel_on_nas(nas_dir, original).ok_or("This clip isn't in your NAS folder, so it can't be replaced safely.")?;
+    let edited_p = Path::new(edited);
+    crate::library::verify_output(edited_p, expected_secs)?;
+    let orig = Path::new(original);
+    let target = orig.with_extension(crate::library::ext_of(edited_p));
+    set_aside(nas, &rel).map_err(|e| format!("Saved the edit as a new file, but {e}"))?;
+    // An export can change the extension; a file already using that name is set aside too.
+    if target != orig && target.exists()
+        && let Some(r) = rel_on_nas(nas_dir, &target.to_string_lossy())
+    {
+        set_aside(nas, &r)?;
+    }
+    fs::rename(edited_p, &target).map_err(|e| {
+        format!("Couldn't move the edit into place ({e}). Your edit is saved as {} and the original is in the NAS's {REPLACED} folder.", edited_p.display())
+    })?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
 /// Remove replaced versions older than `KEEP_REPLACED_DAYS` (by their day folder).
 fn prune_replaced(nas: &Path, today: chrono::NaiveDate) {
     let Ok(days) = fs::read_dir(nas.join(REPLACED)) else { return };
@@ -1173,6 +1210,49 @@ pub fn start(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nas_paths_are_found_whatever_the_case() {
+        assert_eq!(rel_on_nas("\\\\VOYAGER\\clips", "\\\\voyager\\Clips\\Desktop\\a.mp4").as_deref(), Some("Desktop/a.mp4"));
+        assert_eq!(rel_on_nas("\\\\nas\\clips\\", "//nas/clips/a.mp4").as_deref(), Some("a.mp4"));
+        assert_eq!(rel_on_nas("\\\\nas\\clips", "\\\\nas\\clipsx\\a.mp4"), None);
+        assert_eq!(rel_on_nas("\\\\nas\\clips", "\\\\nas\\clips\\.hindsight-replaced\\a.mp4"), None);
+        assert_eq!(rel_on_nas("", "\\\\nas\\clips\\a.mp4"), None);
+    }
+
+    #[test]
+    fn replacing_a_nas_clip_sets_the_original_aside_and_keeps_its_date() {
+        crate::ffmpeg::init(None);
+        let nas = std::env::temp_dir().join(format!("rewind-nas-replace-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&nas);
+        fs::create_dir_all(nas.join("Desktop")).unwrap();
+        let make = |p: &Path, secs: &str| {
+            let mut a = crate::ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30", "-t", secs, "-c:v", "mpeg4"]);
+            a.push(p.into());
+            crate::ffmpeg::run("ffmpeg", &a).unwrap();
+        };
+        let orig = nas.join("Desktop").join("clip.mp4");
+        let edit = nas.join("Desktop").join("clip (trim).mp4");
+        make(&orig, "4");
+        make(&edit, "2");
+        let old = fs::read(&orig).unwrap();
+        let taken = crate::library::dates_of(&orig).unwrap();
+        let nas_dir = nas.to_string_lossy().into_owned();
+        let out = replace_on_nas(&nas_dir, &orig.to_string_lossy(), &edit.to_string_lossy(), Some(2.0)).unwrap();
+        crate::library::set_dates(Path::new(&out), taken);
+        assert_eq!(Path::new(&out), orig);
+        assert!(!edit.exists(), "the edit moved into the clip's place");
+        assert_ne!(fs::read(&orig).unwrap(), old, "the clip is the edit now");
+        let day = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let kept = nas.join(REPLACED).join(day).join("Desktop").join("clip.mp4");
+        assert_eq!(fs::read(&kept).unwrap(), old, "the original is set aside, not deleted");
+        let now = crate::library::dates_of(&orig).unwrap();
+        let ms = |t: std::time::SystemTime| t.duration_since(UNIX_EPOCH).unwrap().as_millis() as i64;
+        assert!((ms(now.0) - ms(taken.0)).abs() < 1000, "keeps the date it was taken");
+        // A path outside the NAS folder is refused, not replaced.
+        assert!(replace_on_nas(&nas_dir, "C:\\elsewhere\\a.mp4", &edit.to_string_lossy(), None).is_err());
+        let _ = fs::remove_dir_all(&nas);
+    }
 
     #[test]
     fn merged_folders_keep_their_copied_record() {
