@@ -362,12 +362,66 @@ pub fn edited(s: &crate::settings::Settings, old: &Path, new: &Path) {
 
 /// Move a NAS file into today's `.hindsight-replaced` folder (never overwriting).
 fn set_aside(nas: &Path, rel: &str) -> Result<(), String> {
+    set_aside_in(nas, rel, REPLACED).map(|_| ())
+}
+
+/// Where clips deleted in the app wait on the NAS (a network folder has no Recycle
+/// Bin), by day, so Undo can bring them back. Removed after 30 days, like replaced versions.
+const DELETED: &str = ".hindsight-deleted";
+
+/// Delete a clip's NAS copy: it moves to today's `.hindsight-deleted` folder.
+/// Ok(false) when there was no NAS copy.
+pub fn delete_on_nas(nas_dir: &str, rel: &str) -> Result<bool, String> {
+    let nas = Path::new(nas_dir);
+    if nas_dir.is_empty() || !nas.join(rel.replace('/', "\\")).is_file() {
+        return Ok(false);
+    }
+    set_aside_in(nas, rel, DELETED).map_err(|e| e.replace("the old NAS version", "the NAS copy"))?;
+    forget(nas_dir, rel);
+    Ok(true)
+}
+
+/// Undo `delete_on_nas`: put the newest deleted copy of `rel` back, unless
+/// something already took its place. Ok(false) when there was nothing to bring back.
+pub fn undelete_on_nas(nas_dir: &str, rel: &str) -> Result<bool, String> {
+    let nas = Path::new(nas_dir);
+    let dest = nas.join(rel.replace('/', "\\"));
+    if nas_dir.is_empty() || dest.exists() {
+        return Ok(false);
+    }
+    let Ok(days) = fs::read_dir(nas.join(DELETED)) else { return Ok(false) };
+    let mut days: Vec<PathBuf> = days.flatten().map(|d| d.path()).collect();
+    days.sort();
+    for day in days.iter().rev() {
+        let from = day.join(rel.replace('/', "\\"));
+        if from.is_file() {
+            if let Some(dir) = dest.parent() {
+                fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+            }
+            fs::rename(&from, &dest).map_err(|e| format!("couldn't bring back the NAS copy ({e})"))?;
+            wake();
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Drop a clip from the cached NAS listing straight away (the next pass rescans anyway).
+fn forget(nas_dir: &str, rel: &str) {
+    let key = rel_key(rel);
+    if let Some(l) = LISTING.lock().unwrap().as_mut().filter(|l| l.root == nas_dir) {
+        l.files.retain(|f| rel_key(&f.rel) != key);
+        l.rels.remove(&key);
+    }
+}
+
+fn set_aside_in(nas: &Path, rel: &str, folder: &str) -> Result<PathBuf, String> {
     let from = nas.join(rel.replace('/', "\\"));
     if !from.exists() {
-        return Ok(());
+        return Ok(from);
     }
     let day = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let mut to = nas.join(REPLACED).join(&day).join(rel.replace('/', "\\"));
+    let mut to = nas.join(folder).join(&day).join(rel.replace('/', "\\"));
     let mut n = 2;
     while to.exists() {
         let stem = from.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -376,7 +430,8 @@ fn set_aside(nas: &Path, rel: &str) -> Result<(), String> {
         n += 1;
     }
     fs::create_dir_all(to.parent().unwrap()).map_err(|e| e.to_string())?;
-    fs::rename(&from, &to).map_err(|e| format!("couldn't set the old NAS version aside ({e})"))
+    fs::rename(&from, &to).map_err(|e| format!("couldn't set the old NAS version aside ({e})"))?;
+    Ok(to)
 }
 
 /// Where `path` sits inside the NAS folder ("Game/clip.mp4"), ignoring case
@@ -390,7 +445,7 @@ pub fn rel_on_nas(nas_dir: &str, path: &str) -> Option<String> {
     let p = path.replace('/', "\\");
     let head = p.get(..root.len())?;
     let rest = p.get(root.len()..)?.strip_prefix('\\')?;
-    (head.eq_ignore_ascii_case(root) && !rest.is_empty() && !rest.starts_with(REPLACED)).then(|| rest.replace('\\', "/"))
+    (head.eq_ignore_ascii_case(root) && !rest.is_empty() && !rest.starts_with(REPLACED) && !rest.starts_with(DELETED)).then(|| rest.replace('\\', "/"))
 }
 
 /// Replace a clip that lives on the NAS with its edit. There's no Recycle Bin on a
@@ -418,7 +473,7 @@ pub fn replace_on_nas(nas_dir: &str, original: &str, edited: &str, expected_secs
 
 /// Remove replaced versions older than `KEEP_REPLACED_DAYS` (by their day folder).
 fn prune_replaced(nas: &Path, today: chrono::NaiveDate) {
-    let Ok(days) = fs::read_dir(nas.join(REPLACED)) else { return };
+    let days = [REPLACED, DELETED].into_iter().filter_map(|f| fs::read_dir(nas.join(f)).ok()).flatten();
     for d in days.flatten() {
         let name = d.file_name().to_string_lossy().into_owned();
         if let Ok(date) = chrono::NaiveDate::parse_from_str(&name, "%Y-%m-%d")
@@ -1210,6 +1265,30 @@ pub fn start(app: AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deleting_moves_the_nas_copy_aside_and_undo_brings_it_back() {
+        let nas = std::env::temp_dir().join(format!("rewind-nas-delete-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&nas);
+        fs::create_dir_all(nas.join("VALORANT")).unwrap();
+        let clip = nas.join("VALORANT").join("a.mp4");
+        fs::write(&clip, b"clip").unwrap();
+        let dir = nas.to_string_lossy().into_owned();
+        assert_eq!(delete_on_nas(&dir, "VALORANT/a.mp4"), Ok(true));
+        assert!(!clip.exists());
+        let day = chrono::Local::now().format("%Y-%m-%d").to_string();
+        assert_eq!(fs::read(nas.join(DELETED).join(&day).join("VALORANT").join("a.mp4")).unwrap(), b"clip");
+        assert_eq!(rel_on_nas(&dir, &nas.join(DELETED).join(&day).join("VALORANT").join("a.mp4").to_string_lossy()), None);
+        assert_eq!(delete_on_nas(&dir, "VALORANT/a.mp4"), Ok(false), "nothing left to delete");
+        assert_eq!(undelete_on_nas(&dir, "VALORANT/a.mp4"), Ok(true));
+        assert_eq!(fs::read(&clip).unwrap(), b"clip");
+        assert_eq!(undelete_on_nas(&dir, "VALORANT/a.mp4"), Ok(false), "already back");
+        // Deleted copies go after 30 days, like replaced versions.
+        delete_on_nas(&dir, "VALORANT/a.mp4").unwrap();
+        prune_replaced(&nas, chrono::Local::now().date_naive() + chrono::Duration::days(31));
+        assert!(!nas.join(DELETED).join(&day).exists());
+        let _ = fs::remove_dir_all(&nas);
+    }
 
     #[test]
     fn nas_paths_are_found_whatever_the_case() {

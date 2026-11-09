@@ -141,7 +141,7 @@ export default function App() {
             .restoreClips(res.deleted)
             .then((k) => toast(`Restored ${k} clip${k === 1 ? "" : "s"}`))
             .catch((e) => toast(errText(e), true));
-        toast(`Moved ${n} clip${n === 1 ? "" : "s"} to the Recycle Bin`, false, undefined, { label: "Undo", run: restore });
+        toast(`Deleted ${n} clip${n === 1 ? "" : "s"}`, false, undefined, { label: "Undo", run: restore });
       }
       if (res.failed.length) {
         const [path, why] = res.failed[0];
@@ -561,7 +561,13 @@ export default function App() {
         <MergeDialog list={similar} onClose={() => setMergeOpen(false)} onMerged={onMerged} onError={(m) => toast(m, true)} />
       )}
       {pendingDelete && (
-        <ConfirmDelete paths={pendingDelete.paths} busy={deleting} onConfirm={confirmDelete} onCancel={cancelDelete} />
+        <ConfirmDelete
+          paths={pendingDelete.paths}
+          busy={deleting}
+          onConfirm={confirmDelete}
+          onCancel={cancelDelete}
+          nas={pendingDelete.paths.some((p) => clips?.find((c) => c.path === p && (c.onNas || c.location === "nas")))}
+        />
       )}
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => (

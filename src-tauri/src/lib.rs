@@ -1358,7 +1358,28 @@ fn reveal_file(path: String) -> Result<(), String> {
 async fn delete_clips(app: AppHandle, paths: Vec<String>) -> Result<library::DeleteResult, String> {
     let s = settings_of(&app);
     let res = blocking(move || {
-        Ok(library::delete_clips(&paths, PathBuf::from(&s.clips_dir).as_path(), &s.external_files, &s.linked_folders, &s.nas_dir))
+        // A clip in the NAS folder (only on the NAS) is deleted there; the rest go
+        // to the Recycle Bin, and their NAS copies (same game folder and name) go too.
+        let (on_nas, here): (Vec<String>, Vec<String>) = paths.into_iter().partition(|p| nas::rel_on_nas(&s.nas_dir, p).is_some());
+        let clips_dir = PathBuf::from(&s.clips_dir);
+        let mut res = library::delete_clips(&here, &clips_dir, &s.external_files, &s.linked_folders, &s.nas_dir);
+        let mut extra_failed = Vec::new();
+        for p in &res.deleted {
+            if let Some(rel) = library::rel_in(&clips_dir, p)
+                && let Err(e) = nas::delete_on_nas(&s.nas_dir, &rel)
+            {
+                extra_failed.push((p.clone(), format!("Deleted from this PC, but {e}")));
+            }
+        }
+        res.failed.extend(extra_failed);
+        for p in on_nas {
+            let rel = nas::rel_on_nas(&s.nas_dir, &p).unwrap_or_default();
+            match nas::delete_on_nas(&s.nas_dir, &rel) {
+                Ok(_) => res.deleted.push(p),
+                Err(e) => res.failed.push((p, e)),
+            }
+        }
+        Ok(res)
     })
     .await?;
     let _ = app.emit("clips-changed", ());
@@ -1367,7 +1388,25 @@ async fn delete_clips(app: AppHandle, paths: Vec<String>) -> Result<library::Del
 
 #[tauri::command]
 async fn restore_clips(app: AppHandle, paths: Vec<String>) -> Result<usize, String> {
-    let n = blocking(move || library::restore_clips(&paths)).await?;
+    let s = settings_of(&app);
+    let n = blocking(move || {
+        let (on_nas, here): (Vec<String>, Vec<String>) = paths.into_iter().partition(|p| nas::rel_on_nas(&s.nas_dir, p).is_some());
+        let mut n = if here.is_empty() { 0 } else { library::restore_clips(&here)? };
+        // Their NAS copies come back too.
+        let clips_dir = PathBuf::from(&s.clips_dir);
+        for p in &here {
+            if let Some(rel) = library::rel_in(&clips_dir, p) {
+                let _ = nas::undelete_on_nas(&s.nas_dir, &rel);
+            }
+        }
+        for p in &on_nas {
+            if nas::undelete_on_nas(&s.nas_dir, &nas::rel_on_nas(&s.nas_dir, p).unwrap_or_default())? {
+                n += 1;
+            }
+        }
+        Ok(n)
+    })
+    .await?;
     let _ = app.emit("clips-changed", ());
     Ok(n)
 }

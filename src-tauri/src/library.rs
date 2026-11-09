@@ -912,6 +912,16 @@ fn deletable(path: &Path, clips_dir: &Path, external: &[String], linked: &[Strin
     if inside || listed { Ok(()) } else { Err("Not part of your Hindsight library".into()) }
 }
 
+/// Where `path` sits inside Hindsight's clips folder ("Game/clip.mp4"), ignoring
+/// case: the same place its NAS copy has.
+pub fn rel_in(clips_dir: &Path, path: &str) -> Option<String> {
+    let root = clips_dir.to_string_lossy().replace('/', "\\");
+    let root = root.trim_end_matches('\\');
+    let p = path.replace('/', "\\");
+    let rest = p.get(root.len()..)?.strip_prefix('\\')?;
+    (p.get(..root.len())?.eq_ignore_ascii_case(root) && !rest.is_empty() && !root.is_empty()).then(|| rest.replace('\\', "/"))
+}
+
 /// Move clips to the Recycle Bin (one batch, so Windows can restore them together).
 pub fn delete_clips(paths: &[String], clips_dir: &Path, external: &[String], linked: &[String], nas_dir: &str) -> DeleteResult {
     let mut res = DeleteResult::default();
