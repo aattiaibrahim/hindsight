@@ -1,6 +1,6 @@
 {
   "name": "hindsight-server",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "private": true,
   "description": "Hindsight on the NAS: browse, watch, edit, share and make montages of your clips over the local network",
   "type": "module",
