@@ -330,7 +330,7 @@ export async function createServer({ library, media, cleanup = null, shares = nu
         return res.end();
       }
       const clips = library.clips.map(withMeta);
-      return send(res, 200, { clips, games: gamesOf(library.clips), scannedAt: library.scannedAt, version: VERSION, release: RELEASE, canChange: !!cleanup?.canChange }, {
+      return send(res, 200, { clips, games: gamesOf(library.clips), scannedAt: library.scannedAt, version: VERSION, release: RELEASE, canChange: !!cleanup?.canChange, trashDays: cleanup?.trashDays ?? null }, {
         etag,
         "cache-control": "no-cache",
       });

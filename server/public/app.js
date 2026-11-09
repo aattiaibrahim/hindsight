@@ -2,7 +2,7 @@ import { montage } from "./montage.js";
 import { editor } from "./editor.js";
 import { icon } from "./icons.js";
 import { facet, filterClips, groupByDay, sortBy, sortClips } from "./group.js";
-import { api, btn, clipTitle, codecLabel, dayLabel, dayTs, duration, el, hydrateIcons, logo, logoUrl, postJson, size } from "./ui.js";
+import { api, btn, clipTitle, codecLabel, dayLabel, dayTs, duration, edgeBar, el, hydrateIcons, logo, logoUrl, postJson, size } from "./ui.js";
 
 const $ = (id) => document.getElementById(id);
 const scroller = $("scroller");
@@ -33,6 +33,8 @@ let filters = { ...EMPTY };
 let clips = [];
 let etag = null;
 let canChange = false;
+/** How long the trash keeps deleted clips (from the server). */
+let trashDays = 30;
 let about = {};
 let noticeList = [];
 
@@ -49,6 +51,7 @@ async function load() {
     etag = tag;
     clips = data.clips;
     canChange = data.canChange;
+    if (data.trashDays) trashDays = data.trashDays;
     about = { release: data.release, version: data.version, scannedAt: data.scannedAt };
     $("brand").title = `Hindsight on the NAS · ${data.release} (${data.version})`;
     updateCounts();
@@ -589,6 +592,21 @@ async function openClip(c, inQueue = null) {
   $("share").onclick = () => share(c);
   $("edit-clip").onclick = () => openEditor(c);
   $("keep-whole").hidden = !c.toTrim;
+  // Delete: to the NAS trash (restore it from Trash), only when the server may change files.
+  $("delete-clip").hidden = !canChange;
+  $("delete-clip").onclick = async () => {
+    if (!confirm(`Delete "${c.name}"?\n\nIt goes to the trash for ${trashDays} days (Trash → Restore), then it's gone for good.`)) return;
+    $("delete-clip").disabled = true;
+    try {
+      await postJson(api(c.id, "trash"));
+      dialog.close();
+      load();
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      $("delete-clip").disabled = false;
+    }
+  };
   $("keep-whole").onclick = async () => {
     await postJson(api(c.id, "keep-whole")).catch((e) => alert(e.message));
     $("keep-whole").hidden = true;
@@ -1120,3 +1138,6 @@ document.addEventListener("visibilitychange", () => {
     loadNotices();
   }
 });
+
+// The views' sliding edge bar (see ui.js).
+edgeBar($("rail-nav"));

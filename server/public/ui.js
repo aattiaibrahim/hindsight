@@ -142,3 +142,45 @@ export async function loadVideo(video, c, info, { onStatus = () => {}, alive = (
   }
   return use(api(c.id, "web.mp4"));
 }
+
+/**
+ * The views' edge bar, like the desktop sidebar: the selected icon's background
+ * fades in where it is, and only a thin accent bar slides to it (down the left
+ * edge of the rail, or along the bottom of the tab bar on phones).
+ */
+export function edgeBar(rail) {
+  const bar = el("span", { class: "rail-bar", "aria-hidden": "true" });
+  rail.append(bar);
+  rail.classList.add("has-bar");
+  let first = true;
+  const place = () => {
+    const on = rail.querySelector(".nav.on");
+    if (!on || on.offsetParent === null) return void (bar.style.opacity = "0");
+    const row = getComputedStyle(rail).flexDirection === "row";
+    if (first) bar.style.transition = "none";
+    bar.style.opacity = "1";
+    if (row) {
+      const w = Math.round(on.offsetWidth * 0.4);
+      bar.style.width = `${w}px`;
+      bar.style.height = "3px";
+      bar.style.transform = `translate(${on.offsetLeft + (on.offsetWidth - w) / 2}px, ${on.offsetTop + on.offsetHeight - 5}px)`;
+    } else {
+      bar.style.width = "3px";
+      bar.style.height = "20px";
+      bar.style.transform = `translate(0px, ${on.offsetTop + (on.offsetHeight - 20) / 2}px)`;
+    }
+    if (first) {
+      void bar.offsetWidth;
+      bar.style.transition = "";
+      first = false;
+    }
+  };
+  let frame = 0;
+  const soon = () => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(place);
+  };
+  new MutationObserver(soon).observe(rail, { subtree: true, attributes: true, attributeFilter: ["class"] });
+  new ResizeObserver(soon).observe(rail);
+  place();
+}

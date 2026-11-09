@@ -425,8 +425,25 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 @media (max-width: 380px) {
   .nav-label { font-size: 9px; }
 }
+/* ---------- motion (kept short; off for reduced motion) ---------- */
+.rail-bar {
+  position: absolute; left: 0; top: 0; border-radius: 2px; background: var(--accent); pointer-events: none; opacity: 0; z-index: 1;
+  transition: transform 0.24s cubic-bezier(0.2, 0.8, 0.2, 1), width 0.24s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s;
+}
+.rail.has-bar .nav.on::before { display: none; }
+/* The clip viewer and other dialogs rise in; their backdrop fades. */
+.modal[open] { animation: modal-in 0.2s var(--ease); }
+.modal[open]::backdrop { animation: fade-in 0.2s var(--ease); }
+@keyframes modal-in { from { opacity: 0; transform: translateY(8px) scale(0.985); } }
+@keyframes fade-in { from { opacity: 0; } }
+/* Switching views: the new one fades up a little. */
+.view:not([hidden]) { animation: view-in 0.18s var(--ease); }
+@keyframes view-in { from { opacity: 0; transform: translateY(4px); } }
+/* Cards: the picture zooms a touch and lifts on hover. */
+.card:hover .thumb img, .card:focus-visible .thumb img { transform: scale(1.03); }
+.chip { transition: background 0.12s var(--ease), color 0.12s var(--ease), outline-color 0.12s var(--ease); }
 @media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; }
+  * { transition: none !important; animation: none !important; }
 }
 
 /* Settings: paired PCs and the pairing code */
