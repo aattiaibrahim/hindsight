@@ -21,6 +21,9 @@ test("a track that mixes the others is found by name", () => {
   assert.deepEqual(tracksToMix(["", ""]), [0, 1]);
   assert.equal(trackName({ tags: { name: "All Audio" } }), "All Audio", "Medal's MP4s use the name tag");
   assert.equal(trackName({ tags: { title: "Game" } }), "Game");
+  assert.equal(trackName({ tags: { handler_name: "All Audio" } }), "All Audio", "some ffmpeg builds keep a title as the handler name");
+  assert.equal(trackName({ tags: { handler_name: "SoundHandler" } }), "", "a default handler name isn't a name");
+  assert.equal(trackName({ tags: { handler_name: "SoundHandler", name: "Mic" } }), "Mic");
 });
 
 const FFMPEG = process.env.FFMPEG || "ffmpeg";
@@ -30,7 +33,8 @@ describe("mixing a Medal-style clip", { skip: !hasFfmpeg && "ffmpeg isn't instal
   test("the All Audio copy isn't mixed in again", async () => {
     const dir = await mkdtemp(path.join(tmpdir(), "hindsight-mix-"));
     try {
-      const clip = path.join(dir, "medal.mp4");
+      // MKV: every ffmpeg build keeps track titles there (some save an MP4 title as the handler name).
+      const clip = path.join(dir, "medal.mkv");
       // All Audio is a loud tone; Game and Mic are silent. Mixed right, the result is silent.
       execFileSync(FFMPEG, [
         "-hide_banner", "-loglevel", "error", "-y",
@@ -41,6 +45,8 @@ describe("mixing a Medal-style clip", { skip: !hasFfmpeg && "ffmpeg isn't instal
         "-t", "3", "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a", "-c:v", "mpeg4", "-c:a", "aac",
         "-metadata:s:a:0", "title=All Audio", "-metadata:s:a:1", "title=Game", "-metadata:s:a:2", "title=Mic", clip,
       ]);
+      const tags = spawnSync(process.env.FFPROBE || "ffprobe", ["-v", "error", "-select_streams", "a", "-show_entries", "stream_tags", "-of", "json", clip], { encoding: "utf8" }).stdout;
+      assert.deepEqual(tracksToMix(JSON.parse(tags).streams.map(trackName)), [1, 2], `track names not found: ${tags}`);
       const out = path.join(dir, "all.mp3");
       await exportMp3(clip, { out });
       const r = spawnSync(FFMPEG, ["-hide_banner", "-i", out, "-af", "volumedetect", "-f", "null", "-"], { encoding: "utf8" });

@@ -323,13 +323,26 @@ const MIX_NAMES: [&str; 10] = ["all audio", "all", "mix", "mixed", "master", "co
 
 /// Each audio track's name: its title tag, or the name tag MP4s from Medal use. "" when none.
 pub fn track_titles(path: &str) -> Vec<String> {
-    let mut args = ffmpeg::args(&["-v", "error", "-select_streams", "a", "-show_entries", "stream_tags=title,name", "-of", "json"]);
+    let mut args = ffmpeg::args(&["-v", "error", "-select_streams", "a", "-show_entries", "stream_tags=title,name,handler_name", "-of", "json"]);
     args.push(path.into());
     let Some(v) = ffmpeg::run("ffprobe", &args).ok().and_then(|j| serde_json::from_str::<Value>(&j).ok()) else { return Vec::new() };
-    v["streams"]
-        .as_array()
-        .map(|s| s.iter().map(|t| t["tags"]["title"].as_str().or(t["tags"]["name"].as_str()).unwrap_or("").trim().to_string()).collect())
-        .unwrap_or_default()
+    v["streams"].as_array().map(|s| s.iter().map(|t| track_name(&t["tags"])).collect()).unwrap_or_default()
+}
+
+/// A track's own name from its tags: title, the name tag Medal's MP4s use, or (as
+/// some ffmpeg builds save a title in MP4s) the handler name when it isn't a default.
+fn track_name(tags: &Value) -> String {
+    let own = tags["title"].as_str().or(tags["name"].as_str()).unwrap_or("").trim();
+    if !own.is_empty() {
+        return own.to_string();
+    }
+    let handler = tags["handler_name"].as_str().unwrap_or("").trim();
+    let generic = ["", "soundhandler", "sound handler", "soundhandle", "sound media handler", "apple sound media handler", "core media audio", "gpac iso audio handler", "l-smash audio handler", "mainconcept mp4 sound media handler"];
+    if generic.contains(&handler.to_lowercase().as_str()) || handler.to_lowercase().starts_with("isomedia file produced by") {
+        String::new()
+    } else {
+        handler.to_string()
+    }
 }
 
 /// `-metadata:s:a:N title=…` for each named track, for saves that keep every track
@@ -1269,6 +1282,16 @@ mod tests {
         }
         let _ = fs::remove_dir_all(&dir);
     }
+    #[test]
+    fn track_names_come_from_title_name_or_a_real_handler_name() {
+        let n = |v: serde_json::Value| track_name(&v);
+        assert_eq!(n(serde_json::json!({ "title": "Game" })), "Game");
+        assert_eq!(n(serde_json::json!({ "name": "All Audio", "handler_name": "SoundHandler" })), "All Audio");
+        assert_eq!(n(serde_json::json!({ "handler_name": "All Audio" })), "All Audio");
+        assert_eq!(n(serde_json::json!({ "handler_name": "SoundHandler" })), "");
+        assert_eq!(n(serde_json::json!({})), "");
+    }
+
     #[test]
     fn a_track_that_mixes_the_others_is_found_by_name() {
         let t = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
