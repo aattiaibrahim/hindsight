@@ -1328,3 +1328,10 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
 .sb-meter { width: 64px; height: 4px; border-radius: 2px; background: var(--raised); overflow: hidden; }
 .sb-meter i { display: block; height: 100%; background: var(--accent); }
 .sb-stop { height: 24px; padding: 0 10px; font-size: 12px; }
+
+/* Saving an edit: the button fills up as ffmpeg goes, and the side panel shows a bar. */
+.btn.primary.saving { opacity: 1; cursor: progress; font-variant-numeric: tabular-nums;
+  background: linear-gradient(to right, #fff var(--pct, 0%), #bdbdbd var(--pct, 0%)); transition: background 0.25s; }
+.job-progress { display: flex; flex-direction: column; gap: 6px; font-variant-numeric: tabular-nums; }
+.job-bar { display: block; height: 4px; border-radius: 2px; background: var(--raised); overflow: hidden; }
+.job-bar > span { display: block; height: 100%; background: var(--accent); transition: width 0.25s; }

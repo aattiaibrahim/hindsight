@@ -30,7 +30,7 @@ import { StudioNas } from "./NasProgress";
 import { Slider } from "./Slider";
 import { Crop, CROP_PRESETS, CropBox, cropPixels, fitRatio, isWhole, WHOLE } from "./CropBox";
 
-type Job = { label: string } | null;
+type Job = { label: string; pct?: number } | null;
 
 function loadNumber(key: string, fallback: number) {
   try {
@@ -620,6 +620,10 @@ export function Studio({
   const run = async (label: string, fn: () => Promise<string>, replaces = false) => {
     setJob({ label });
     setResult(null);
+    // How far the save has got, from ffmpeg (see edit-progress in lib.rs).
+    const un = listen<{ path: string; pct: number }>("edit-progress", (e) => {
+      if (e.payload.path === path) setJob((j) => (j ? { ...j, pct: Math.max(j.pct ?? 0, e.payload.pct) } : j));
+    });
     try {
       const out = await fn();
       onDone();
@@ -635,6 +639,7 @@ export function Studio({
     } catch (e) {
       setResult({ text: errText(e), err: true });
     } finally {
+      un.then((f) => f());
       setJob(null);
     }
   };
@@ -702,14 +707,17 @@ export function Studio({
           <span className="kbd">T</span>
         </button>
         <button
-          className="btn primary"
+          className={`btn primary ${job ? "saving" : ""}`}
+          style={job?.pct != null ? ({ "--pct": `${job.pct}%` } as React.CSSProperties) : undefined}
           disabled={busy || (wholeFile && !audioEdited && !cropped)}
           title="Cuts exactly at your start and end frames, with your audio changes. Only the moment before the first keyframe is re-encoded (under a second for Hindsight's clips); the rest of the video is copied untouched, so it's quick and keeps full quality."
           onClick={() =>
             run(wholeFile ? (cropped ? "Saving crop…" : "Saving audio changes…") : "Saving trim…", () => api.trim(path, a, b, true, replace, editsForSave, cropForSave), replace)
           }
         >
-          {wholeFile && cropped ? "Save crop" : wholeFile && audioEdited ? "Save audio changes" : "Save trim"}
+          {job
+            ? `${job.label.replace("…", "")}${job.pct != null ? ` ${job.pct}%` : "…"}`
+            : wholeFile && cropped ? "Save crop" : wholeFile && audioEdited ? "Save audio changes" : "Save trim"}
         </button>
       </div>
       <div className={`studio-body ${theater ? "theater" : ""} ${narrow ? "narrow" : ""}`}>
@@ -1185,7 +1193,13 @@ export function Studio({
               : "The original is kept. Edits are saved as new files next to it."}
           </span>
           </div>
-          {job && <div className="result">{job.label}</div>}
+          {job && (
+            <div className="result job-progress">
+              {job.label.replace("…", "")}
+              {job.pct != null ? ` ${job.pct}%` : "…"}
+              <span className="job-bar"><span style={{ width: `${job.pct ?? 0}%` }} /></span>
+            </div>
+          )}
           {result && (
             <div className={`result ${result.err ? "err" : ""}`}>
               {result.text}

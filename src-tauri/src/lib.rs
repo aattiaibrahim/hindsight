@@ -974,7 +974,21 @@ async fn edit(
     }
     // Edits keep the clip's date: a trim stays where the clip was, not under today.
     let dates = library::dates_of(std::path::Path::new(&original));
-    let out = blocking(move || f(&path)).await?;
+    // Progress for Studio: seconds written so far, out of the edit's length.
+    let total = expected_secs.or_else(|| duration_of(&path)).filter(|t| *t > 0.0);
+    let (a, which) = (app.clone(), original.clone());
+    let out = blocking(move || {
+        ffmpeg::with_progress(
+            move |secs| {
+                if let Some(t) = total {
+                    let pct = (secs / t * 100.0).clamp(0.0, 99.0).round() as u32;
+                    let _ = a.emit("edit-progress", serde_json::json!({ "path": which, "pct": pct }));
+                }
+            },
+            || f(&path),
+        )
+    })
+    .await?;
     if !replace {
         if let Some(d) = dates {
             library::set_dates(std::path::Path::new(&out), d);
