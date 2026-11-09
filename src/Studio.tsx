@@ -417,7 +417,14 @@ export function Studio({
         .catch(() => alive && setWaves([]));
       api
         .previewAudio(path)
-        .then((t) => alive && setTracks(t))
+        .then((t) => {
+          if (!alive) return;
+          setTracks(t);
+          // A track that's the others already mixed (Medal's "All Audio") starts muted
+          // here, or the game and mic play twice. Saves leave it out too.
+          const mixTitle = t.mix == null ? null : t.mix === 0 ? t.firstTitle : t.extra.find((x) => x.index === t.mix)?.title;
+          if (mixTitle) setTrackMuted((m) => ({ ...m, [mixTitle]: true }));
+        })
         // Only the preview of the other tracks is lost; editing them still works.
         .catch(() => alive && setTracks({ firstTitle: "Game audio", extra: [] }));
     };
@@ -1035,8 +1042,12 @@ export function Studio({
                       >
                         <SpeakerIcon level={off ? 0 : tv(t.title)} />
                       </button>
-                      <span className="track-name" title={t.title}>
+                      <span
+                        className="track-name"
+                        title={t.index === tracks.mix ? `${t.title}: the other tracks already mixed together, so it's muted here and left out when you save, export or share` : t.title}
+                      >
                         {t.title.replace(" audio", "")}
+                        {t.index === tracks.mix && <small className="muted"> (mix)</small>}
                       </span>
                       <Slider
                         aria-label={`${t.title} volume`}

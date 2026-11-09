@@ -2,6 +2,7 @@
 // Everything is written to the cache folder, never next to the clips.
 
 import { spawn } from "node:child_process";
+import { trackName, tracksToMix } from "./tracks.js";
 import { mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -168,6 +169,7 @@ export class Media {
           duration: Number(j.format?.duration) || 0,
           video: v ? { codec: v.codec_name, width: v.width, height: v.height, pixFmt: v.pix_fmt } : null,
           audio: audio.map((a) => a.codec_name),
+          audioNames: audio.map(trackName),
         };
       });
       p.catch(() => this.probes.delete(k));
@@ -244,11 +246,13 @@ export class Media {
       const out = this.webPath(clip);
       const tmp = `${out}.tmp.mp4`;
       const args = ["-hide_banner", "-v", "error", "-y", "-i", file, "-map", "0:v:0"];
-      // Desktop and mic are separate tracks in Rewind clips: mix them so phones hear both.
-      if (info.audio.length === 1) args.push("-map", "0:a:0");
-      if (info.audio.length > 1) {
-        const inputs = info.audio.map((_, i) => `[0:a:${i}]`).join("");
-        args.push("-filter_complex", `${inputs}amix=inputs=${info.audio.length}:duration=longest:normalize=0[mix]`, "-map", "[mix]");
+      // Desktop and mic are separate tracks in Rewind clips: mix them so phones hear both
+      // (not a track that already mixes the others, like Medal's "All Audio": see tracks.js).
+      const mix = tracksToMix(info.audioNames ?? info.audio.map(() => ""));
+      if (mix.length === 1) args.push("-map", `0:a:${mix[0]}`);
+      if (mix.length > 1) {
+        const inputs = mix.map((i) => `[0:a:${i}]`).join("");
+        args.push("-filter_complex", `${inputs}amix=inputs=${mix.length}:duration=longest:normalize=0[mix]`, "-map", "[mix]");
       }
       args.push(
         "-vf", "scale='min(1920,iw)':-2,format=yuv420p",

@@ -67,7 +67,7 @@ pub fn cancel() {
 }
 
 /// The ffmpeg arguments for a montage (without the output path).
-pub fn args(m: &Montage, audio_tracks: &[u32]) -> Result<(Vec<std::ffi::OsString>, f64), String> {
+pub fn args(m: &Montage, audio_tracks: &[Vec<usize>]) -> Result<(Vec<std::ffi::OsString>, f64), String> {
     if m.pieces.is_empty() {
         return Err("Add some clips to the montage first.".into());
     }
@@ -94,15 +94,16 @@ pub fn args(m: &Montage, audio_tracks: &[u32]) -> Result<(Vec<std::ffi::OsString
         g.push(format!(
             "[{i}:v:0]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,fps={fps},format=yuv420p,setsar=1,trim=duration={len:.3},setpts=PTS-STARTPTS[v{i}]"
         ));
-        // The clip's sound: all its tracks mixed, or silence for a clip without any.
-        let n = audio_tracks.get(i).copied().unwrap_or(0);
+        // The clip's sound: its tracks mixed (not a track that's already the others
+        // mixed, see library::tracks_to_mix), or silence for a clip without any.
+        let mix = audio_tracks.get(i).cloned().unwrap_or_default();
         let tail = format!("aresample=48000,aformat=channel_layouts=stereo,{clip_gain},apad,atrim=duration={len:.3},asetpts=PTS-STARTPTS[a{i}]");
-        match n {
-            0 => g.push(format!("anullsrc=r=48000:cl=stereo,atrim=duration={len:.3},asetpts=PTS-STARTPTS[a{i}]")),
-            1 => g.push(format!("[{i}:a:0]{tail}")),
-            n => {
-                let ins: String = (0..n).map(|t| format!("[{i}:a:{t}]")).collect();
-                g.push(format!("{ins}amix=inputs={n}:duration=longest:normalize=0,{tail}"));
+        match mix.as_slice() {
+            [] => g.push(format!("anullsrc=r=48000:cl=stereo,atrim=duration={len:.3},asetpts=PTS-STARTPTS[a{i}]")),
+            [t] => g.push(format!("[{i}:a:{t}]{tail}")),
+            ts => {
+                let ins: String = ts.iter().map(|t| format!("[{i}:a:{t}]")).collect();
+                g.push(format!("{ins}amix=inputs={}:duration=longest:normalize=0,{tail}", ts.len()));
             }
         }
     }
@@ -143,7 +144,11 @@ pub fn out_path(clips_dir: &Path) -> PathBuf {
 /// Render it. `progress` gets 0..1 as it goes.
 pub fn render(m: &Montage, out: &Path, mut progress: impl FnMut(f64)) -> Result<String, String> {
     CANCEL.store(false, Ordering::Relaxed);
-    let tracks: Vec<u32> = m.pieces.iter().map(|p| library::probe(&p.path).map(|i| i.audio_tracks).unwrap_or(0)).collect();
+    let tracks: Vec<Vec<usize>> = m
+        .pieces
+        .iter()
+        .map(|p| library::tracks_to_mix(&p.path, library::probe(&p.path).map(|i| i.audio_tracks).unwrap_or(0) as usize))
+        .collect();
     let (mut a, total) = args(m, &tracks)?;
     a.push(out.into());
     let mut child = ffmpeg::cmd("ffmpeg")

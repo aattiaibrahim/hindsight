@@ -938,6 +938,8 @@ async fn thumbnail(app: AppHandle, path: String) -> Result<String, String> {
 struct PreviewAudio {
     first_title: String,
     extra: Vec<library::PreviewTrack>,
+    /// A track that's the others already mixed (Medal's "All Audio"): heard twice if played with them.
+    mix: Option<usize>,
 }
 
 /// Audio tracks Studio has to play next to the video (the video plays track 1 itself).
@@ -945,7 +947,8 @@ struct PreviewAudio {
 async fn preview_audio(app: AppHandle, path: String) -> Result<PreviewAudio, String> {
     let cache = app.state::<AppState>().thumbs_dir.with_file_name("preview");
     blocking(move || {
-        Ok(PreviewAudio { first_title: library::first_track_title(&path), extra: library::preview_tracks(&path, &cache)? })
+        let mix = library::mix_copy(&library::track_titles(&path));
+        Ok(PreviewAudio { first_title: library::first_track_title(&path), extra: library::preview_tracks(&path, &cache)?, mix })
     })
     .await
 }

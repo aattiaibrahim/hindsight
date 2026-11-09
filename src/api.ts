@@ -193,7 +193,7 @@ export type BenchReport = {
 };
 export type BenchProgress = { step: string; detail: string; waitingForUser: boolean; done: number; total: number };
 
-export type PreviewAudio ={ firstTitle: string; extra: { index: number; title: string; path: string }[] };
+export type PreviewAudio ={ firstTitle: string; extra: { index: number; title: string; path: string }[]; /** a track that's the others already mixed */ mix?: number | null };
 
 export type DeleteResult ={ deleted: string[]; failed: [string, string][] };
 

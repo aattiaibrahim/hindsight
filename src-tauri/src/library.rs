@@ -276,7 +276,7 @@ pub struct PreviewTrack {
 /// (e.g. the mic) is pulled out into its own small audio file so Studio can
 /// play it alongside, in sync. Copied without re-encoding when possible.
 pub fn preview_tracks(path: &str, cache: &Path) -> Result<Vec<PreviewTrack>, String> {
-    let mut args = ffmpeg::args(&["-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_name:stream_tags=title", "-of", "json"]);
+    let mut args = ffmpeg::args(&["-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_name:stream_tags=title,name", "-of", "json"]);
     args.push(path.into());
     let json: Value = serde_json::from_str(&ffmpeg::run("ffprobe", &args)?).map_err(|e| e.to_string())?;
     let streams = json["streams"].as_array().cloned().unwrap_or_default();
@@ -290,7 +290,7 @@ pub fn preview_tracks(path: &str, cache: &Path) -> Result<Vec<PreviewTrack>, Str
 
     let mut out = Vec::new();
     for (i, s) in streams.iter().enumerate().skip(1) {
-        let title = s["tags"]["title"].as_str().map(str::to_string).unwrap_or_else(|| {
+        let title = s["tags"]["title"].as_str().or(s["tags"]["name"].as_str()).map(str::to_string).unwrap_or_else(|| {
             if i == 1 { "Microphone".into() } else { format!("Track {}", i + 1) }
         });
         let file = cache.join(format!("{key}_a{i}.m4a"));
@@ -316,13 +316,56 @@ pub fn preview_tracks(path: &str, cache: &Path) -> Result<Vec<PreviewTrack>, Str
 }
 
 /// The first audio track's title (what plays inside the video element).
+/// Names other recorders give a track that's every other track already mixed
+/// together (Medal's "All Audio", OBS-style "Mix"). Mixing it in again with
+/// the separate tracks plays the game and mic twice.
+const MIX_NAMES: [&str; 10] = ["all audio", "all", "mix", "mixed", "master", "combined", "everything", "full mix", "main mix", "stereo mix"];
+
+/// Each audio track's name: its title tag, or the name tag MP4s from Medal use. "" when none.
+pub fn track_titles(path: &str) -> Vec<String> {
+    let mut args = ffmpeg::args(&["-v", "error", "-select_streams", "a", "-show_entries", "stream_tags=title,name", "-of", "json"]);
+    args.push(path.into());
+    let Some(v) = ffmpeg::run("ffprobe", &args).ok().and_then(|j| serde_json::from_str::<Value>(&j).ok()) else { return Vec::new() };
+    v["streams"]
+        .as_array()
+        .map(|s| s.iter().map(|t| t["tags"]["title"].as_str().or(t["tags"]["name"].as_str()).unwrap_or("").trim().to_string()).collect())
+        .unwrap_or_default()
+}
+
+/// Which track is a mix of the others, if exactly one is (and there are others).
+pub fn mix_copy(titles: &[String]) -> Option<usize> {
+    if titles.len() < 2 {
+        return None;
+    }
+    let hits: Vec<usize> = titles.iter().enumerate().filter(|(_, t)| MIX_NAMES.contains(&t.to_lowercase().as_str())).map(|(i, _)| i).collect();
+    (hits.len() == 1).then(|| hits[0])
+}
+
+/// The tracks to mix when a clip's sound becomes one track: all of them, except a
+/// track that's already the others mixed together.
+pub fn tracks_to_mix(path: &str, n: usize) -> Vec<usize> {
+    let skip = if n >= 2 { mix_copy(&track_titles(path)) } else { None };
+    (0..n).filter(|i| Some(*i) != skip).collect()
+}
+
+/// A filter graph that mixes `tracks` (each through `chain`) into `[out]`.
+fn mix_graph(tracks: &[usize], chain: impl Fn(usize) -> String, out: &str) -> String {
+    if let [t] = tracks {
+        return format!("{}anull[{out}]", chain(*t));
+    }
+    let mut parts: Vec<String> = tracks.iter().map(|&i| format!("{}anull[t{i}]", chain(i))).collect();
+    let inputs: String = tracks.iter().map(|i| format!("[t{i}]")).collect();
+    parts.push(format!("{inputs}amix=inputs={}:duration=longest:normalize=0[{out}]", tracks.len()));
+    parts.join(";")
+}
+
 pub fn first_track_title(path: &str) -> String {
-    let mut args = ffmpeg::args(&["-v", "error", "-select_streams", "a:0", "-show_entries", "stream_tags=title", "-of", "json"]);
+    let mut args = ffmpeg::args(&["-v", "error", "-select_streams", "a:0", "-show_entries", "stream_tags=title,name", "-of", "json"]);
     args.push(path.into());
     ffmpeg::run("ffprobe", &args)
         .ok()
         .and_then(|j| serde_json::from_str::<Value>(&j).ok())
-        .and_then(|v| v["streams"][0]["tags"]["title"].as_str().map(str::to_string))
+        .and_then(|v| v["streams"][0]["tags"]["title"].as_str().or(v["streams"][0]["tags"]["name"].as_str()).map(str::to_string))
         .unwrap_or_else(|| "Game".into())
 }
 
@@ -788,20 +831,15 @@ fn smart_trim(path: &str, start: f64, end: f64, out: &Path, audio: &AudioEdit) -
 
 /// Map video plus one audio track: desktop + mic mixed when there are several,
 /// because most players and Discord only play the first track.
-fn map_mixed_audio(args: &mut Vec<OsString>, audio_tracks: u32, audio: &AudioEdit) {
+fn map_mixed_audio(args: &mut Vec<OsString>, path: &str, audio_tracks: u32, audio: &AudioEdit) {
     args.extend(ffmpeg::args(&["-map", "0:v:0"]));
-    match audio_tracks {
-        0 => {}
-        1 if audio.is_empty() => args.extend(ffmpeg::args(&["-map", "0:a:0"])),
-        1 => {
-            let graph = format!("{}anull[mix]", audio.chain(0, 0.0));
+    let tracks = tracks_to_mix(path, audio_tracks as usize);
+    match tracks.as_slice() {
+        [] => {}
+        [t] if audio.is_empty() => args.extend(ffmpeg::args(&["-map", &format!("0:a:{t}")])),
+        _ => {
+            let graph = mix_graph(&tracks, |i| audio.chain(i, 0.0), "mix");
             args.extend(ffmpeg::args(&["-filter_complex", &graph, "-map", "[mix]"]));
-        }
-        n => {
-            let mut parts: Vec<String> = (0..n as usize).map(|i| format!("{}anull[t{i}]", audio.chain(i, 0.0))).collect();
-            let inputs: String = (0..n).map(|i| format!("[t{i}]")).collect();
-            parts.push(format!("{inputs}amix=inputs={n}:duration=longest:normalize=0[mix]"));
-            args.extend(ffmpeg::args(&["-filter_complex", &parts.join(";"), "-map", "[mix]"]));
         }
     }
 }
@@ -1102,7 +1140,7 @@ fn export_h264_vf(path: &str, out: PathBuf, audio: &AudioEdit, crop: Option<Crop
     let info = probe(path)?;
     let mut args = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-i"]);
     args.push(path.into());
-    map_mixed_audio(&mut args, info.audio_tracks, audio);
+    map_mixed_audio(&mut args, path, info.audio_tracks, audio);
     if let Some(c) = crop.filter(|c| !c.is_whole()) {
         args.extend(ffmpeg::args(&["-vf", &c.filter(info.width, info.height)]));
     }
@@ -1138,13 +1176,7 @@ pub fn export_audio(path: &str, start: f64, end: f64, track: Option<usize>, labe
     // The input starts at the cut (-ss before -i), so mute times shift by `start`.
     let graph = match track {
         Some(i) => format!("{}anull[out]", audio.chain(i, start)),
-        None if n == 1 => format!("{}anull[out]", audio.chain(0, start)),
-        None => {
-            let mut parts: Vec<String> = (0..n).map(|i| format!("{}anull[t{i}]", audio.chain(i, start))).collect();
-            let inputs: String = (0..n).map(|i| format!("[t{i}]")).collect();
-            parts.push(format!("{inputs}amix=inputs={n}:duration=longest:normalize=0[out]"));
-            parts.join(";")
-        }
+        None => mix_graph(&tracks_to_mix(path, n), |i| audio.chain(i, start), "out"),
     };
     args.extend(ffmpeg::args(&["-filter_complex", &graph, "-map", "[out]", "-vn", "-c:a", "libmp3lame", "-b:a", "256k"]));
     args.push(out.clone().into());
@@ -1171,7 +1203,7 @@ fn compress_vf(path: &str, target_mb: u32, out: PathBuf, audio: &AudioEdit, crop
     let (b, buf) = (format!("{video_kbps}k"), format!("{}k", video_kbps * 2));
     let mut args = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-i"]);
     args.push(path.into());
-    map_mixed_audio(&mut args, info.audio_tracks, audio);
+    map_mixed_audio(&mut args, path, info.audio_tracks, audio);
     let mut vf = Vec::new();
     if let Some(c) = crop.filter(|c| !c.is_whole()) {
         vf.push(c.filter(info.width, info.height));
@@ -1193,6 +1225,53 @@ fn compress_vf(path: &str, target_mb: u32, out: PathBuf, audio: &AudioEdit, crop
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_track_that_mixes_the_others_is_found_by_name() {
+        let t = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(mix_copy(&t(&["All Audio", "Game", "Mic"])), Some(0));
+        assert_eq!(mix_copy(&t(&["Game", "Mic", "Mix"])), Some(2));
+        assert_eq!(mix_copy(&t(&["Desktop audio", "Microphone", "Discord"])), None);
+        assert_eq!(mix_copy(&t(&["All Audio"])), None, "a lone track is just the sound");
+        assert_eq!(mix_copy(&t(&["Mix", "Master", "Mic"])), None, "unsure: two candidates");
+        assert_eq!(mix_copy(&t(&["", "", ""])), None);
+    }
+
+    /// A Medal-style clip: "All Audio" (loud here) plus the separate "Game" and
+    /// "Mic" tracks (silent). Mixed sound must leave "All Audio" out, or the game
+    /// and mic play twice.
+    #[test]
+    fn mixing_leaves_out_a_track_that_already_mixes_the_others() {
+        crate::ffmpeg::init(None);
+        let dir = std::env::temp_dir().join(format!("rewind-mixcopy-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let clip = dir.join("medal.mp4");
+        let mut a = ffmpeg::args(&[
+            "-hide_banner", "-loglevel", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30",
+            "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+            "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+            "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+            "-t", "3", "-map", "0:v", "-map", "1:a", "-map", "2:a", "-map", "3:a",
+            "-c:v", "mpeg4", "-c:a", "aac",
+            "-metadata:s:a:0", "title=All Audio", "-metadata:s:a:1", "title=Game", "-metadata:s:a:2", "title=Mic",
+        ]);
+        a.push(clip.clone().into());
+        ffmpeg::run("ffmpeg", &a).unwrap();
+        let p = clip.to_string_lossy().into_owned();
+        assert_eq!(track_titles(&p), vec!["All Audio", "Game", "Mic"]);
+        assert_eq!(tracks_to_mix(&p, 3), vec![1, 2]);
+        let mp3 = export_audio(&p, 0.0, 0.0, None, "all", &AudioEdit::default()).unwrap();
+        let mut v = ffmpeg::args(&["-hide_banner", "-i"]);
+        v.push(mp3.clone().into());
+        v.extend(ffmpeg::args(&["-af", "volumedetect", "-f", "null", "-"]));
+        let out = crate::ffmpeg::cmd("ffmpeg").args(&v).output().unwrap();
+        let log = String::from_utf8_lossy(&out.stderr);
+        let max: f64 = log.lines().find_map(|l| l.split("max_volume:").nth(1)).and_then(|s| s.trim().trim_end_matches(" dB").parse().ok()).unwrap();
+        assert!(max < -50.0, "the All Audio copy was mixed in again (max {max} dB)");
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     /// A 6 s 720p60 test video with two audio tracks (like a real Hindsight clip).
     /// A 6 s, 60 fps clip like Hindsight's (keyframe every second, two audio

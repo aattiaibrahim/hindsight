@@ -2,6 +2,7 @@
 // the editor, and only with ALLOW_CHANGES=1.
 
 import { createReadStream } from "node:fs";
+import { tracksToMix } from "./tracks.js";
 import { createWriteStream } from "node:fs";
 import { mkdir, readFile, rename, rm, stat, statfs } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -204,7 +205,7 @@ export async function createServer({ library, media, cleanup = null, shares = nu
           const file = path.join(library.root, ...clip.rel.split("/"));
           const info = await media.probe(clip, file);
           const end = Math.min(Number(p.end), info.duration || Number(p.end));
-          pieces.push({ file, start: Math.max(0, Number(p.start) || 0), end, audioTracks: info.audio.length });
+          pieces.push({ file, start: Math.max(0, Number(p.start) || 0), end, audioTracks: info.audio.length, mix: tracksToMix(info.audioNames ?? info.audio.map(() => "")) });
         }
         const music = body.song ? { file: montages.songPath(body.song), offset: Number(body.songOffset) || 0, volumeDb: Number(body.songDb) || 0 } : null;
         const id = await montages.start({ pieces, music, clipVolumeDb: Number(body.clipDb) || 0, height: Number(body.height) || 1080, fps: Number(body.fps) || 30 });

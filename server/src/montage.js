@@ -37,10 +37,11 @@ export function montageArgs({ pieces, music = null, clipVolumeDb = 0, height = 1
       `[${i}:v:0]scale=${w}:${h}:force_original_aspect_ratio=decrease,pad=${w}:${h}:(ow-iw)/2:(oh-ih)/2:black,fps=${fps},format=yuv420p,setsar=1,trim=duration=${len},setpts=PTS-STARTPTS[v${i}]`,
     );
     const tail = `aresample=48000,aformat=channel_layouts=stereo,${gain},apad,atrim=duration=${len},asetpts=PTS-STARTPTS[a${i}]`;
-    const n = p.audioTracks ?? 1;
-    if (n === 0) g.push(`anullsrc=r=48000:cl=stereo,atrim=duration=${len},asetpts=PTS-STARTPTS[a${i}]`);
-    else if (n === 1) g.push(`[${i}:a:0]${tail}`);
-    else g.push(`${Array.from({ length: n }, (_, t) => `[${i}:a:${t}]`).join("")}amix=inputs=${n}:duration=longest:normalize=0,${tail}`);
+    // `mix`: the tracks to mix (not one that already mixes the others, see tracks.js).
+    const mix = p.mix ?? Array.from({ length: p.audioTracks ?? 1 }, (_, t) => t);
+    if (mix.length === 0) g.push(`anullsrc=r=48000:cl=stereo,atrim=duration=${len},asetpts=PTS-STARTPTS[a${i}]`);
+    else if (mix.length === 1) g.push(`[${i}:a:${mix[0]}]${tail}`);
+    else g.push(`${mix.map((t) => `[${i}:a:${t}]`).join("")}amix=inputs=${mix.length}:duration=longest:normalize=0,${tail}`);
   });
   g.push(`${pieces.map((_, i) => `[v${i}][a${i}]`).join("")}concat=n=${pieces.length}:v=1:a=1[vout][aclips]`);
   if (music) {

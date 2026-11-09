@@ -18,6 +18,7 @@
 // - Without ALLOW_CHANGES the outputs are kept in the cache, to download.
 
 import { spawn } from "node:child_process";
+import { trackName, tracksToMix } from "./tracks.js";
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readdir, readFile, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -100,13 +101,20 @@ export function audioChain(tracks, i, offset = 0) {
   return f ? `[0:a:${i}]${f},` : `[0:a:${i}]`;
 }
 
-/** Map video plus one audio track: every track mixed, so phones and Discord hear them all. */
-function mixedAudio(n, tracks, offset) {
-  if (n === 0) return [];
-  if (n === 1) return ["-filter_complex", `${audioChain(tracks, 0, offset)}anull[mix]`, "-map", "[mix]"];
-  const parts = Array.from({ length: n }, (_, i) => `${audioChain(tracks, i, offset)}anull[t${i}]`);
-  parts.push(`${Array.from({ length: n }, (_, i) => `[t${i}]`).join("")}amix=inputs=${n}:duration=longest:normalize=0[mix]`);
-  return ["-filter_complex", parts.join(";"), "-map", "[mix]"];
+/** `idx` mixed into one track `[out]` (each through its edits). */
+function mixGraph(idx, tracks, offset, out) {
+  if (idx.length === 1) return `${audioChain(tracks, idx[0], offset)}anull[${out}]`;
+  const parts = idx.map((i) => `${audioChain(tracks, i, offset)}anull[t${i}]`);
+  parts.push(`${idx.map((i) => `[t${i}]`).join("")}amix=inputs=${idx.length}:duration=longest:normalize=0[${out}]`);
+  return parts.join(";");
+}
+
+/** Map video plus one audio track: the tracks mixed, so phones and Discord hear them all
+ *  (not a track that already mixes the others, like Medal's "All Audio": see tracks.js). */
+function mixedAudio(info, tracks, offset) {
+  const idx = tracksToMix(info.audio.map((a) => a.raw ?? ""));
+  if (!idx.length) return [];
+  return ["-filter_complex", mixGraph(idx, tracks, offset, "mix"), "-map", "[mix]"];
 }
 
 export function encoderArgs(enc) {
@@ -143,7 +151,7 @@ export async function probe(file) {
     duration: Number(j.format?.duration) || 0,
     size: Number(j.format?.size) || 0,
     video: v ? { codec: v.codec_name, width: v.width, height: v.height, fps: rate(v.avg_frame_rate) || rate(v.r_frame_rate) } : null,
-    audio: audio.map((a, i) => ({ codec: a.codec_name, name: a.tags?.title || a.tags?.TITLE || (audio.length === 1 ? "Audio" : i === 0 ? "Desktop" : i === 1 ? "Microphone" : `Track ${i + 1}`) })),
+    audio: audio.map((a, i) => ({ codec: a.codec_name, raw: trackName(a), name: trackName(a) || (audio.length === 1 ? "Audio" : i === 0 ? "Desktop" : i === 1 ? "Microphone" : `Track ${i + 1}`) })),
   };
 }
 
@@ -363,7 +371,7 @@ export async function exportH264(file, { start = 0, end = 0, audio = [], encoder
   const info = await probe(file);
   if (!info.video) throw fail("This file has no picture.");
   const len = (end > start ? end : info.duration) - start;
-  const args = ["-hide_banner", "-loglevel", "error", "-y", ...rangeArgs(start, end), "-i", file, "-map", "0:v:0", ...mixedAudio(info.audio.length, audio, start)];
+  const args = ["-hide_banner", "-loglevel", "error", "-y", ...rangeArgs(start, end), "-i", file, "-map", "0:v:0", ...mixedAudio(info, audio, start)];
   args.push("-c:v", encoder, ...encoderArgs(encoder), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", "-f", "mp4", out);
   await run(FFMPEG(), args, { onStdout: progressOf(len, onProgress) });
 }
@@ -374,8 +382,7 @@ export async function exportMp3(file, { start = 0, end = 0, track = null, audio 
   const n = info.audio.length;
   if (!n) throw fail("This clip has no audio.");
   if (track !== null && !(track >= 0 && track < n)) throw fail("That audio track isn't in this clip.");
-  const graph =
-    track !== null ? `${audioChain(audio, track, start)}anull[out]` : n === 1 ? `${audioChain(audio, 0, start)}anull[out]` : [...Array.from({ length: n }, (_, i) => `${audioChain(audio, i, start)}anull[t${i}]`), `${Array.from({ length: n }, (_, i) => `[t${i}]`).join("")}amix=inputs=${n}:duration=longest:normalize=0[out]`].join(";");
+  const graph = track !== null ? `${audioChain(audio, track, start)}anull[out]` : mixGraph(tracksToMix(info.audio.map((a) => a.raw ?? "")), audio, start, "out");
   const len = (end > start ? end : info.duration) - start;
   await run(FFMPEG(), ["-hide_banner", "-loglevel", "error", "-y", ...rangeArgs(start, end), "-i", file, "-filter_complex", graph, "-map", "[out]", "-vn", "-c:a", "libmp3lame", "-b:a", "256k", "-progress", "pipe:1", "-nostats", "-f", "mp3", out], { onStdout: progressOf(len, onProgress) });
 }
@@ -404,14 +411,14 @@ export async function compress(file, { start = 0, end = 0, targetMb, audio = [],
     const log = path.join(tmpDir, `pass-${randomUUID()}`);
     try {
       await run(FFMPEG(), [...input, "-map", "0:v:0", ...vf, "-c:v", "libx264", "-preset", "medium", "-b:v", b, "-pass", "1", "-passlogfile", log, "-an", "-progress", "pipe:1", "-nostats", "-f", "null", "-"], { onStdout: progressOf(len * 2, (p) => onProgress?.(p, "pass 1 of 2")) });
-      await run(FFMPEG(), [...input, "-map", "0:v:0", ...mixedAudio(info.audio.length, audio, start), ...vf, "-c:v", "libx264", "-preset", "medium", "-b:v", b, "-pass", "2", "-passlogfile", log, ...tail], {
+      await run(FFMPEG(), [...input, "-map", "0:v:0", ...mixedAudio(info, audio, start), ...vf, "-c:v", "libx264", "-preset", "medium", "-b:v", b, "-pass", "2", "-passlogfile", log, ...tail], {
         onStdout: (c) => progressOf(len * 2, (p) => onProgress?.(Math.min(0.99, 0.5 + p), "pass 2 of 2"))(c),
       });
     } finally {
       for (const f of await readdir(tmpDir).catch(() => [])) if (f.startsWith(path.basename(log))) await rm(path.join(tmpDir, f), { force: true });
     }
   } else {
-    await run(FFMPEG(), [...input, "-map", "0:v:0", ...mixedAudio(info.audio.length, audio, start), ...vf, "-c:v", encoder, "-b:v", b, "-maxrate", b, "-bufsize", `${videoKbps * 2}k`, ...tail], { onStdout: progressOf(len, onProgress) });
+    await run(FFMPEG(), [...input, "-map", "0:v:0", ...mixedAudio(info, audio, start), ...vf, "-c:v", encoder, "-b:v", b, "-maxrate", b, "-bufsize", `${videoKbps * 2}k`, ...tail], { onStdout: progressOf(len, onProgress) });
   }
 }
 
