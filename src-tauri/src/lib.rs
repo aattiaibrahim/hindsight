@@ -1283,13 +1283,20 @@ async fn find_duplicates(app: AppHandle) -> Result<Vec<DupeSet>, String> {
     let s = settings_of(&app);
     blocking(move || {
         let linked = linked_roots(&s);
-        // Only files on this PC. A clip and its NAS copy are the same clip on purpose,
-        // and nothing on the NAS is ever offered for removal as a "duplicate".
-        let all = library::scan_all(PathBuf::from(&s.clips_dir).as_path(), &s.external_files, &[], &linked, &s.nas_dir);
+        // Byte-for-byte copies: only files on this PC. A clip and its NAS copy are the
+        // same clip on purpose (same name and format), and NAS files aren't read in full.
+        let all = library::scan_all(PathBuf::from(&s.clips_dir).as_path(), &s.external_files, &nas::listing(&s.nas_dir), &linked, &s.nas_dir);
         let list: Vec<(String, u64)> = all
-            .into_iter()
+            .iter()
             .filter(|c| c.location != "nas" && !c.path.starts_with(r"\\") && !health::on_network(&c.path))
-            .map(|c| (c.path, c.size))
+            .map(|c| (c.path.clone(), c.size))
+            .collect();
+        // Remuxes and smaller copies: clips only on the NAS too (OBS's MKV and MP4 often
+        // end up there after freeing up space). They only compare names and details.
+        let named: Vec<(String, u64)> = list
+            .iter()
+            .cloned()
+            .chain(all.iter().filter(|c| c.location == "nas").map(|c| (c.path.clone(), c.size)))
             .collect();
         // Progress for Cleanup: files checked so far (the slow part is reading them).
         let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
@@ -1302,14 +1309,14 @@ async fn find_duplicates(app: AppHandle) -> Result<Vec<DupeSet>, String> {
         // A remux copies the streams untouched: nearly the same size (only the container
         // differs), length, picture and tracks. A re-encode of the same recording (an
         // export at a third of the size, say) isn't one: removing its original would lose quality.
-        let sizes: std::collections::HashMap<&str, u64> = list.iter().map(|(p, s)| (p.as_str(), *s)).collect();
+        let sizes: std::collections::HashMap<&str, u64> = named.iter().map(|(p, s)| (p.as_str(), *s)).collect();
         let size = |p: &str| sizes.get(p).copied().unwrap_or(0);
         let same = |a: &str, b: &str| match (prepare::probe(a), prepare::probe(b)) {
             (Ok(x), Ok(y)) => duplicates::same_streams((&x, size(a)), (&y, size(b))),
             _ => false,
         };
         let in_copies: std::collections::HashSet<&String> = copies.iter().flatten().collect();
-        let remuxes: Vec<Vec<String>> = duplicates::remuxes(&list, same).into_iter().filter(|s| !s.iter().all(|p| in_copies.contains(p))).collect();
+        let remuxes: Vec<Vec<String>> = duplicates::remuxes(&named, same).into_iter().filter(|s| !s.iter().all(|p| in_copies.contains(p))).collect();
         // The same recording re-encoded smaller (an export next to its original):
         // offered too, keeping the original by default so no quality is lost.
         let in_remuxes: std::collections::HashSet<&String> = remuxes.iter().flatten().collect();
@@ -1317,7 +1324,7 @@ async fn find_duplicates(app: AppHandle) -> Result<Vec<DupeSet>, String> {
             (Ok(x), Ok(y)) => duplicates::same_recording(&x, &y),
             _ => false,
         };
-        let smaller: Vec<Vec<String>> = duplicates::remuxes(&list, recording)
+        let smaller: Vec<Vec<String>> = duplicates::remuxes(&named, recording)
             .into_iter()
             .filter(|s| !s.iter().any(|p| in_copies.contains(p) || in_remuxes.contains(p)))
             .collect();
