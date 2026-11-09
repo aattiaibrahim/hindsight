@@ -353,13 +353,25 @@ async function limited<T>(path: string, job: () => Promise<T>, stillWanted: () =
     throw new Error(NOT_NEEDED);
   }
   lane.active++;
+  // A request that hangs (a network drive that stopped answering) mustn't hold its
+  // turn forever: after SLOT_LIMIT_MS the next one goes ahead, and this one still
+  // delivers its answer whenever it comes. Before, a few stuck ones froze every card.
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    lane.active--;
+    lane.waiting.pop()?.();
+  };
+  const timer = setTimeout(release, SLOT_LIMIT_MS);
   try {
     return await job();
   } finally {
-    lane.active--;
-    lane.waiting.pop()?.();
+    clearTimeout(timer);
+    release();
   }
 }
+const SLOT_LIMIT_MS = 20_000;
 
 /**
  * Who still wants a thumbnail or probe: cards add themselves while they're near

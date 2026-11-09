@@ -444,6 +444,9 @@ pub fn thumbnail_exists(path: &str, cache: &Path) -> bool {
 /// NAS clip's thumbnail can come ready-made from the NAS app.
 static NAS_APP: std::sync::Mutex<Option<(String, String)>> = std::sync::Mutex::new(None);
 
+/// When the NAS app last failed to answer (it's skipped for a minute after).
+static NAS_APP_DOWN: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
 pub fn set_nas_app(nas_dir: &str, server: &str) {
     let server = server.trim().trim_end_matches('/');
     *NAS_APP.lock().unwrap() = (!nas_dir.is_empty() && !server.is_empty())
@@ -463,15 +466,30 @@ fn nas_app_thumbnail(path: &str, out: &Path) -> bool {
     let p = path.replace('/', "\\");
     let Some(rest) = p.to_lowercase().starts_with(&root).then(|| p.get(root.len()..)).flatten() else { return false };
     let rel = rest.replace('\\', "/");
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let Ok(client) = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(15)).build() else { return false };
-    let Some(bytes) = client
-        .get(format!("{server}/api/thumb?rel={}", url_encode(&rel)))
-        .send()
-        .ok()
-        .filter(|r| r.status().is_success())
-        .and_then(|r| r.bytes().ok())
-    else {
+    // After the NAS app failed to answer, leave it alone for a minute (ffmpeg makes
+    // thumbnails meanwhile) instead of making every card wait for it again.
+    if NAS_APP_DOWN.lock().unwrap().is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(60)) {
+        return false;
+    }
+    // One client for all requests: no new connection and name lookup per thumbnail.
+    static CLIENT: std::sync::OnceLock<Option<reqwest::blocking::Client>> = std::sync::OnceLock::new();
+    let Some(client) = CLIENT.get_or_init(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        reqwest::blocking::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(3))
+            .timeout(std::time::Duration::from_secs(8))
+            .build()
+            .ok()
+    }) else {
+        return false;
+    };
+    let res = client.get(format!("{server}/api/thumb?rel={}", url_encode(&rel))).send();
+    let Ok(res) = res else {
+        // Not answering at all (vs. a clip it has no thumbnail for).
+        *NAS_APP_DOWN.lock().unwrap() = Some(std::time::Instant::now());
+        return false;
+    };
+    let Some(bytes) = Some(res).filter(|r| r.status().is_success()).and_then(|r| r.bytes().ok()) else {
         return false;
     };
     // A real JPEG, not an error page.
@@ -1356,6 +1374,50 @@ mod tests {
         assert_eq!(&b[..2], &[0xff, 0xd8]);
         set_nas_app("", "");
         let _ = fs::remove_dir_all(&cache);
+    }
+
+    /// The real NAS, the way the app calls it (inside tauri's async runtime, on a
+    /// blocking thread): REWIND_NAS_DIR=\NAS\clips REWIND_NAS_APP=http://NAS:8420
+    #[test]
+    #[ignore]
+    fn live_real_nas_thumbnails() {
+        crate::ffmpeg::init(None);
+        let dir = std::env::var("REWIND_NAS_DIR").unwrap();
+        let app = std::env::var("REWIND_NAS_APP").unwrap();
+        set_nas_app(&dir, &app);
+        let clips: Vec<PathBuf> = fs::read_dir(Path::new(&dir).join("VALORANT")).unwrap().flatten().map(|e| e.path()).filter(|p| is_video(p)).take(4).collect();
+        let cache = std::env::temp_dir().join(format!("rewind-realthumb-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&cache);
+        for c in &clips {
+            let (c, cache) = (c.to_string_lossy().into_owned(), cache.clone());
+            let t = std::time::Instant::now();
+            let r = tauri::async_runtime::block_on(tauri::async_runtime::spawn_blocking(move || thumbnail(&c, &cache)));
+            println!("{:?} in {:?}", r.map(|x| x.map(|p| p.len())), t.elapsed());
+        }
+        set_nas_app("", "");
+        let _ = fs::remove_dir_all(&cache);
+    }
+
+    /// How many NAS clips already have a thumbnail in the app's real cache.
+    /// REWIND_NAS_DIR=\NAS\clips REWIND_CLIPS_DIR=C:\...\Rewind, run from a normal terminal.
+    #[test]
+    #[ignore]
+    fn live_nas_thumb_count() {
+        let nas = std::env::var("REWIND_NAS_DIR").unwrap();
+        let clips = std::env::var("REWIND_CLIPS_DIR").unwrap();
+        let cache = PathBuf::from(std::env::var("LOCALAPPDATA").unwrap()).join("com.rewind.app").join("thumbs");
+        set_twin(&nas, &clips);
+        let (mut have, mut twin, mut missing) = (0, 0, Vec::new());
+        for g in fs::read_dir(&nas).unwrap().flatten().filter(|e| e.path().is_dir() && !e.file_name().to_string_lossy().starts_with('.')) {
+            for f in fs::read_dir(g.path()).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| is_video(p)) {
+                let p = f.to_string_lossy().into_owned();
+                if thumbnail_path(&p, &cache).is_ok_and(|t| t.exists()) { have += 1 }
+                else if twin_thumbnail(&p, &cache).is_some() { twin += 1 }
+                else { missing.push(p) }
+            }
+        }
+        println!("cache {}: own {have}, via this PC's copy {twin}, missing {}", cache.display(), missing.len());
+        for m in missing.iter().take(5) { println!("  missing: {m}"); }
     }
     #[test]
     fn a_track_that_mixes_the_others_is_found_by_name() {

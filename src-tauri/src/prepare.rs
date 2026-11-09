@@ -176,6 +176,32 @@ pub fn start(
 mod tests {
     use super::*;
 
+    /// How many NAS clips already have their details in the app's real cache, and how
+    /// long a probe takes for one that doesn't. Run from a normal terminal with
+    /// REWIND_NAS_DIR and REWIND_CLIPS_DIR set.
+    #[test]
+    #[ignore]
+    fn live_nas_probe_count() {
+        crate::ffmpeg::init(None);
+        let nas = std::env::var("REWIND_NAS_DIR").unwrap();
+        let clips = std::env::var("REWIND_CLIPS_DIR").unwrap();
+        init(std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join("com.rewind.app").join("probes.json"));
+        crate::library::set_twin(&nas, &clips);
+        let (mut have, mut missing) = (0, Vec::new());
+        for g in std::fs::read_dir(&nas).unwrap().flatten().filter(|e| e.path().is_dir() && !e.file_name().to_string_lossy().starts_with('.')) {
+            for f in std::fs::read_dir(g.path()).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| crate::library::is_video(p)) {
+                let p = f.to_string_lossy().into_owned();
+                if known(&p) { have += 1 } else { missing.push(p) }
+            }
+        }
+        println!("probes known {have}, missing {}", missing.len());
+        for m in missing.iter().take(3) {
+            let t = std::time::Instant::now();
+            let r = crate::library::probe(m).map(|x| x.duration);
+            println!("  {m}: {r:?} in {:?}", t.elapsed());
+        }
+    }
+
     #[test]
     fn details_are_read_once_and_again_when_the_file_changes() {
         crate::ffmpeg::init(None);
