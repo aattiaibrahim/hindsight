@@ -195,6 +195,9 @@ export type BenchProgress = { step: string; detail: string; waitingForUser: bool
 
 export type PreviewAudio ={ firstTitle: string; extra: { index: number; title: string; path: string }[]; /** a track that's the others already mixed */ mix?: number | null };
 
+/** The same clip more than once: "copy" (byte for byte) or "remux" (same recording, another format, e.g. OBS's MKV and MP4). */
+export type DupeSet = { paths: string[]; kind: "copy" | "remux" };
+
 export type DeleteResult ={ deleted: string[]; failed: [string, string][] };
 
 export type ClipFile = {
@@ -443,7 +446,7 @@ export const api = {
     invoke<string>("compress_clip", { path, targetMb, replace, audio: audio ?? null, crop: crop ?? null }),
   gpuEncoders: () => invoke<GpuEncoders>("gpu_encoders"),
   /** Sets of paths holding the very same clip */
-  findDuplicates: () => invoke<string[][]>("find_duplicates"),
+  findDuplicates: () => invoke<DupeSet[]>("find_duplicates"),
   detectStatus: () => invoke<DetectStatus>("detect_status"),
   detectInstall: () => invoke<void>("detect_install"),
   gameSuggestions: () => invoke<GameSuggestion[]>("game_suggestions"),

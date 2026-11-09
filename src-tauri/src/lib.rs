@@ -1259,9 +1259,19 @@ fn dismiss_game_suggestions(app: AppHandle, paths: Vec<String>) -> Result<(), St
     set_settings(app, s)
 }
 
-/// Sets of library paths that hold the very same clip (checked byte for byte).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DupeSet {
+    paths: Vec<String>,
+    /// "copy": byte for byte the same. "remux": the same recording in another format
+    /// (OBS keeps the MKV next to the MP4 it remuxes to).
+    kind: &'static str,
+}
+
+/// Sets of library paths that hold the same clip: copies (checked byte for byte)
+/// and remuxes (same name and recording, another format).
 #[tauri::command]
-async fn find_duplicates(app: AppHandle) -> Result<Vec<Vec<String>>, String> {
+async fn find_duplicates(app: AppHandle) -> Result<Vec<DupeSet>, String> {
     let s = settings_of(&app);
     blocking(move || {
         let linked = linked_roots(&s);
@@ -1273,7 +1283,23 @@ async fn find_duplicates(app: AppHandle) -> Result<Vec<Vec<String>>, String> {
             .filter(|c| c.location != "nas" && !c.path.starts_with(r"\\") && !health::on_network(&c.path))
             .map(|c| (c.path, c.size))
             .collect();
-        Ok(duplicates::find(&list))
+        let copies = duplicates::find(&list);
+        // A remux copies the streams untouched: nearly the same size (only the container
+        // differs), length, picture and tracks. A re-encode of the same recording (an
+        // export at a third of the size, say) isn't one: removing its original would lose quality.
+        let sizes: std::collections::HashMap<&str, u64> = list.iter().map(|(p, s)| (p.as_str(), *s)).collect();
+        let size = |p: &str| sizes.get(p).copied().unwrap_or(0);
+        let same = |a: &str, b: &str| match (prepare::probe(a), prepare::probe(b)) {
+            (Ok(x), Ok(y)) => duplicates::same_streams((&x, size(a)), (&y, size(b))),
+            _ => false,
+        };
+        let in_copies: std::collections::HashSet<&String> = copies.iter().flatten().collect();
+        let remuxes: Vec<Vec<String>> = duplicates::remuxes(&list, same).into_iter().filter(|s| !s.iter().all(|p| in_copies.contains(p))).collect();
+        Ok(copies
+            .into_iter()
+            .map(|paths| DupeSet { paths, kind: "copy" })
+            .chain(remuxes.into_iter().map(|paths| DupeSet { paths, kind: "remux" }))
+            .collect())
     })
     .await
 }

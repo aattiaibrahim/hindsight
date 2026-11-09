@@ -105,9 +105,127 @@ pub fn find(clips: &[(String, u64)]) -> Vec<Vec<String>> {
     out
 }
 
+/// The same recording saved in two formats: OBS's "Automatically remux to mp4"
+/// (and Hindsight's own Change to .mp4) keep the original, so `2026-03-05 19-36-49.mkv`
+/// sits next to `2026-03-05 19-36-49.mp4`. They differ byte for byte, so `find`
+/// misses them. Here: same folder, same name, a different extension, and
+/// `same` (length, picture, tracks) agrees. Sets of 2+ paths, sorted.
+pub fn remuxes(clips: &[(String, u64)], same: impl Fn(&str, &str) -> bool) -> Vec<Vec<String>> {
+    use std::path::Path;
+    let mut by_name: HashMap<(String, String), Vec<&str>> = HashMap::new();
+    for (p, _) in clips {
+        let path = Path::new(p);
+        let (Some(dir), Some(stem)) = (path.parent(), path.file_stem()) else { continue };
+        by_name.entry((dir.to_string_lossy().to_lowercase(), stem.to_string_lossy().to_lowercase())).or_default().push(p);
+    }
+    let ext = |p: &str| Path::new(p).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let mut out = Vec::new();
+    for (_, paths) in by_name {
+        if paths.len() < 2 {
+            continue;
+        }
+        // Each file joins the first one it matches; a lookalike with the same name stays out.
+        let mut sets: Vec<Vec<String>> = Vec::new();
+        for p in paths {
+            match sets.iter_mut().find(|s| s.iter().all(|q| ext(q) != ext(p)) && same(&s[0], p)) {
+                Some(s) => s.push(p.to_string()),
+                None => sets.push(vec![p.to_string()]),
+            }
+        }
+        out.extend(sets.into_iter().filter(|s| s.len() > 1));
+    }
+    for set in &mut out {
+        set.sort();
+    }
+    out.sort();
+    out
+}
+
+/// Is one file a remux of the other: the same streams copied into another container?
+/// Then they're nearly the same size (only the container differs) and the same
+/// length, picture and tracks. A re-encode of the same recording (an export at a
+/// third of the size) isn't: removing its original would lose quality.
+pub fn same_streams((x, xs): (&crate::library::Probe, u64), (y, ys): (&crate::library::Probe, u64)) -> bool {
+    let near = xs > 0 && ys > 0 && (xs.max(ys) - xs.min(ys)) as f64 <= xs.max(ys) as f64 * 0.05;
+    near && x.duration > 0.0
+        && (x.duration - y.duration).abs() <= 0.5_f64.max(x.duration * 0.005)
+        && (x.width, x.height) == (y.width, y.height)
+        && x.codec == y.codec
+        && x.audio_tracks == y.audio_tracks
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_remux_has_the_same_streams_but_a_re_encode_does_not() {
+        let p = |duration: f64, codec: &str| crate::library::Probe { duration, codec: codec.into(), width: 1920, height: 1080, fps: 60.0, audio_tracks: 2, container: String::new() };
+        let mkv = p(772.9, "h264");
+        // OBS's remux: a little smaller (MP4's container), same everything else.
+        assert!(same_streams((&mkv, 2_386 << 20), (&p(772.9, "h264"), 2_370 << 20)));
+        // An export of the same recording: same length and codec, a third of the size.
+        assert!(!same_streams((&mkv, 2_386 << 20), (&p(772.9, "h264"), 750 << 20)));
+        assert!(!same_streams((&mkv, 100), (&p(772.9, "hevc"), 100)), "another codec");
+        assert!(!same_streams((&mkv, 100), (&p(700.0, "h264"), 100)), "another length");
+        assert!(!same_streams((&p(0.0, "h264"), 100), (&p(0.0, "h264"), 100)), "unreadable");
+    }
+
+
+    /// Real files: an MKV, its MP4 remux (streams copied, like OBS) and a smaller
+    /// re-encode with the same name in another folder's worth of formats.
+    #[test]
+    fn a_real_remux_is_found_and_a_re_encode_is_not() {
+        use crate::ffmpeg;
+        ffmpeg::init(None);
+        let d = std::env::temp_dir().join(format!("rewind-remux-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        let run = |a: &[&str], out: &std::path::Path| {
+            let mut v = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y"]);
+            v.extend(ffmpeg::args(a));
+            v.push(out.into());
+            ffmpeg::run("ffmpeg", &v).unwrap();
+        };
+        let mkv = d.join("2026-03-05 19-36-49.mkv");
+        run(&["-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "4", "-c:v", "mpeg4", "-q:v", "2", "-c:a", "aac"], &mkv);
+        let mkv_s = mkv.to_string_lossy().into_owned();
+        run(&["-i", &mkv_s, "-map", "0", "-c", "copy"], &d.join("2026-03-05 19-36-49.mp4"));
+        let other = d.join("Export");
+        std::fs::create_dir_all(&other).unwrap();
+        let export_src = other.join("2026-03-05 19-36-49.mkv");
+        std::fs::copy(&mkv, &export_src).unwrap();
+        run(&["-i", &export_src.to_string_lossy(), "-c:v", "mpeg4", "-q:v", "20", "-c:a", "aac"], &other.join("2026-03-05 19-36-49.mp4"));
+        let list: Vec<(String, u64)> = [&mkv, &d.join("2026-03-05 19-36-49.mp4"), &export_src, &other.join("2026-03-05 19-36-49.mp4")]
+            .iter()
+            .map(|p| (p.to_string_lossy().into_owned(), std::fs::metadata(p).unwrap().len()))
+            .collect();
+        let size = |p: &str| list.iter().find(|(q, _)| q == p).map(|(_, s)| *s).unwrap_or(0);
+        let sets = remuxes(&list, |a, b| match (crate::library::probe(a), crate::library::probe(b)) {
+            (Ok(x), Ok(y)) => same_streams((&x, size(a)), (&y, size(b))),
+            _ => false,
+        });
+        assert_eq!(sets.len(), 1, "only the remux: {sets:?}");
+        assert!(!sets[0][0].contains("Export"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test]
+    fn remuxes_are_the_same_name_in_another_format_and_the_same_recording() {
+        let list: Vec<(String, u64)> = [
+            r"C:\OBS\2026-03-05 19-36-49.mkv",
+            r"C:\OBS\2026-03-05 19-36-49.mp4",
+            r"C:\OBS\2026-03-05 19-40-00.mkv",     // no partner
+            r"C:\OBS\Other\2026-03-05 19-36-49.mp4", // same name, other folder
+            r"C:\OBS\clip.mkv",
+            r"C:\OBS\clip.mp4",                    // same name, but a different recording
+        ]
+        .iter()
+        .map(|p| (p.to_string(), 1))
+        .collect();
+        let sets = remuxes(&list, |a, b| !(a.contains("clip") && b.contains("clip")));
+        assert_eq!(sets.len(), 1, "{sets:?}");
+        assert!(sets[0][0].ends_with("19-36-49.mkv") && sets[0][1].ends_with("19-36-49.mp4") && !sets[0][1].contains("Other"));
+    }
 
     #[test]
     fn finds_copies_not_lookalikes() {

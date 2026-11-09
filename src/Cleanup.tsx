@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, ClipFile, errText, fmtSize, Settings } from "./api";
+import { api, ClipFile, errText, fmtSize, Settings, DupeSet } from "./api";
 import { ConfirmDialog } from "./ConfirmUpdate";
 import { useThumb } from "./hooks";
 
@@ -128,15 +128,19 @@ function placeOf(c: ClipFile) {
   return c.onNas ? "Hindsight (also on the NAS)" : "Hindsight";
 }
 
-/** Which copy to keep by default: Hindsight's own, then the NAS, then the oldest name. */
-function bestCopy(set: ClipFile[]) {
+/** Which copy to keep by default: Hindsight's own, then the NAS, then the oldest name.
+ *  For a remux (the same recording as MKV and MP4), the MP4: it plays everywhere. */
+function bestCopy(set: ClipFile[], kind: DupeSet["kind"] = "copy") {
   const rank = (c: ClipFile) => (c.location === "local" ? 0 : c.location === "nas" ? 1 : 2);
-  return [...set].sort((a, b) => rank(a) - rank(b) || a.path.length - b.path.length)[0];
+  const mp4 = (c: ClipFile) => (kind === "remux" && /\.mp4$/i.test(c.path) ? 0 : 1);
+  return [...set].sort((a, b) => mp4(a) - mp4(b) || rank(a) - rank(b) || a.path.length - b.path.length)[0];
 }
+
+const extOf = (p: string) => (p.split(".").pop() ?? "").toUpperCase();
 
 /** The same clip saved more than once: pick the copy to keep, the rest go to the Recycle Bin. */
 function Duplicates({ clips, onDelete, onChanged }: { clips: ClipFile[]; onDelete: (paths: string[]) => Promise<boolean>; onChanged: () => void }) {
-  const [sets, setSets] = useState<string[][] | null>(null);
+  const [sets, setSets] = useState<DupeSet[] | null>(null);
   const [keep, setKeep] = useState<Record<number, string>>({});
   const byPath = useMemo(() => new Map(clips.map((c) => [c.path, c])), [clips]);
   useEffect(() => {
@@ -147,30 +151,41 @@ function Duplicates({ clips, onDelete, onChanged }: { clips: ClipFile[]; onDelet
     };
   }, [clips]);
   if (!sets) return <p className="muted">Looking for duplicates…</p>;
-  const found = sets.map((s) => s.map((p) => byPath.get(p)).filter((c): c is ClipFile => !!c)).filter((s) => s.length > 1);
+  const found = sets
+    .map((s) => ({ kind: s.kind, clips: s.paths.map((p) => byPath.get(p)).filter((c): c is ClipFile => !!c) }))
+    .filter((s) => s.clips.length > 1);
   if (!found.length) return null;
-  const extra = found.reduce((n, s) => n + s[0].size * (s.length - 1), 0);
+  // What removing all but the kept copy would free.
+  const extra = found.reduce((n, s) => {
+    const kept = bestCopy(s.clips, s.kind);
+    return n + s.clips.reduce((m, c) => m + (c.path === kept.path ? 0 : c.size), 0);
+  }, 0);
+  const remuxes = found.filter((s) => s.kind === "remux").length;
   return (
     <section className="dupes">
       <h2>Duplicates</h2>
       <p className="muted" style={{ margin: 0 }}>
-        {found.length} clip{found.length === 1 ? " is" : "s are"} saved more than once (checked byte for byte), using {fmtSize(extra)} extra. Pick
-        the copy to keep; the others go to the Recycle Bin.
+        {found.length} clip{found.length === 1 ? " is" : "s are"} saved more than once, using {fmtSize(extra)} extra.
+        {remuxes > 0 &&
+          ` ${remuxes === found.length ? "They're" : `${remuxes} of them are`} the same recording in two formats (OBS keeps the original when it remuxes to MP4): same name, length and tracks.`}{" "}
+        Pick the copy to keep; the others go to the Recycle Bin.
       </p>
-      {found.map((set, i) => {
-        const chosen = keep[i] ?? bestCopy(set).path;
+      {found.map(({ kind, clips: set }, i) => {
+        const chosen = keep[i] ?? bestCopy(set, kind).path;
         return (
           <div className="dupe-set" key={set[0].path}>
             <div className="dupe-head">
               <strong>{set[0].name}</strong>
               <span className="muted">
-                {set.length} copies · {fmtSize(set[0].size)} each
+                {kind === "remux"
+                  ? `Same recording as ${set.map((c) => extOf(c.path)).join(" and ")}`
+                  : `${set.length} copies · ${fmtSize(set[0].size)} each`}
               </span>
             </div>
             {set.map((c) => (
               <label key={c.path} className={`dupe-copy ${chosen === c.path ? "on" : ""}`}>
                 <input type="radio" name={`dupe-${i}`} checked={chosen === c.path} onChange={() => setKeep((k) => ({ ...k, [i]: c.path }))} />
-                <span className="dupe-where">{placeOf(c)}</span>
+                <span className="dupe-where">{kind === "remux" ? `${extOf(c.path)} · ${fmtSize(c.size)}` : placeOf(c)}</span>
                 <small className="muted dupe-path" title={c.path}>
                   {c.path}
                 </small>

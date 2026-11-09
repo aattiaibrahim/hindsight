@@ -154,7 +154,10 @@ export function installDevMock() {
       return "Paired with the NAS app (412 clips there).";
     },
     run_diagnostics: () => "C:\\Users\\you\\Downloads\\Hindsight diagnostics 2026-11-06 12-00-00.txt",
-    find_duplicates: () => [],
+    find_duplicates: () =>
+      new URLSearchParams(location.search).has("remux") && clips.length > 1
+        ? [{ kind: "remux", paths: [clips[0].path, clips[1].path] }]
+        : [],
     edited_clips: () => [],
     system_accent: () => "#4cc2ff",
     media_base: () => null,
