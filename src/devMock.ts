@@ -59,6 +59,7 @@ export function installDevMock() {
   }
   // ?many=N: a library of N clips, to time the app with a real-sized library.
   const many = Number(new URLSearchParams(location.search).get("many") || 0);
+  const medal = new URLSearchParams(location.search).has("medal");
   for (let i = 0; i < many; i++) {
     const g = games[i % games.length];
     clips.push({
@@ -241,7 +242,8 @@ export function installDevMock() {
     list_monitors: () => [],
     screen_preview: () => fetch("/thumb-cs2a.jpg").then((r) => r.arrayBuffer()),
     list_audio_inputs: () => [],
-    probe_file: () => ({ duration: 45, codec: "av1", width: 1920, height: 1080, fps: 60, audioTracks: 2, container: "matroska" }),
+    // ?medal: a Medal clip, "All Audio" (the others mixed) plus Game and Mic.
+    probe_file: () => ({ duration: 45, codec: "av1", width: 1920, height: 1080, fps: 60, audioTracks: medal ? 3 : 2, container: "matroska" }),
     // Thumbnails matched to each game (frames picked from real clips for the README screenshots).
     thumbnail: (a) => {
       const p = a.path as string;
@@ -260,12 +262,23 @@ export function installDevMock() {
         const talk = [2, 10, 18, 27, 35].some((s) => i / 20 >= s && i / 20 < s + 4);
         return Math.round(talk ? 120 + Math.random() * 100 : Math.random() * 20);
       });
+      if (medal) return [{ step: 0.05, levels: game.map((g, i) => Math.min(255, g + mic[i])) }, { step: 0.05, levels: game }, { step: 0.05, levels: mic }];
       return [{ step: 0.05, levels: game }, { step: 0.05, levels: mic }];
     },
-    preview_audio: () => ({
-      firstTitle: "Desktop audio",
-      extra: [{ index: 1, title: "Microphone", path: "C:\\Users\\you\\preview\\mic.m4a" }],
-    }),
+    preview_audio: () =>
+      medal
+        ? {
+            firstTitle: "All Audio",
+            extra: [
+              { index: 1, title: "Game", path: "C:\\Users\\you\\preview\\game.m4a" },
+              { index: 2, title: "Mic", path: "C:\\Users\\you\\preview\\mic.m4a" },
+            ],
+            mix: 0,
+          }
+        : {
+            firstTitle: "Desktop audio",
+            extra: [{ index: 1, title: "Microphone", path: "C:\\Users\\you\\preview\\mic.m4a" }],
+          },
     delete_clips: (a) => {
       const paths = a.paths as string[];
       bin.push(...clips.filter((c) => paths.includes(c.path)));

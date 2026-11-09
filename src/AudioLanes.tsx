@@ -75,6 +75,8 @@ type Props = {
   time: number;
   range: [number, number];
   onSeek: (t: number) => void;
+  /** A track that's the others already mixed (Medal's "All Audio"): left out of saves, so no lane. */
+  hidden?: number | null;
 };
 
 /**
@@ -82,7 +84,7 @@ type Props = {
  * to mute a stretch, click a muted stretch's × to bring it back, and a volume
  * (dB) control for the saved file.
  */
-export function AudioLanes({ titles, waves, edits, setEdits, duration, time, range, onSeek }: Props) {
+export function AudioLanes({ titles, waves, edits, setEdits, duration, time, range, onSeek, hidden = null }: Props) {
   const [draft, setDraft] = useState<{ track: number; a: number; b: number } | null>(null);
   if (!duration || titles.length === 0) return null;
   const pct = (t: number) => `${Math.min(100, Math.max(0, (t / duration) * 100))}%`;
@@ -122,6 +124,7 @@ export function AudioLanes({ titles, waves, edits, setEdits, duration, time, ran
   return (
     <div className="lanes">
       {titles.map((title, i) => {
+        if (i === hidden) return null;
         const e = edit(i);
         const allMuted = e.mutes.length === 1 && e.mutes[0][0] <= 0.01 && e.mutes[0][1] >= duration - 0.01;
         const name = title.replace(/ audio$/i, "");
