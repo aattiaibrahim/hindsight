@@ -494,7 +494,7 @@ function merge(spans) {
 function jobText(j) {
   const what = OP_LABEL[j.op] || j.op;
   if (j.state === "queued") return `${what}: waiting for the edit before it`;
-  if (j.state === "working") return `${what}: ${Math.round((j.progress || 0) * 100)}%`;
+  if (j.state === "working") return `${what}${j.step ? `, ${j.step}` : ""}: ${Math.round((j.progress || 0) * 100)}%`;
   if (j.state === "failed") return `${what} failed: ${j.error}`;
   const how = j.method === "copy" ? " (copied, no re-encode)" : j.method === "smart" ? " (only the start re-encoded)" : j.method === "audio" ? " (video copied)" : "";
   return j.rel ? `Saved${j.replace ? " over the original" : ""}${how}` : `Ready to download${how}`;

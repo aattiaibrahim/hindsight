@@ -403,9 +403,9 @@ export async function compress(file, { start = 0, end = 0, targetMb, audio = [],
   if (encoder === "libx264") {
     const log = path.join(tmpDir, `pass-${randomUUID()}`);
     try {
-      await run(FFMPEG(), [...input, "-map", "0:v:0", ...vf, "-c:v", "libx264", "-preset", "medium", "-b:v", b, "-pass", "1", "-passlogfile", log, "-an", "-progress", "pipe:1", "-nostats", "-f", "null", "-"], { onStdout: progressOf(len * 2, onProgress) });
+      await run(FFMPEG(), [...input, "-map", "0:v:0", ...vf, "-c:v", "libx264", "-preset", "medium", "-b:v", b, "-pass", "1", "-passlogfile", log, "-an", "-progress", "pipe:1", "-nostats", "-f", "null", "-"], { onStdout: progressOf(len * 2, (p) => onProgress?.(p, "pass 1 of 2")) });
       await run(FFMPEG(), [...input, "-map", "0:v:0", ...mixedAudio(info.audio.length, audio, start), ...vf, "-c:v", "libx264", "-preset", "medium", "-b:v", b, "-pass", "2", "-passlogfile", log, ...tail], {
-        onStdout: (c) => progressOf(len * 2, (p) => onProgress?.(Math.min(0.99, 0.5 + p)))(c),
+        onStdout: (c) => progressOf(len * 2, (p) => onProgress?.(Math.min(0.99, 0.5 + p), "pass 2 of 2"))(c),
       });
     } finally {
       for (const f of await readdir(tmpDir).catch(() => [])) if (f.startsWith(path.basename(log))) await rm(path.join(tmpDir, f), { force: true });
@@ -600,7 +600,11 @@ export class Edits {
     await mkdir(outDir, { recursive: true });
     const tmp = path.join(outDir, `.${job.name}.rewind-partial`);
     const format = FORMAT[p.ext];
-    const onProgress = (x) => (job.progress = x);
+    // `step`: which pass, for edits that take two (compressing with libx264).
+    const onProgress = (x, step = null) => {
+      job.progress = x;
+      job.step = step;
+    };
     const common = { encoder: this.encoder, out: tmp, format, onProgress, tmpDir: this.tmpDir, audio: p.audio };
     try {
       if (p.op === "save") {
