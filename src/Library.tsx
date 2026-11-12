@@ -1,8 +1,8 @@
 import { Select } from "./Select";
 import { open } from "@tauri-apps/plugin-dialog";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, ClipFile, codecLabel, errText, fmtDuration, fmtSize, Health, Probe, Upload, UploadProgress, VIDEO_EXTENSIONS, want } from "./api";
-import { useNearView, useThumb } from "./hooks";
+import { api, ClipFile, codecLabel, errText, fmtDuration, fmtSize, Health, Probe, Upload, UploadProgress, NOT_NEEDED, VIDEO_EXTENSIONS, want } from "./api";
+import { RETRY_MS, useNearView, useOnScreen, useThumb } from "./hooks";
 import { liveLink, progressText, ShareRequest, timeLeft } from "./Share";
 import { Timeline } from "./Timeline";
 import { DamagedStatus, damagedText } from "./Health";
@@ -107,6 +107,7 @@ function ClipRow({
   view?: string;
 }) {
   const [rowRef, near] = useNearView<HTMLButtonElement>();
+  useOnScreen(rowRef, ["t:" + clip.path + String(clip.modified), "p:" + clip.path + String(clip.modified)]);
   const thumb = useThumb(clip.path, clip.modified, near);
   const time = new Date(clip.modified).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   return (
@@ -192,6 +193,7 @@ function ClipCard({
   // Only clips near the screen ask the drive for anything: with hundreds of
   // clips (or a slow hard drive) the ones you're looking at come first.
   const [cardRef, near] = useNearView<HTMLButtonElement>();
+  useOnScreen(cardRef, ["t:" + clip.path + String(clip.modified), "p:" + clip.path + String(clip.modified)]);
   const thumb = useThumb(clip.path, clip.modified, near);
   const [info, setInfo] = useState<Probe | null>(null);
   useEffect(() => {
@@ -199,12 +201,21 @@ function ClipCard({
     let alive = true;
     const k = "p:" + clip.path + String(clip.modified);
     want(k, 1);
-    api
-      .probe(clip.path, String(clip.modified), false, true)
-      .then((p) => alive && setInfo(p))
-      .catch(() => {});
+    let retry = 0;
+    // Same as thumbnails (hooks.ts useThumb): asked again while the card is still here.
+    const load = (tries: number) =>
+      api
+        .probe(clip.path, String(clip.modified), false, true)
+        .then((p) => alive && setInfo(p))
+        .catch((e) => {
+          if (!alive) return;
+          if (String(e).includes(NOT_NEEDED)) retry = window.setTimeout(() => load(tries), 50);
+          else if (tries < RETRY_MS.length) retry = window.setTimeout(() => load(tries + 1), RETRY_MS[tries]);
+        });
+    load(0);
     return () => {
       alive = false;
+      clearTimeout(retry);
       want(k, -1);
     };
   }, [near, clip.path, clip.modified]);

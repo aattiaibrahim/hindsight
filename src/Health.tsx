@@ -6,9 +6,12 @@ import { Icon } from "./icons";
 /** Health results for the clips on screen (only ones already checked). */
 export function useHealth(clips: ClipFile[] | null) {
   const [health, setHealth] = useState<Record<string, Health>>({});
+  // Asked again only when the clips really changed, not every time the list is re-read
+  // (that happens whenever the window gets focus).
+  const key = clips?.map((c) => `${c.path}|${c.modified}`).join("\n") ?? "";
   useEffect(() => {
-    if (!clips?.length) return;
-    const paths = clips.map((c) => c.path);
+    if (!key) return;
+    const paths = key.split("\n").map((l) => l.slice(0, l.lastIndexOf("|")));
     const load = () => api.clipHealth(paths).then(setHealth).catch(() => {});
     load();
     // New results arrive as the background check goes (it re-emits clips-changed on damage).
@@ -18,7 +21,7 @@ export function useHealth(clips: ClipFile[] | null) {
       clearInterval(t);
       un.then((f) => f());
     };
-  }, [clips]);
+  }, [key]);
   return health;
 }
 

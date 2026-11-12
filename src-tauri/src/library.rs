@@ -1467,6 +1467,35 @@ mod tests {
         println!("cache {}: own {have}, via this PC's copy {twin}, missing {}", cache.display(), missing.len());
         for m in missing.iter().take(5) { println!("  missing: {m}"); }
     }
+
+    /// Thumbnails in the app's real cache for the clips under REWIND_DIR, and how long
+    /// a missing one takes to make. Run from a normal terminal.
+    #[test]
+    #[ignore]
+    fn live_dir_thumb_count() {
+        crate::ffmpeg::init(None);
+        let root = std::env::var("REWIND_DIR").unwrap();
+        let cache = PathBuf::from(std::env::var("LOCALAPPDATA").unwrap()).join("com.rewind.app").join("thumbs");
+        let mut stack = vec![PathBuf::from(&root)];
+        let (mut have, mut missing) = (0, Vec::new());
+        while let Some(d) = stack.pop() {
+            for e in fs::read_dir(&d).into_iter().flatten().flatten() {
+                let p = e.path();
+                if p.is_dir() { stack.push(p) } else if is_video(&p) && !is_sidecar(&p) {
+                    let s = p.to_string_lossy().into_owned();
+                    if thumbnail_path(&s, &cache).is_ok_and(|t| t.exists()) { have += 1 } else { missing.push(s) }
+                }
+            }
+        }
+        println!("have {have}, missing {}", missing.len());
+        let tmp = std::env::temp_dir().join("rewind-dircount");
+        for m in missing.iter().take(3) {
+            let t = std::time::Instant::now();
+            let r = thumbnail(m, &tmp);
+            println!("  {m}: {:?} in {:?}", r.map(|_| "ok"), t.elapsed());
+        }
+        let _ = fs::remove_dir_all(&tmp);
+    }
     #[test]
     fn a_track_that_mixes_the_others_is_found_by_name() {
         let t = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();

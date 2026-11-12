@@ -334,6 +334,9 @@ export function installDevMock() {
     convertFileSrc: (p: string) =>
       p.endsWith("mic.m4a") ? "/preview-mic.m4a" : p.startsWith("C:\\Users\\you\\") || p.startsWith("\\\\nas\\") ? "/preview-sample.mkv" : p,
     invoke: async (cmd: string, args: Record<string, unknown> = {}) => {
+      // ?slow=300: thumbnails and details take that long, like a hard drive or the NAS.
+      const slow = Number(new URLSearchParams(location.search).get("slow") || 0);
+      if (slow && (cmd === "thumbnail" || cmd === "probe_file")) await new Promise((r) => setTimeout(r, slow));
       const h = handlers[cmd];
       if (!h) {
         console.warn("[preview] no mock for", cmd);

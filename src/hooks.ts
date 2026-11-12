@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ClipFile, Settings, Status, UpdateState, NOT_NEEDED, want as wantThumb } from "./api";
+import { api, ClipFile, Settings, Status, UpdateState, NOT_NEEDED, markOnScreen, want as wantThumb } from "./api";
 
 export function useUpdate() {
   const [u, setU] = useState<UpdateState | null>(null);
@@ -101,6 +101,28 @@ export function useNearView<T extends Element>(rootSelector = ".lib-page", margi
  * (going back to the library doesn't blank them all); otherwise it's fetched
  * once `want` is true (cards pass "near the screen").
  */
+/**
+ * Tell the request queue while this element is really on screen (not just near it),
+ * so its thumbnail and details go before the ones it asked for ahead of the scroll.
+ */
+export function useOnScreen<T extends Element>(ref: React.RefObject<T | null>, keys: string[], rootSelector = ".lib-page") {
+  const joined = keys.join("\n");
+  useEffect(() => {
+    const el = ref.current;
+    const list = joined.split("\n");
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((es) => markOnScreen(list, es.some((e) => e.isIntersecting)), { root: document.querySelector(rootSelector) });
+    io.observe(el);
+    return () => {
+      io.disconnect();
+      markOnScreen(list, false);
+    };
+  }, [ref, joined, rootSelector]);
+}
+
+/** How long a card waits before asking again for a thumbnail or details that failed. */
+export const RETRY_MS = [2500, 8000, 20000];
+
 export function useThumb(path: string, key: string | number = "", want = true) {
   const [src, setSrc] = useState<string | null>(() => (path ? api.thumbNow(path, String(key)) : null));
   useEffect(() => {
@@ -111,15 +133,18 @@ export function useThumb(path: string, key: string | number = "", want = true) {
     const k = "t:" + path + String(key);
     wantThumb(k, 1);
     let retry = 0;
-    const load = (again: boolean) =>
+    const load = (tries: number) =>
       api
         .thumbnail(path, String(key), true)
         .then((s) => alive && setSrc(s))
         .catch((e) => {
-          // A slow drive or a busy NAS: try once more a little later.
-          if (alive && !again && !String(e).includes(NOT_NEEDED)) retry = window.setTimeout(() => load(true), 2500);
+          if (!alive) return;
+          // Still on screen but told "not needed" (a mix-up over who wants it): ask again now.
+          // Otherwise (a slow drive, a busy NAS) try again a few times, waiting longer each time.
+          if (String(e).includes(NOT_NEEDED)) retry = window.setTimeout(() => load(tries), 50);
+          else if (tries < RETRY_MS.length) retry = window.setTimeout(() => load(tries + 1), RETRY_MS[tries]);
         });
-    load(false);
+    load(0);
     return () => {
       alive = false;
       clearTimeout(retry);

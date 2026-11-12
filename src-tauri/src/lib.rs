@@ -866,9 +866,13 @@ fn secrets_set(app: AppHandle) -> Result<SecretsSet, String> {
 // ---------- Clip health ----------
 
 /// Health results for these clips (only ones already checked and unchanged).
+/// Off the main thread: it reads every checked clip's size and date (over the network
+/// for NAS clips), and on the main thread that held up every other request, so the
+/// library's cards waited for their thumbnails and details.
 #[tauri::command]
-fn clip_health(app: AppHandle, paths: Vec<String>) -> Result<std::collections::BTreeMap<String, health::Health>, String> {
-    Ok(health::results(&data_file(&app, "health.json")?, &paths))
+async fn clip_health(app: AppHandle, paths: Vec<String>) -> Result<std::collections::BTreeMap<String, health::Health>, String> {
+    let file = data_file(&app, "health.json")?;
+    blocking(move || Ok(health::results(&file, &paths))).await
 }
 
 #[tauri::command]

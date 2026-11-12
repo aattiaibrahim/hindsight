@@ -292,18 +292,17 @@ fn save_cache(file: &Path) {
 
 /// Results for clips that are still the same file (size and date unchanged).
 pub fn results(file: &Path, paths: &[String]) -> BTreeMap<String, Health> {
-    with_cache(file, |m| {
-        paths
-            .iter()
-            .filter_map(|p| {
-                let h = m.get(p)?;
-                let (size, modified) = stamp(Path::new(p))?;
-                // A "damaged" from an older check is checked again (it may have been a false alarm).
-                let current = h.state == "ok" || h.version >= VERSION;
-                (h.size == size && h.modified == modified && current).then(|| (p.clone(), h.clone()))
-            })
-            .collect()
-    })
+    // Look the results up under the lock, but read the files' sizes and dates after:
+    // for clips on the NAS each one asks the network, and the background check needs the lock too.
+    let found: Vec<(String, Health)> = with_cache(file, |m| paths.iter().filter_map(|p| Some((p.clone(), m.get(p)?.clone()))).collect());
+    found
+        .into_iter()
+        .filter(|(p, h)| {
+            // A "damaged" from an older check is checked again (it may have been a false alarm).
+            let current = h.state == "ok" || h.version >= VERSION;
+            current && stamp(Path::new(p)).is_some_and(|(size, modified)| h.size == size && h.modified == modified)
+        })
+        .collect()
 }
 
 pub fn forget(file: &Path, path: &str) {
@@ -383,6 +382,29 @@ pub fn start(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// How long the health lookup takes for the whole real library (it used to run on
+    /// the app's main thread). REWIND_NAS_DIR and REWIND_CLIPS_DIR, from a normal terminal.
+    #[test]
+    #[ignore]
+    fn live_health_lookup_time() {
+        let file = std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join("com.rewind.app").join("health.json");
+        let nas = std::env::var("REWIND_NAS_DIR").unwrap();
+        let clips = std::env::var("REWIND_CLIPS_DIR").unwrap();
+        let mut paths = Vec::new();
+        for root in [nas, clips, r"D:\Medal\Clips".to_string(), r"D:\Recordings".to_string()] {
+            let mut stack = vec![std::path::PathBuf::from(root)];
+            while let Some(d) = stack.pop() {
+                for e in fs::read_dir(&d).into_iter().flatten().flatten() {
+                    let p = e.path();
+                    if p.is_dir() { if !e.file_name().to_string_lossy().starts_with('.') { stack.push(p) } } else if crate::library::is_video(&p) { paths.push(p.to_string_lossy().into_owned()) }
+                }
+            }
+        }
+        let t = std::time::Instant::now();
+        let r = results(&file, &paths);
+        println!("{} clips, {} with results, lookup took {:?}", paths.len(), r.len(), t.elapsed());
+    }
 
     #[test]
     fn damaged_chunks_merge_and_the_longest_clean_part_wins() {

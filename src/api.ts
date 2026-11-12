@@ -338,18 +338,39 @@ export type Monitor = {
  * network can be slow (more so while the NAS is busy checking copies), and they
  * must never hold up the clips on this PC.
  */
-type Lane = { active: number; max: number; waiting: (() => void)[] };
+type Waiter = { go: () => void; key: string };
+type Lane = { active: number; max: number; waiting: Waiter[] };
+
+/**
+ * Cards actually on screen (not just near it): their requests go first. Without
+ * this, after a quick scroll the cards you're looking at waited behind ones 900 px
+ * below (asked for more recently) and ones already scrolled past.
+ */
+const onScreen = new Set<string>();
+export function markOnScreen(keys: string[], on: boolean) {
+  for (const k of keys) {
+    if (on) onScreen.add(k);
+    else onScreen.delete(k);
+  }
+}
+/** The next request to go: the newest one on screen, else the newest one. */
+function next(lane: Lane) {
+  for (let i = lane.waiting.length - 1; i >= 0; i--) {
+    if (onScreen.has(lane.waiting[i].key)) return lane.waiting.splice(i, 1)[0].go();
+  }
+  lane.waiting.pop()?.go();
+}
 const LANES: Record<"local" | "net", Lane> = { local: { active: 0, max: 3, waiting: [] }, net: { active: 0, max: 3, waiting: [] } };
 const laneOf = (path: string): Lane => (/^(\\\\|\/\/)/.test(path) ? LANES.net : LANES.local);
 
 /** Thrown for a request whose card left the screen before its turn came. */
 export const NOT_NEEDED = "not needed any more";
 
-async function limited<T>(path: string, job: () => Promise<T>, stillWanted: () => boolean = () => true): Promise<T> {
+async function limited<T>(path: string, job: () => Promise<T>, stillWanted: () => boolean = () => true, key = ""): Promise<T> {
   const lane = laneOf(path);
-  if (lane.active >= lane.max) await new Promise<void>((r) => lane.waiting.push(r));
+  if (lane.active >= lane.max) await new Promise<void>((go) => lane.waiting.push({ go, key }));
   if (!stillWanted()) {
-    lane.waiting.pop()?.(); // pass the turn on
+    next(lane); // pass the turn on
     throw new Error(NOT_NEEDED);
   }
   lane.active++;
@@ -361,17 +382,25 @@ async function limited<T>(path: string, job: () => Promise<T>, stillWanted: () =
     if (released) return;
     released = true;
     lane.active--;
-    lane.waiting.pop()?.();
+    next(lane);
   };
   const timer = setTimeout(release, SLOT_LIMIT_MS);
+  let giveUp = 0;
   try {
-    return await job();
+    // A request that never answers is given up on, so the card asks again.
+    return await Promise.race([
+      job(),
+      new Promise<never>((_, no) => (giveUp = window.setTimeout(() => no(new Error(TIMED_OUT)), REQUEST_LIMIT_MS))),
+    ]);
   } finally {
+    clearTimeout(giveUp);
     clearTimeout(timer);
     release();
   }
 }
 const SLOT_LIMIT_MS = 20_000;
+const REQUEST_LIMIT_MS = 30_000;
+const TIMED_OUT = "timed out";
 
 /**
  * Who still wants a thumbnail or probe: cards add themselves while they're near
@@ -382,7 +411,9 @@ const wants = new Map<string, number>();
 export function want(key: string, delta: 1 | -1) {
   wants.set(key, Math.max(0, (wants.get(key) ?? 0) + delta));
 }
-const wanted = (key: string) => !wants.has(key) || (wants.get(key) ?? 0) > 0;
+/** Asked for by something other than a card (Studio, the To trim estimate): always wanted. */
+const always = new Set<string>();
+const wanted = (key: string) => always.has(key) || !wants.has(key) || (wants.get(key) ?? 0) > 0;
 
 const thumbCache = new Map<string, Promise<string>>();
 const thumbReady = new Map<string, string>();
@@ -420,9 +451,11 @@ export const api = {
   /** `tracked`: the caller registers with `want` (cards); anyone else always gets an answer. */
   probe: (path: string, key = "", now = false, tracked = false) => {
     const k = path + key;
-    if (!tracked) wants.delete("p:" + k);
+    // Before, this deleted the cards' count for the clip, so cards still on screen
+    // looked unwanted, were told "not needed" and never showed their details.
+    if (!tracked) always.add("p:" + k);
     if (!probeCache.has(k)) {
-      const p = now ? invoke<Probe>("probe_file", { path }) : limited(path, () => invoke<Probe>("probe_file", { path }), () => wanted("p:" + k));
+      const p = now ? invoke<Probe>("probe_file", { path }) : limited(path, () => invoke<Probe>("probe_file", { path }), () => wanted("p:" + k), "p:" + k);
       p.catch(() => probeCache.delete(k));
       probeCache.set(k, p);
     }
@@ -430,9 +463,9 @@ export const api = {
   },
   thumbnail: (path: string, key = "", tracked = false) => {
     const k = path + key;
-    if (!tracked) wants.delete("t:" + k);
+    if (!tracked) always.add("t:" + k);
     if (!thumbCache.has(k)) {
-      const p = limited(path, () => invoke<string>("thumbnail", { path }), () => wanted("t:" + k)).then(convertFileSrc);
+      const p = limited(path, () => invoke<string>("thumbnail", { path }), () => wanted("t:" + k), "t:" + k).then(convertFileSrc);
       p.then((src) => thumbReady.set(k, src)).catch(() => thumbCache.delete(k));
       thumbCache.set(k, p);
     }
