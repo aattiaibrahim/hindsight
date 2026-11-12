@@ -73,6 +73,15 @@ export function useClips() {
  * card loads its thumbnail once and keeps it. `root` is the scrolling box
  * (found by selector) and `margin` how far ahead to start.
  */
+/**
+ * The list this element scrolls in. Its own, not the first one on the page: every list
+ * you open stays loaded, so "the first .lib-page" could be another, hidden list, and
+ * cards watching it never counted as near the screen (no thumbnail, no details).
+ */
+function scroller(el: Element, selector: string) {
+  return el.closest(selector) ?? document.querySelector(selector);
+}
+
 export function useNearView<T extends Element>(rootSelector = ".lib-page", margin = "900px 0px") {
   const ref = useRef<T>(null);
   const [near, setNear] = useState(false);
@@ -88,7 +97,7 @@ export function useNearView<T extends Element>(rootSelector = ".lib-page", margi
           io.disconnect();
         }
       },
-      { root: document.querySelector(rootSelector), rootMargin: margin },
+      { root: scroller(el, rootSelector), rootMargin: margin },
     );
     io.observe(el);
     return () => io.disconnect();
@@ -111,7 +120,7 @@ export function useOnScreen<T extends Element>(ref: React.RefObject<T | null>, k
     const el = ref.current;
     const list = joined.split("\n");
     if (!el || typeof IntersectionObserver === "undefined") return;
-    const io = new IntersectionObserver((es) => markOnScreen(list, es.some((e) => e.isIntersecting)), { root: document.querySelector(rootSelector) });
+    const io = new IntersectionObserver((es) => markOnScreen(list, es.some((e) => e.isIntersecting)), { root: scroller(el, rootSelector) });
     io.observe(el);
     return () => {
       io.disconnect();

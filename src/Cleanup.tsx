@@ -154,6 +154,9 @@ function Duplicates({ clips, onDelete, onChanged, run = 0 }: { clips: ClipFile[]
   const progress = useCountProgress("dupes-progress", sets === null);
   const [keep, setKeep] = useState<Record<number, string>>({});
   const byPath = useMemo(() => new Map(clips.map((c) => [c.path, c])), [clips]);
+  // Searched again only when the clips really changed (the list is re-read whenever
+  // the window gets focus) or on Run cleanup check.
+  const key = clips.map((c) => `${c.path}|${c.size}`).join("\n");
   useEffect(() => {
     let alive = true;
     setSets(null);
@@ -161,7 +164,7 @@ function Duplicates({ clips, onDelete, onChanged, run = 0 }: { clips: ClipFile[]
     return () => {
       alive = false;
     };
-  }, [clips, run]);
+  }, [key, run]);
   if (!sets) {
     const pct = progress && progress[1] > 0 ? Math.round((progress[0] / progress[1]) * 100) : null;
     return (
