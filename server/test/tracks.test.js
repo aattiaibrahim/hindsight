@@ -14,6 +14,7 @@ import { mixCopy, trackName, tracksToMix } from "../src/tracks.js";
 test("a track that mixes the others is found by name", () => {
   assert.equal(mixCopy(["All Audio", "Game", "Mic"]), 0);
   assert.equal(mixCopy(["Game", "Mic", "Mix"]), 2);
+  assert.equal(mixCopy(["Master", "Microphone"]), null, "Ascent: Master is the game, not a mix");
   assert.equal(mixCopy(["Desktop audio", "Microphone", "Discord"]), null);
   assert.equal(mixCopy(["All Audio"]), null, "a lone track is just the sound");
   assert.equal(mixCopy(["Mix", "Master", "Mic"]), null, "unsure: two candidates");

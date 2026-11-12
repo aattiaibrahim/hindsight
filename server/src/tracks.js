@@ -25,7 +25,11 @@ export function trackName(s) {
 export function mixCopy(names) {
   if (names.length < 2) return null;
   const hits = names.map((n, i) => (MIX_NAMES.has(String(n).toLowerCase()) ? i : -1)).filter((i) => i >= 0);
-  return hits.length === 1 ? hits[0] : null;
+  if (hits.length !== 1) return null;
+  // Only when the others are more than a microphone: Ascent's "Master" is the game,
+  // next to just "Microphone" (library::mix_copy on the desktop).
+  const onlyMics = names.every((n, i) => i === hits[0] || /mic|voice/i.test(String(n)));
+  return onlyMics ? null : hits[0];
 }
 
 /** The tracks to mix into one: all of them, except a track that already mixes the others. */

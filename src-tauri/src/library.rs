@@ -466,13 +466,23 @@ pub fn keep_track_names(path: &str) -> Vec<OsString> {
     out
 }
 
+/// Is this track a microphone (or other voice input) by its name?
+fn is_mic_track(title: &str) -> bool {
+    let t = title.to_lowercase();
+    t.contains("mic") || t.contains("voice")
+}
+
 /// Which track is a mix of the others, if exactly one is (and there are others).
+/// Only when the others include more than a microphone: Ascent saves "Master" (the
+/// game) and "Microphone", and skipping Master as a mix left only the mic to hear.
 pub fn mix_copy(titles: &[String]) -> Option<usize> {
     if titles.len() < 2 {
         return None;
     }
     let hits: Vec<usize> = titles.iter().enumerate().filter(|(_, t)| MIX_NAMES.contains(&t.to_lowercase().as_str())).map(|(i, _)| i).collect();
-    (hits.len() == 1).then(|| hits[0])
+    let [hit] = hits[..] else { return None };
+    let only_mics = titles.iter().enumerate().filter(|(i, _)| *i != hit).all(|(_, t)| is_mic_track(t));
+    (!only_mics).then_some(hit)
 }
 
 /// The tracks to mix when a clip's sound becomes one track: all of them, except a
@@ -1424,6 +1434,23 @@ fn compress_vf(path: &str, target_mb: u32, out: PathBuf, audio: &AudioEdit, crop
     ]));
     args.push(out.clone().into());
     finish(args, out)
+}
+
+#[cfg(test)]
+mod mix_tests {
+    use super::*;
+    fn t(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn a_master_track_next_to_only_a_mic_is_the_game_not_a_mix() {
+        assert_eq!(mix_copy(&t(&["Master", "Microphone"])), None);
+        assert_eq!(mix_copy(&t(&["All Audio", "Game", "Mic"])), Some(0));
+        assert_eq!(mix_copy(&t(&["All audio", "Desktop audio", "Microphone", "Discord audio"])), Some(0));
+        assert_eq!(mix_copy(&t(&["Master", "Game"])), Some(0));
+        assert_eq!(mix_copy(&t(&["Desktop audio", "Microphone"])), None);
+    }
 }
 
 #[cfg(test)]
