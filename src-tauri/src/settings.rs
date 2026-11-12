@@ -236,8 +236,14 @@ impl Settings {
             self.litterbox_time = d.litterbox_time.clone();
         }
         self.streamable_email = self.streamable_email.trim().to_string();
-        self.linked_folders.retain(|f| !f.trim().is_empty());
-        self.linked_folders.dedup();
+        // One entry per folder, however it was written (see library::tidy_path).
+        let mut seen = std::collections::HashSet::new();
+        self.linked_folders = std::mem::take(&mut self.linked_folders)
+            .into_iter()
+            .filter(|f| !f.trim().is_empty())
+            .map(|f| crate::library::tidy_path(&f))
+            .filter(|f| seen.insert(f.to_lowercase()))
+            .collect();
         self.folder_names.retain(|k, v| !k.is_empty() && !v.trim().is_empty());
         self.similar_dismissed.sort();
         self.similar_dismissed.dedup();

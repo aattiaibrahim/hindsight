@@ -1,4 +1,5 @@
 mod app_audio;
+mod audio_sessions;
 mod prepare;
 mod game_icons;
 mod duplicates;
@@ -30,7 +31,7 @@ mod updater;
 mod upload;
 
 use settings::Settings;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -1159,6 +1160,54 @@ fn cancel_montage() {
     montage::cancel();
 }
 
+/// Linked folders and other recorders' folders for diagnostics: where each came
+/// from, how many clips it has and the newest, and the ones that overlap (the
+/// same folder written twice, or one holding the clips folder).
+fn diag_folders(s: &Settings) -> String {
+    let known = bench::recorders::clip_folders();
+    let clips_dir = PathBuf::from(&s.clips_dir);
+    let label_of = |p: &str| known.iter().find(|k| library::same_path(Path::new(&k.path), Path::new(p))).map(|k| k.label.clone());
+    let summary = |p: &str| {
+        let root = library::LinkedRoot { path: PathBuf::from(p), label: String::new() };
+        let mut found = Vec::new();
+        library::scan_linked(&root, &[clips_dir.clone()], &mut found);
+        let newest = found.iter().map(|c| c.modified).max().and_then(chrono::DateTime::from_timestamp_millis);
+        format!(
+            "{} clip{}{}",
+            found.len(),
+            if found.len() == 1 { "" } else { "s" },
+            newest.map(|t| format!(", newest {}", t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M"))).unwrap_or_default()
+        )
+    };
+    let mut lines = Vec::new();
+    if s.linked_folders.is_empty() {
+        lines.push("Linked: none".to_string());
+    }
+    for (i, f) in s.linked_folders.iter().enumerate() {
+        let p = Path::new(f);
+        let mut notes = Vec::new();
+        if let Some(l) = label_of(f) {
+            notes.push(format!("{l}'s folder"));
+        }
+        if !p.is_dir() {
+            notes.push("missing".into());
+        } else {
+            notes.push(summary(f));
+        }
+        if clips_dir.starts_with(p) && !library::same_path(&clips_dir, p) {
+            notes.push("holds the clips folder (skipped there)".into());
+        }
+        if s.linked_folders[..i].iter().any(|o| library::same_path(Path::new(o), p)) {
+            notes.push("same folder as an earlier entry".into());
+        }
+        lines.push(format!("Linked: {f} ({})", notes.join(", ")));
+    }
+    for k in known.iter().filter(|k| k.exists && !s.linked_folders.iter().any(|f| library::same_path(Path::new(f), Path::new(&k.path)))) {
+        lines.push(format!("Not linked: {} folder {} ({})", k.label, k.path, summary(&k.path)));
+    }
+    lines.join("\n")
+}
+
 /// Make a diagnostics report (optionally about one clip), save it in
 /// Downloads and return its path. See diag.rs for what's in it.
 #[tauri::command]
@@ -1198,6 +1247,7 @@ async fn run_diagnostics(app: AppHandle, clip: Option<String>) -> Result<String,
                 },
             ),
             ("Health check", serde_json::to_string(&health::progress()).unwrap_or_default()),
+            ("Folders", diag_folders(&s)),
         ];
         let mut text = diag::report(&version, &extra, clip.as_deref());
         if !s.nas_dir.is_empty() {

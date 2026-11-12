@@ -198,6 +198,7 @@ fn open_stream(src: &Source, q: Queue, chunks: Option<Chunks>) -> Result<(cpal::
         }
     };
     let name = dev.name().unwrap_or_default();
+    crate::log!("audio: {} from {name} ({} Hz, {} ch)", if is_mic { "mic" } else { "desktop" }, cfg.sample_rate().0, cfg.channels());
     let config: cpal::StreamConfig = cfg.config();
     let in_ch = config.channels as usize;
     let out_ch = if mono { 1 } else { config.channels };

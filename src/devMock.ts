@@ -159,8 +159,13 @@ export function installDevMock() {
     },
     run_diagnostics: () => "C:\\Users\\you\\Downloads\\Hindsight diagnostics 2026-11-06 12-00-00.txt",
     find_duplicates: () =>
-      new URLSearchParams(location.search).has("remux") && clips.length > 1
-        ? [{ kind: "remux", paths: [clips[0].path, clips[1].path] }]
+      new URLSearchParams(location.search).has("remux") && clips.length > 7
+        ? [
+            { kind: "remux", paths: [clips[0].path, clips[1].path] },
+            { kind: "remux", paths: [clips[2].path, clips[3].path] },
+            { kind: "remux", paths: [clips[4].path, clips[5].path] },
+            { kind: "smaller", paths: [clips[6].path, clips[7].path] },
+          ]
         : [],
     edited_clips: () => [],
     system_accent: () => "#4cc2ff",

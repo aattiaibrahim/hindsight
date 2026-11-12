@@ -143,8 +143,34 @@ pub(crate) fn scan_linked(root: &LinkedRoot, avoid: &[PathBuf], out: &mut Vec<Cl
     walk(&root.path, 0, root, avoid, out);
 }
 
+/// A folder path written one way: backslashes, no doubled ones (OBS's settings
+/// store `C:\\Users\\...`, which Windows opens fine but which looked like another
+/// folder here, so its clips were listed twice), and no slash at the end.
+/// A network path keeps its leading `\\`; a drive root keeps its `\`.
+pub(crate) fn tidy_path(p: &str) -> String {
+    let p = p.trim().replace('/', "\\");
+    let unc = p.starts_with("\\\\");
+    let mut out = String::with_capacity(p.len());
+    for c in p.chars() {
+        if c == '\\' && out.ends_with('\\') {
+            continue;
+        }
+        out.push(c);
+    }
+    if unc {
+        out.insert(0, '\\');
+    }
+    while out.len() > 1 && out.ends_with('\\') && !out.ends_with(":\\") && !(unc && out.len() <= 2) {
+        out.pop();
+    }
+    if out.ends_with(':') {
+        out.push('\\');
+    }
+    out
+}
+
 pub(crate) fn same_path(a: &Path, b: &Path) -> bool {
-    let norm = |p: &Path| p.to_string_lossy().trim_end_matches(['\\', '/']).to_lowercase();
+    let norm = |p: &Path| tidy_path(&p.to_string_lossy()).trim_end_matches('\\').to_lowercase();
     norm(a) == norm(b)
 }
 
@@ -176,12 +202,13 @@ pub fn scan_all(clips_dir: &Path, external: &[String], nas: &[crate::nas::NasFil
         avoid.push(PathBuf::from(nas_dir));
     }
     avoid.extend(linked.iter().map(|l| l.path.clone()));
-    let mut seen: std::collections::HashSet<String> = out.iter().map(|c| c.path.to_lowercase()).collect();
+    let key = |p: &str| tidy_path(p).to_lowercase();
+    let mut seen: std::collections::HashSet<String> = out.iter().map(|c| key(&c.path)).collect();
     for root in linked {
         let mut found = Vec::new();
         let others: Vec<PathBuf> = avoid.iter().filter(|a| !same_path(a, &root.path)).cloned().collect();
         scan_linked(root, &others, &mut found);
-        out.extend(found.into_iter().filter(|c| seen.insert(c.path.to_lowercase())));
+        out.extend(found.into_iter().filter(|c| seen.insert(key(&c.path))));
     }
     out.sort_by(|a, b| b.modified.cmp(&a.modified));
     out
@@ -1397,6 +1424,37 @@ fn compress_vf(path: &str, target_mb: u32, out: PathBuf, audio: &AudioEdit, crop
     ]));
     args.push(out.clone().into());
     finish(args, out)
+}
+
+#[cfg(test)]
+mod tidy_tests {
+    use super::*;
+
+    #[test]
+    fn a_folder_written_with_doubled_backslashes_is_the_same_folder() {
+        assert_eq!(tidy_path(r"C:\\Users\\me\\Videos"), r"C:\Users\me\Videos");
+        assert_eq!(tidy_path("C:/Users/me/Videos/"), r"C:\Users\me\Videos");
+        assert_eq!(tidy_path(r"\\nas\clips\\OBS\"), r"\\nas\clips\OBS");
+        assert_eq!(tidy_path(r"D:\"), r"D:\");
+        assert_eq!(tidy_path("D:"), r"D:\");
+        assert!(same_path(Path::new(r"C:\\Users\\Me\\Videos"), Path::new(r"c:\users\me\videos\")));
+    }
+
+    #[test]
+    fn a_doubled_linked_folder_does_not_list_the_clips_folder_twice() {
+        let tmp = std::env::temp_dir().join(format!("hs-tidy-{}", std::process::id()));
+        let clips = tmp.join("Hindsight");
+        std::fs::create_dir_all(clips.join("Desktop")).unwrap();
+        std::fs::write(clips.join("Desktop").join("Desktop 2026-11-12 05-14-22.mkv"), b"x").unwrap();
+        let doubled = tmp.to_string_lossy().replace('\\', "\\\\");
+        let linked = [
+            LinkedRoot { path: PathBuf::from(&doubled), label: "OBS".into() },
+            LinkedRoot { path: tmp.clone(), label: "Videos".into() },
+        ];
+        let all = scan_all(&clips, &[], &[], &linked, "");
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert_eq!(all.len(), 1, "{:?}", all.iter().map(|c| &c.path).collect::<Vec<_>>());
+    }
 }
 
 #[cfg(test)]

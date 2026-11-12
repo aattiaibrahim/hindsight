@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, ClipFile, errText, fmtSize, Settings, DupeSet } from "./api";
 import { ConfirmDialog } from "./ConfirmUpdate";
 import { useThumb } from "./hooks";
+import { Icon } from "./icons";
 import { ProgressBar, useCountProgress, useEditProgress } from "./Progress";
 
 const LIMIT = 40;
@@ -148,11 +149,38 @@ function bestCopy(set: ClipFile[], kind: DupeSet["kind"] = "copy") {
 
 const extOf = (p: string) => (p.split(".").pop() ?? "").toUpperCase();
 
-/** The same clip saved more than once: pick the copy to keep, the rest go to the Recycle Bin. */
+/** The kinds of duplicate, in the order they're shown, and what's kept by default. */
+const DUPE_GROUPS: { kind: DupeSet["kind"]; title: string; keeps: string }[] = [
+  { kind: "remux", title: "Same recording in two formats", keeps: "keeps the MP4, which plays everywhere" },
+  { kind: "smaller", title: "Next to a smaller re-encode", keeps: "keeps the original, at full quality" },
+  { kind: "copy", title: "Exact copies", keeps: "keeps Hindsight's own copy" },
+];
+
+type Dupe = { id: string; kind: DupeSet["kind"]; clips: ClipFile[] };
+
+/** A copy's label: its format for a remux, original or re-encode for a smaller copy, where it lives for an exact copy. */
+function copyLabel(c: ClipFile, d: Dupe) {
+  if (d.kind === "remux") return extOf(c.path);
+  if (d.kind === "smaller") return c.size === Math.max(...d.clips.map((x) => x.size)) ? `Original ${extOf(c.path)}` : `Re-encode ${extOf(c.path)}`;
+  return placeOf(c);
+}
+
+function DupeThumb({ clip }: { clip: ClipFile }) {
+  const src = useThumb(clip.path, clip.modified);
+  return <div className={`dupe-thumb ${src ? "" : "loading"}`}>{src && <img src={src} alt="" />}</div>;
+}
+
+/** The same clip saved more than once. A summary with one button removes every
+ *  extra copy (the better one of each is kept); each group opens to change which
+ *  copy is kept, and "Review one by one" walks through them side by side. Nothing
+ *  is removed until that one button is pressed (and confirmed). */
 function Duplicates({ clips, onDelete, onChanged, run = 0 }: { clips: ClipFile[]; onDelete: (paths: string[]) => Promise<boolean>; onChanged: () => void; run?: number }) {
   const [sets, setSets] = useState<DupeSet[] | null>(null);
   const progress = useCountProgress("dupes-progress", sets === null);
-  const [keep, setKeep] = useState<Record<number, string>>({});
+  const [keep, setKeep] = useState<Record<string, string>>({});
+  const [both, setBoth] = useState<Set<string>>(new Set());
+  const [open, setOpen] = useState<Set<DupeSet["kind"]>>(new Set());
+  const [review, setReview] = useState<number | null>(null);
   const byPath = useMemo(() => new Map(clips.map((c) => [c.path, c])), [clips]);
   // Searched again only when the clips really changed (the list is re-read whenever
   // the window gets focus) or on Run cleanup check.
@@ -160,6 +188,7 @@ function Duplicates({ clips, onDelete, onChanged, run = 0 }: { clips: ClipFile[]
   useEffect(() => {
     let alive = true;
     setSets(null);
+    setReview(null);
     api.findDuplicates().then((s) => alive && setSets(s)).catch(() => alive && setSets([]));
     return () => {
       alive = false;
@@ -174,71 +203,173 @@ function Duplicates({ clips, onDelete, onChanged, run = 0 }: { clips: ClipFile[]
       </div>
     );
   }
-  const found = sets
-    .map((s) => ({ kind: s.kind, clips: s.paths.map((p) => byPath.get(p)).filter((c): c is ClipFile => !!c) }))
+  const found: Dupe[] = sets
+    .map((s) => ({ id: [...s.paths].sort().join("\n"), kind: s.kind, clips: s.paths.map((p) => byPath.get(p)).filter((c): c is ClipFile => !!c) }))
     .filter((s) => s.clips.length > 1);
   if (!found.length) return null;
-  // What removing all but the kept copy would free.
-  const extra = found.reduce((n, s) => {
-    const kept = bestCopy(s.clips, s.kind);
-    return n + s.clips.reduce((m, c) => m + (c.path === kept.path ? 0 : c.size), 0);
-  }, 0);
-  const remuxes = found.filter((s) => s.kind === "remux").length;
-  const smaller = found.filter((s) => s.kind === "smaller").length;
-  return (
-    <section className="dupes">
-      <h2>Duplicates</h2>
-      <p className="muted" style={{ margin: 0 }}>
-        {found.length} clip{found.length === 1 ? " is" : "s are"} saved more than once, using {fmtSize(extra)} extra.
-        {remuxes > 0 &&
-          ` ${remuxes === found.length ? "They're" : `${remuxes} of them are`} the same recording in two formats (OBS keeps the original when it remuxes to MP4): same name, length and tracks.`}
-        {smaller > 0 &&
-          ` ${smaller === found.length ? (smaller === 1 ? "It's" : "They're") : `${smaller} ${smaller === 1 ? "is" : "are"}`} the same recording next to a smaller re-encode of it (an export, say): the original is kept unless you pick the smaller copy.`}{" "}
-        Pick the copy to keep; the others go to the Recycle Bin (copies on the NAS go to the NAS app's Trash for 30 days).
-      </p>
-      {found.map(({ kind, clips: set }, i) => {
-        const chosen = keep[i] ?? bestCopy(set, kind).path;
-        return (
-          <div className="dupe-set" key={set[0].path}>
-            <div className="dupe-head">
-              <strong>{set[0].name}</strong>
-              <span className="muted">
-                {kind === "remux"
-                  ? `Same recording as ${set.map((c) => extOf(c.path)).join(" and ")}`
-                  : kind === "smaller"
-                    ? `Same recording · the smaller copy is ${Math.round((Math.min(...set.map((c) => c.size)) / Math.max(...set.map((c) => c.size))) * 100)}% of the size`
-                    : `${set.length} copies · ${fmtSize(set[0].size)} each`}
-              </span>
-            </div>
-            {set.map((c) => (
-              <label key={c.path} className={`dupe-copy ${chosen === c.path ? "on" : ""}`}>
-                <input type="radio" name={`dupe-${i}`} checked={chosen === c.path} onChange={() => setKeep((k) => ({ ...k, [i]: c.path }))} />
-                <span className="dupe-where">
-                  {kind === "remux"
-                    ? `${extOf(c.path)} · ${fmtSize(c.size)}`
-                    : kind === "smaller"
-                      ? `${extOf(c.path)} · ${fmtSize(c.size)}${c.size === Math.max(...set.map((x) => x.size)) ? " · original" : " · re-encoded"}`
-                      : placeOf(c)}
-                </span>
-                <small className="muted dupe-path" title={c.path}>
-                  {c.path}
-                </small>
-              </label>
-            ))}
-            <div className="row" style={{ justifyContent: "flex-end" }}>
+  const kept = (d: Dupe) => keep[d.id] ?? bestCopy(d.clips, d.kind).path;
+  const extras = (d: Dupe) => d.clips.filter((c) => c.path !== kept(d));
+  const freed = (d: Dupe) => extras(d).reduce((n, c) => n + c.size, 0);
+  const todo = found.filter((d) => !both.has(d.id));
+  const gone = todo.flatMap((d) => extras(d).map((c) => c.path));
+  const total = todo.reduce((n, d) => n + freed(d), 0);
+  const toggle = <T,>(s: Set<T>, v: T) => {
+    const n = new Set(s);
+    if (n.has(v)) n.delete(v);
+    else n.add(v);
+    return n;
+  };
+  const removeAll = async () => {
+    if (gone.length && (await onDelete(gone))) onChanged();
+  };
+
+  const summary = (
+    <div className="dupe-summary">
+      <div>
+        <h2>Duplicates</h2>
+        <div className="dupe-total">
+          {found.length} clip{found.length === 1 ? "" : "s"} saved more than once · {fmtSize(total)} extra
+        </div>
+        <p className="muted">
+          The better copy of each is kept. The others go to the Recycle Bin, or the NAS app's Trash for 30 days if they're on the NAS.
+          {both.size > 0 && ` You're keeping both copies of ${both.size} ${both.size === 1 ? "clip" : "clips"}.`}
+        </p>
+      </div>
+      <div className="row dupe-actions">
+        {review === null && (
+          <button className="btn" onClick={() => setReview(0)}>
+            Review one by one
+          </button>
+        )}
+        <button className="btn primary" disabled={!gone.length} onClick={removeAll}>
+          Remove {gone.length} cop{gone.length === 1 ? "y" : "ies"}
+        </button>
+      </div>
+    </div>
+  );
+
+  if (review !== null) {
+    const i = Math.min(review, found.length - 1);
+    const d = found[i];
+    const chosen = kept(d);
+    const group = DUPE_GROUPS.find((g) => g.kind === d.kind);
+    const next = () => setReview(i + 1 >= found.length ? null : i + 1);
+    return (
+      <section className="dupes">
+        {summary}
+        <div className="dupe-review">
+          <div className="dupe-review-head">
+            <span className="muted">
+              {i + 1} of {found.length} · {group?.title.toLowerCase()}
+            </span>
+            <div className="row">
+              <button className="btn small" disabled={i === 0} onClick={() => setReview(i - 1)}>
+                Back
+              </button>
               <button
-                className="btn small danger"
-                onClick={async () => {
-                  const gone = set.filter((c) => c.path !== chosen).map((c) => c.path);
-                  if (await onDelete(gone)) onChanged();
+                className="btn small"
+                onClick={() => {
+                  setBoth((s) => toggle(s, d.id));
+                  next();
                 }}
               >
-                Keep the selected copy, remove {set.length - 1}
+                {both.has(d.id) ? "Don't keep both" : "Keep both"}
+              </button>
+              <button
+                className="btn small primary"
+                onClick={() => {
+                  setBoth((s) => {
+                    const n = new Set(s);
+                    n.delete(d.id);
+                    return n;
+                  });
+                  next();
+                }}
+              >
+                Keep {copyLabel(byPath.get(chosen) ?? d.clips[0], d)}
+              </button>
+              <button className="btn small" onClick={() => setReview(null)}>
+                Done
               </button>
             </div>
           </div>
-        );
-      })}
+          <strong className="dupe-name">{d.clips[0].name}</strong>
+          <div className="dupe-cards">
+            {d.clips.map((c) => {
+              const on = c.path === chosen && !both.has(d.id);
+              return (
+                <button key={c.path} className={`dupe-card ${on ? "on" : ""}`} onClick={() => setKeep((k) => ({ ...k, [d.id]: c.path }))}>
+                  <DupeThumb clip={c} />
+                  <span className="dupe-card-label">
+                    {copyLabel(c, d)} <small className={on ? "accent" : "muted"}>{both.has(d.id) ? "keep" : c.path === chosen ? "keep" : "remove"}</small>
+                  </span>
+                  <small className="muted">
+                    {fmtSize(c.size)} · {when(c.modified)} · {placeOf(c)}
+                  </small>
+                  <small className="muted dupe-path" title={c.path}>
+                    {c.path}
+                  </small>
+                </button>
+              );
+            })}
+          </div>
+          <p className="muted small">Click a copy to keep it instead. Nothing is removed until you press Remove.</p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="dupes">
+      {summary}
+      <div className="dupe-groups">
+        {DUPE_GROUPS.map((g) => {
+          const items = found.filter((d) => d.kind === g.kind);
+          if (!items.length) return null;
+          const isOpen = open.has(g.kind);
+          const size = items.filter((d) => !both.has(d.id)).reduce((n, d) => n + freed(d), 0);
+          return (
+            <div key={g.kind} className="dupe-group">
+              <button className="dupe-group-head" aria-expanded={isOpen} onClick={() => setOpen((s) => toggle(s, g.kind))}>
+                <Icon name="chevron" size={16} className={`dupe-chev ${isOpen ? "open" : ""}`} />
+                <span>{g.title}</span>
+                <span className="muted">
+                  {items.length} · {g.keeps}
+                </span>
+                <span className="dupe-size">{fmtSize(size)}</span>
+              </button>
+              {isOpen &&
+                items.map((d) => {
+                  const chosen = kept(d);
+                  const off = both.has(d.id);
+                  return (
+                    <div key={d.id} className={`dupe-row ${off ? "off" : ""}`}>
+                      <span className="dupe-row-name" title={d.clips[0].path}>
+                        {d.clips[0].name}
+                      </span>
+                      <span className="dupe-tags">
+                        {d.clips.map((c) => (
+                          <button
+                            key={c.path}
+                            className={`dupe-tag ${!off && c.path === chosen ? "on" : ""} ${!off && c.path !== chosen ? "gone" : ""}`}
+                            title={`${off ? "Kept" : c.path === chosen ? "Kept" : "Removed"}: ${c.path}. Click to keep this one.`}
+                            onClick={() => setKeep((k) => ({ ...k, [d.id]: c.path }))}
+                          >
+                            {copyLabel(c, d)}
+                          </button>
+                        ))}
+                      </span>
+                      <span className="muted dupe-size">{off ? "kept both" : fmtSize(freed(d))}</span>
+                      <button className="btn small" onClick={() => setBoth((s) => toggle(s, d.id))}>
+                        {off ? "Remove extra" : "Keep both"}
+                      </button>
+                    </div>
+                  );
+                })}
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }

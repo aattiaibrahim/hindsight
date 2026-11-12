@@ -152,6 +152,40 @@ fn clip_report(out: &mut String, path: &str) {
             let _ = writeln!(out, "  {l}");
         }
     }
+    track_levels(out, path);
+}
+
+/// How loud each audio track is over the first minute, so a silent "Desktop
+/// audio" (the game's sound missing) shows at a glance.
+fn track_levels(out: &mut String, path: &str) {
+    let titles = crate::library::track_titles(path);
+    if titles.is_empty() {
+        return;
+    }
+    let _ = writeln!(out, "Audio levels in the first 60 s:");
+    for (i, title) in titles.iter().enumerate() {
+        let mut a = crate::ffmpeg::args(&["-hide_banner", "-nostats", "-t", "60", "-i"]);
+        a.push(path.into());
+        a.extend(crate::ffmpeg::args(&["-map", &format!("0:a:{i}"), "-af", "volumedetect", "-f", "null", "-"]));
+        let Ok(o) = crate::ffmpeg::cmd("ffmpeg").args(&a).output() else { continue };
+        let (mean, max) = parse_volumedetect(&String::from_utf8_lossy(&o.stderr));
+        let name = if title.is_empty() { format!("Track {}", i + 1) } else { title.clone() };
+        let _ = match (mean, max) {
+            (Some(mean), Some(max)) => writeln!(out, "  {name}: average {mean:.1} dB, loudest {max:.1} dB{}", if max < -60.0 { " (silent)" } else { "" }),
+            _ => writeln!(out, "  {name}: couldn't measure"),
+        };
+    }
+}
+
+/// ffmpeg's volumedetect summary: (mean_volume, max_volume) in dB.
+fn parse_volumedetect(text: &str) -> (Option<f64>, Option<f64>) {
+    let find = |key: &str| {
+        text.lines().find_map(|l| {
+            let rest = &l[l.find(key)? + key.len()..];
+            rest.trim().trim_end_matches("dB").trim().parse::<f64>().ok()
+        })
+    };
+    (find("mean_volume:"), find("max_volume:"))
 }
 
 /// Everything above, as text. `extra` is JSON the app adds (status, settings…).
@@ -177,6 +211,11 @@ pub fn report(version: &str, extra: &[(&str, String)], clip: Option<&str>) -> St
     let _ = writeln!(out, "Default input: {}", mic.unwrap_or_else(|| "none".into()));
     let _ = writeln!(out, "Inputs: {}", crate::audio::input_devices().join(" | "));
     let _ = writeln!(out, "Discord running: {}", crate::app_audio::discord_pid().is_some());
+    // Which programs play to which output: a game on a headset that isn't the
+    // default output is the usual reason its sound is missing from clips.
+    for l in crate::audio_sessions::report_lines(&crate::audio_sessions::outputs()) {
+        let _ = writeln!(out, "{l}");
+    }
     for (title, body) in extra {
         section(&mut out, title);
         let _ = writeln!(out, "{body}");
@@ -233,6 +272,13 @@ mod tests {
         assert_eq!(anonymize(&escaped), "\"%USERPROFILE%\\\\Videos\"");
         crate::log!("[rewind] test line {}", 42);
         assert!(LINES.lock().unwrap().iter().any(|l| l.ends_with("[rewind] test line 42")));
+    }
+
+    #[test]
+    fn volumedetect_is_read() {
+        let t = "[Parsed_volumedetect_0 @ 0x1] n_samples: 960000\n[Parsed_volumedetect_0 @ 0x1] mean_volume: -91.0 dB\n[Parsed_volumedetect_0 @ 0x1] max_volume: -91.0 dB";
+        assert_eq!(parse_volumedetect(t), (Some(-91.0), Some(-91.0)));
+        assert_eq!(parse_volumedetect("nothing"), (None, None));
     }
 
     #[test]

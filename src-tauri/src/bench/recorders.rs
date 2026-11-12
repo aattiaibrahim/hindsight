@@ -289,7 +289,7 @@ pub fn clip_folders() -> Vec<ClipFolder> {
     let mut out = Vec::new();
     let mut push = |label: &str, path: Option<String>| {
         if let Some(p) = path {
-            let p = p.replace('/', "\\").trim_end_matches('\\').to_string();
+            let p = crate::library::tidy_path(&p);
             if !p.is_empty() && !out.iter().any(|f: &ClipFolder| f.path.eq_ignore_ascii_case(&p)) {
                 out.push(ClipFolder { label: label.into(), exists: Path::new(&p).is_dir(), path: p });
             }
