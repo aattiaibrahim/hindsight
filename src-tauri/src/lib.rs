@@ -1040,9 +1040,18 @@ async fn trim_clip(
     crop: Option<library::Crop>,
 ) -> Result<String, String> {
     let audio = audio.unwrap_or_default();
+    // Muted stretches or volume changes are in the separate tracks; the All audio
+    // track other players use is rebuilt from them so it has the change too.
+    let changed = !audio.is_empty();
+    let remix = move |out: String| -> Result<String, String> {
+        if changed {
+            library::refresh_mix_track(&out)?;
+        }
+        Ok(out)
+    };
     match crop.filter(|c| !c.is_whole()) {
-        Some(c) => edit(app, path, replace, Some(end - start), move |p| library::trim_cropped(p, start, end, &audio, c)).await,
-        None => edit(app, path, replace, Some(end - start), move |p| library::trim(p, start, end, exact, &audio)).await,
+        Some(c) => edit(app, path, replace, Some(end - start), move |p| library::trim_cropped(p, start, end, &audio, c).and_then(remix)).await,
+        None => edit(app, path, replace, Some(end - start), move |p| library::trim(p, start, end, exact, &audio).and_then(remix)).await,
     }
 }
 

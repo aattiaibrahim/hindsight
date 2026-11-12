@@ -321,6 +321,54 @@ pub fn preview_tracks(path: &str, cache: &Path) -> Result<Vec<PreviewTrack>, Str
 /// the separate tracks plays the game and mic twice.
 const MIX_NAMES: [&str; 10] = ["all audio", "all", "mix", "mixed", "master", "combined", "everything", "full mix", "main mix", "stereo mix"];
 
+/// The name of the first track in Hindsight's clips: every other track mixed, for players
+/// that only play the first one. One of MIX_NAMES, so Hindsight leaves it out of its own mixes.
+pub const MIX_TITLE: &str = "All audio";
+
+/// Rebuild a clip's mix track from its other tracks, in place (the file is checked
+/// before it replaces the old one). For a save that changed the audio (a muted
+/// stretch, a track turned down): the separate tracks have the change, and the mix
+/// other players hear must too. Nothing to do for a clip without a mix track.
+pub fn refresh_mix_track(path: &str) -> Result<(), String> {
+    let titles = track_titles(path);
+    let Some(mix) = mix_copy(&titles) else { return Ok(()) };
+    let others: Vec<usize> = (0..titles.len()).filter(|i| *i != mix).collect();
+    let file = Path::new(path);
+    let tmp = file.with_file_name(format!(".{}.mix{}", file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), PART_EXT_SUFFIX));
+    let ins: String = others.iter().map(|i| format!("[0:a:{i}]aresample=48000,aformat=channel_layouts=stereo[m{i}];")).collect();
+    let refs: String = others.iter().map(|i| format!("[m{i}]")).collect();
+    let mut a = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y", "-i"]);
+    a.push(path.into());
+    a.extend(ffmpeg::args(&[
+        "-filter_complex",
+        &format!("{ins}{refs}amix=inputs={}:duration=longest:normalize=0[mix]", others.len()),
+        "-map", "0:v", "-map", "[mix]",
+    ]));
+    for i in &others {
+        a.extend(ffmpeg::args(&["-map", &format!("0:a:{i}")]));
+    }
+    a.extend(ffmpeg::args(&["-c", "copy", "-c:a:0", "aac", "-b:a:0", "192k", "-metadata:s:a:0", &format!("title={MIX_TITLE}")]));
+    for (o, i) in others.iter().enumerate() {
+        a.push(format!("-metadata:s:a:{}", o + 1).into());
+        a.push(format!("title={}", titles[*i]).into());
+    }
+    if ext_of(file) == "mp4" {
+        a.extend(ffmpeg::args(&["-movflags", "+faststart"]));
+    }
+    a.extend(ffmpeg::args(&["-f", if ext_of(file) == "mp4" { "mp4" } else { "matroska" }]));
+    a.push(tmp.clone().into());
+    let done = ffmpeg::run("ffmpeg", &a).and_then(|_| verify_output(&tmp, probe(path).ok().map(|p| p.duration)));
+    if let Err(e) = done {
+        let _ = fs::remove_file(&tmp);
+        return Err(format!("Saved, but couldn't update the All audio track: {e}"));
+    }
+    fs::rename(&tmp, file).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        e.to_string()
+    })
+}
+const PART_EXT_SUFFIX: &str = ".part";
+
 /// Each audio track's name: its title tag, or the name tag MP4s from Medal use. "" when none.
 pub fn track_titles(path: &str) -> Vec<String> {
     let mut args = ffmpeg::args(&["-v", "error", "-select_streams", "a", "-show_entries", "stream_tags=title,name,handler_name", "-of", "json"]);

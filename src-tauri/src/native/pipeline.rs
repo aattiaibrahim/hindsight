@@ -562,11 +562,25 @@ fn mux_with(video: &Path, format: &str, fps: u32, tracks: &[(PathBuf, TrackMeta)
         a.push(p.into());
     }
     a.extend(ffmpeg::args(&["-map", "0:v"]));
+    // With more than one track (desktop, mic, Discord), the first one is all of them
+    // mixed: other players (VLC, browsers, phones, the NAS app) only play the first
+    // track, and a clip whose desktop track was quiet seemed to have no sound at all.
+    // Hindsight itself leaves this track out and uses the separate ones
+    // (library::mix_copy finds it by its name), so nothing plays twice.
+    let mixed = tracks.len() >= 2;
+    if mixed {
+        let ins: String = (1..=tracks.len()).map(|i| format!("[{i}:a]aresample=48000,aformat=channel_layouts=stereo[m{i}];")).collect();
+        let refs: String = (1..=tracks.len()).map(|i| format!("[m{i}]")).collect();
+        a.extend(ffmpeg::args(&["-filter_complex", &format!("{ins}{refs}amix=inputs={}:duration=longest:normalize=0[mix]", tracks.len())]));
+        a.extend(ffmpeg::args(&["-map", "[mix]", "-b:a:0", "192k", "-metadata:s:a:0", &format!("title={}", crate::library::MIX_TITLE)]));
+    }
+    let first = usize::from(mixed);
     for (i, (_, t)) in tracks.iter().enumerate() {
+        let o = i + first;
         a.extend(ffmpeg::args(&["-map", &format!("{}:a", i + 1)]));
-        a.push(format!("-b:a:{i}").into());
+        a.push(format!("-b:a:{o}").into());
         a.push(t.bitrate.clone().into());
-        a.push(format!("-metadata:s:a:{i}").into());
+        a.push(format!("-metadata:s:a:{o}").into());
         a.push(format!("title={}", t.title).into());
     }
     a.extend(ffmpeg::args(&["-c:v", "copy"]));
@@ -611,6 +625,67 @@ pub fn mux_recording_parts(dir: &Path) {
 mod tests {
     use super::*;
 
+
+    /// Max loudness (dB) of one audio track of `path`, between `from` and `to` seconds.
+    fn loudness(path: &Path, track: usize, from: f64, to: f64) -> f64 {
+        let mut a = ffmpeg::args(&["-hide_banner", "-nostats", "-ss", &format!("{from}"), "-to", &format!("{to}"), "-i"]);
+        a.push(path.into());
+        a.extend(ffmpeg::args(&["-map", &format!("0:a:{track}"), "-af", "volumedetect", "-f", "null", "-"]));
+        let out = ffmpeg::cmd("ffmpeg").args(&a).output().unwrap();
+        let log = String::from_utf8_lossy(&out.stderr);
+        log.lines().find_map(|l| l.split("max_volume:").nth(1)).and_then(|s| s.trim().trim_end_matches(" dB").parse().ok()).unwrap_or(-999.0)
+    }
+
+    /// Like the desktop recording that seemed silent: nothing on the desktop track,
+    /// sound on the mic and Discord. The saved clip's first track is all of them
+    /// mixed (what other players play), Hindsight's own mixes leave it out, and an
+    /// edit that mutes the mic reaches the mixed track too.
+    #[test]
+    fn saved_clips_start_with_all_their_sound_mixed() {
+        ffmpeg::init(None);
+        let d = std::env::temp_dir().join(format!("rewind-mixtrack-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        let mut a = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=60", "-t", "4", "-c:v", "h264_nvenc", "-g", "60", "-bf", "0", "-f", "h264"]);
+        a.push(d.join("video.raw").into());
+        ffmpeg::run("ffmpeg", &a).unwrap();
+        let raw = |name: &str, src: &str, ch: &str| {
+            let mut a = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", src, "-t", "4", "-ar", "48000", "-ac", ch, "-f", "f32le"]);
+            a.push(d.join(name).into());
+            ffmpeg::run("ffmpeg", &a).unwrap();
+        };
+        raw("desktop.raw", "anullsrc=r=48000:cl=stereo", "2");
+        raw("mic.raw", "sine=frequency=440:sample_rate=48000", "1");
+        raw("discord.raw", "sine=frequency=880:sample_rate=48000", "2");
+        let t = |title: &str, ch: u16| TrackMeta { title: title.into(), bitrate: "128k".into(), rate: 48000, channels: ch };
+        let tracks = vec![(d.join("desktop.raw"), t("Desktop audio", 2)), (d.join("mic.raw"), t("Microphone", 1)), (d.join("discord.raw"), t("Discord audio", 2))];
+        let clip = d.join("Desktop clip.mkv");
+        mux(&d.join("video.raw"), "h264", 60, &tracks, &clip, Duration::from_secs(60)).unwrap();
+        let c = clip.to_string_lossy().into_owned();
+
+        let titles = crate::library::track_titles(&c);
+        assert_eq!(titles, vec!["All audio", "Desktop audio", "Microphone", "Discord audio"]);
+        assert!(loudness(&clip, 0, 0.0, 4.0) > -20.0, "other players hear the mic and Discord");
+        assert!(loudness(&clip, 1, 0.0, 4.0) < -60.0, "the desktop track is still silent on its own");
+        assert_eq!(crate::library::mix_copy(&titles), Some(0));
+        assert_eq!(crate::library::tracks_to_mix(&c, 4), vec![1, 2, 3], "Hindsight's own mixes leave the All audio track out");
+
+        // Mute the mic and Discord from 1 s to 3 s, save the trim: the All audio track is quiet there too.
+        let edit: crate::audio_edit::AudioEdit = serde_json::from_value(serde_json::json!([
+            { "gainDb": 0.0, "mutes": [] },
+            { "gainDb": 0.0, "mutes": [] },
+            { "gainDb": 0.0, "mutes": [[1.0, 3.0]] },
+            { "gainDb": 0.0, "mutes": [[1.0, 3.0]] }
+        ]))
+        .unwrap();
+        let out = crate::library::trim(&c, 0.0, 4.0, true, &edit).unwrap();
+        crate::library::refresh_mix_track(&out).unwrap();
+        let o = Path::new(&out);
+        assert_eq!(crate::library::track_titles(&out), vec!["All audio", "Desktop audio", "Microphone", "Discord audio"]);
+        assert!(loudness(o, 0, 1.4, 2.6) < -60.0, "the muted stretch is muted in All audio too");
+        assert!(loudness(o, 0, 3.3, 3.9) > -20.0, "and the rest still has sound");
+        let _ = fs::remove_dir_all(&d);
+    }
     /// A save cut off after its raw files were written (Hindsight closed or
     /// crashed) is finished on the next start, and its folder removed.
     #[test]
