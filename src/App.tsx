@@ -18,7 +18,7 @@ import { useNasState } from "./NasProgress";
 import type { MoveOutcome, OldFolder } from "./api";
 import { fmtSize } from "./api";
 import { OldFolderDialog } from "./OldFolder";
-import { useAppearance, useClips, useSettings, useStatus, useUpdate } from "./hooks";
+import { useAppearance, useClips, useMediaReady, useSettings, useStatus, useUpdate } from "./hooks";
 import { Library } from "./Library";
 import { Performance } from "./Performance";
 import logo from "./logo.svg";
@@ -49,6 +49,8 @@ export default function App() {
   const [settings, update] = useSettings();
   useAppearance(settings);
   const [clips, refresh] = useClips();
+  // Everything that plays (Studio, previews) re-renders once the media server's address is known.
+  useMediaReady();
   const uploads = useUploads();
   const health = useHealth(clips);
   const [shareReq, setShareReq] = useState<ShareRequest | null>(null);

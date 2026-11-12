@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, ClipFile, Settings, Status, UpdateState, NOT_NEEDED, markOnScreen, want as wantThumb } from "./api";
+import { api, ClipFile, Settings, Status, UpdateState, NOT_NEEDED, markOnScreen, mediaReady, whenMediaReady, want as wantThumb } from "./api";
 
 export function useUpdate() {
   const [u, setU] = useState<UpdateState | null>(null);
@@ -228,4 +228,11 @@ export function applyCachedAppearance() {
   } catch {
     /* first launch or storage unavailable: defaults */
   }
+}
+
+/** True once the player's address is known; the component re-renders then. */
+export function useMediaReady() {
+  const [ready, setReady] = useState(mediaReady);
+  useEffect(() => (ready ? undefined : whenMediaReady(() => setReady(true))), [ready]);
+  return ready;
 }

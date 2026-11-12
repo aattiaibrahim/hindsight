@@ -427,15 +427,54 @@ const probeCache = new Map<string, Promise<Probe>>();
 
 // The app's player loads clips from a local server that streams only what it
 // needs (Tauri's file protocol read whole 400 MB clips into memory first).
+// Asked until it answers: right at startup the server may not be listening yet, and
+// asking only once left the player on Tauri's file protocol for the whole session,
+// which can't play clips on the NAS (and is limited to the app's own data folder).
+// If it never starts (about 15 s of asking, or an empty answer meaning "none"), clips
+// fall back to the file protocol rather than waiting forever.
 let mediaBase: string | null = null;
-invoke<string | null>("media_base")
-  .then((b) => (mediaBase = typeof b === "string" ? b : null))
-  .catch(() => {});
+let noMediaServer = false;
+const mediaWaiters = new Set<() => void>();
+const mediaSettled = () => {
+  mediaWaiters.forEach((f) => f());
+  mediaWaiters.clear();
+};
+const askMediaBase = (tries = 0) => {
+  const again = () => {
+    if (tries >= 12) {
+      noMediaServer = true;
+      mediaSettled();
+    } else setTimeout(() => askMediaBase(tries + 1), Math.min(2000, 100 * 2 ** tries));
+  };
+  invoke<string | null>("media_base")
+    .then((b) => {
+      if (typeof b === "string" && b) {
+        mediaBase = b;
+        mediaSettled();
+      } else if (b === "") {
+        noMediaServer = true;
+        mediaSettled();
+      } else again();
+    })
+    .catch(again);
+};
+askMediaBase();
+/** Is it known yet where the player loads clips from? */
+export const mediaReady = () => !!mediaBase || noMediaServer;
+/** Call `f` once the player's address is known (right away if it is). */
+export function whenMediaReady(f: () => void) {
+  if (mediaReady()) f();
+  else mediaWaiters.add(f);
+  return () => {
+    mediaWaiters.delete(f);
+  };
+}
 
 /** The address the player loads a clip (or audio track) from. */
-export function mediaSrc(path: string, bust?: string | number) {
-  if (mediaBase) return `${mediaBase}${encodeURIComponent(path)}${bust != null ? `&v=${encodeURIComponent(String(bust))}` : ""}`;
-  return `${convertFileSrc(path)}${bust != null ? `?v=${bust}` : ""}`;
+export function mediaSrc(path: string, bust?: string | number): string | undefined {
+  if (noMediaServer) return `${convertFileSrc(path)}${bust != null ? `?v=${bust}` : ""}`;
+  if (!mediaBase) return undefined; // App re-renders once it's known (useMediaReady)
+  return `${mediaBase}${encodeURIComponent(path)}${bust != null ? `&v=${encodeURIComponent(String(bust))}` : ""}`;
 }
 
 export const api = {

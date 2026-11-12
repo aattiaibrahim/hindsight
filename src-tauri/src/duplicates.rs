@@ -123,33 +123,66 @@ pub fn find_with(clips: &[(String, u64)], progress: &mut dyn FnMut(usize, usize)
 /// `same` (length, picture, tracks) agrees. Sets of 2+ paths, sorted.
 pub fn remuxes(clips: &[(String, u64)], same: impl Fn(&str, &str) -> bool) -> Vec<Vec<String>> {
     use std::path::Path;
-    let mut by_name: HashMap<(String, String), Vec<&str>> = HashMap::new();
+    // Grouped by folder and name, with a timestamp in the name set aside: OBS names each
+    // file by the moment it was written, so the MP4 it remuxes to can be a second or two
+    // later than its MKV ("OBS 2026-07-30 16-04-14.mkv" and "... 16-04-15.mp4").
+    let mut by_name: HashMap<(String, String), Vec<(&str, Option<i64>)>> = HashMap::new();
     for (p, _) in clips {
         let path = Path::new(p);
         let (Some(dir), Some(stem)) = (path.parent(), path.file_stem()) else { continue };
-        by_name.entry((dir.to_string_lossy().to_lowercase(), stem.to_string_lossy().to_lowercase())).or_default().push(p);
+        let (key, at) = name_key(&stem.to_string_lossy().to_lowercase());
+        by_name.entry((dir.to_string_lossy().to_lowercase(), key)).or_default().push((p, at));
     }
     let ext = |p: &str| Path::new(p).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    // Same name, or the same but for a timestamp at most this many seconds apart.
+    const NEAR_SECS: i64 = 10;
+    let close = |a: Option<i64>, b: Option<i64>| match (a, b) {
+        (Some(x), Some(y)) => (x - y).abs() <= NEAR_SECS,
+        (None, None) => true,
+        _ => false,
+    };
     let mut out = Vec::new();
     for (_, paths) in by_name {
         if paths.len() < 2 {
             continue;
         }
-        // Each file joins the first one it matches; a lookalike with the same name stays out.
-        let mut sets: Vec<Vec<String>> = Vec::new();
-        for p in paths {
-            match sets.iter_mut().find(|s| s.iter().all(|q| ext(q) != ext(p)) && same(&s[0], p)) {
-                Some(s) => s.push(p.to_string()),
-                None => sets.push(vec![p.to_string()]),
+        // Each file joins the first one it matches; a lookalike that isn't the same recording stays out.
+        let mut sets: Vec<(Vec<String>, Option<i64>)> = Vec::new();
+        for (p, at) in paths {
+            match sets.iter_mut().find(|(s, t)| close(*t, at) && s.iter().all(|q| ext(q) != ext(p)) && same(&s[0], p)) {
+                Some((s, _)) => s.push(p.to_string()),
+                None => sets.push((vec![p.to_string()], at)),
             }
         }
-        out.extend(sets.into_iter().filter(|s| s.len() > 1));
+        out.extend(sets.into_iter().map(|(s, _)| s).filter(|s| s.len() > 1));
     }
     for set in &mut out {
         set.sort();
     }
     out.sort();
     out
+}
+
+/// A file name with its timestamp (`2026-07-30 16-04-14`, any of ` `/`_`/`T` between date
+/// and time, `-`/`_`/`.` between hours, minutes and seconds) replaced by `{t}`, and
+/// that moment in seconds. Names without one are their own key.
+pub(crate) fn name_key(stem: &str) -> (String, Option<i64>) {
+    let b = stem.as_bytes();
+    let digits = |i: usize, n: usize| i + n <= b.len() && b[i..i + n].iter().all(|c| c.is_ascii_digit());
+    let num = |i: usize, n: usize| stem[i..i + n].parse::<i64>().unwrap_or(0);
+    for i in 0..b.len().saturating_sub(18) {
+        let ok = digits(i, 4) && b[i + 4] == b'-' && digits(i + 5, 2) && b[i + 7] == b'-' && digits(i + 8, 2)
+            && matches!(b[i + 10], b' ' | b'_' | b't')
+            && digits(i + 11, 2) && matches!(b[i + 13], b'-' | b'_' | b'.') && digits(i + 14, 2) && matches!(b[i + 16], b'-' | b'_' | b'.') && digits(i + 17, 2);
+        if ok {
+            let (y, mo, d) = (num(i, 4), num(i + 5, 2), num(i + 8, 2));
+            let (h, mi, s) = (num(i + 11, 2), num(i + 14, 2), num(i + 17, 2));
+            // Seconds from a fixed point; only differences between nearby names matter.
+            let secs = (((y * 12 + mo) * 31 + d) * 24 + h) * 3600 + mi * 60 + s;
+            return (format!("{}{{t}}{}", &stem[..i], &stem[i + 19..]), Some(secs));
+        }
+    }
+    (stem.to_string(), None)
 }
 
 /// Is one file a remux of the other: the same streams copied into another container?
@@ -230,6 +263,28 @@ mod tests {
         assert!(!sets[0][0].contains("Export"));
         let _ = std::fs::remove_dir_all(&d);
     }
+    #[test]
+    fn obs_names_a_remux_a_second_or_two_after_its_mkv() {
+        assert_eq!(name_key("obs 2026-07-30 16-04-14").0, name_key("obs 2026-07-30 16-04-15").0);
+        assert_eq!(name_key("obs 2026-07-30 16-04-15").1.unwrap() - name_key("obs 2026-07-30 16-04-14").1.unwrap(), 1);
+        assert_eq!(name_key("desktop 2026-11-12 02-34-09 - admin").0, "desktop {t} - admin");
+        assert_eq!(name_key("medal clip").1, None);
+        let list: Vec<(String, u64)> = [
+            r"C:\clips\OBS\OBS 2026-07-30 16-04-14.mkv",
+            r"C:\clips\OBS\OBS 2026-07-30 16-04-15.mp4",  // 1 s later: its remux
+            r"C:\clips\OBS\OBS 2026-07-30 16-09-40.mp4",  // 5 min later: another recording
+            r"C:\clips\OBS\OBS 2026-07-30 00-36-44.mkv",
+            r"C:\clips\OBS\OBS 2026-07-30 00-36-46.mp4",
+        ]
+        .iter()
+        .map(|p| (p.to_string(), 1))
+        .collect();
+        let sets = remuxes(&list, |_, _| true);
+        assert_eq!(sets.len(), 2, "{sets:?}");
+        assert!(sets.iter().all(|s| s.len() == 2));
+        assert!(!sets.iter().flatten().any(|p| p.contains("16-09-40")));
+    }
+
     #[test]
     fn remuxes_are_the_same_name_in_another_format_and_the_same_recording() {
         let list: Vec<(String, u64)> = [

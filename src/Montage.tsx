@@ -305,6 +305,7 @@ function Editor({
       if (!v || !at) return;
       const p = pieces[at.i];
       const src = mediaSrc(p.clip.path);
+      if (!src) return; // the player's address isn't known yet
       if (playingIdx.current !== at.i || !v.src.endsWith(encodeURI(src).split("/").pop() ?? "")) {
         playingIdx.current = at.i;
         v.src = src;

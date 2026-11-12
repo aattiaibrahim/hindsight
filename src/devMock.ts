@@ -164,7 +164,7 @@ export function installDevMock() {
         : [],
     edited_clips: () => [],
     system_accent: () => "#4cc2ff",
-    media_base: () => null,
+    media_base: () => "", // no media server in the browser preview
     old_folders: () => [{ path: "C:\\Medal", label: "Medal", moved: 42, files: 3, bytes: 18_400_000 }],
     remove_old_folder: () => null,
     set_game_logo: () => null,
