@@ -1372,3 +1372,17 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
 }
 @keyframes sb-spin { to { transform: rotate(360deg); } }
 :root[data-motion="reduce"] .sb-spin { animation-duration: 2.4s; }
+
+/* A card whose picture is on its way: a soft light sweeps across it, then the
+   picture fades in. Still (no sweep) with reduced motion. */
+.thumb.loading, .clip-row-thumb.loading { position: relative; overflow: hidden; }
+.thumb.loading::after, .clip-row-thumb.loading::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(100deg, transparent 30%, color-mix(in srgb, var(--text) 9%, transparent) 50%, transparent 70%);
+  background-size: 250% 100%; animation: thumb-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes thumb-shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
+.thumb img, .clip-row-thumb img { animation: thumb-in 0.25s var(--ease); }
+@keyframes thumb-in { from { opacity: 0; } }
+:root[data-motion="reduce"] .thumb.loading::after, :root[data-motion="reduce"] .clip-row-thumb.loading::after { animation: none; background: color-mix(in srgb, var(--text) 4%, transparent); }
+:root[data-motion="reduce"] .thumb img, :root[data-motion="reduce"] .clip-row-thumb img { animation: none; }

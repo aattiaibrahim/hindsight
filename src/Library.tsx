@@ -2,7 +2,7 @@ import { Select } from "./Select";
 import { open } from "@tauri-apps/plugin-dialog";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ClipFile, codecLabel, errText, fmtDuration, fmtSize, Health, Probe, Upload, UploadProgress, NOT_NEEDED, VIDEO_EXTENSIONS, want } from "./api";
-import { RETRY_MS, useNearView, useOnScreen, useThumb } from "./hooks";
+import { RETRY_MS, useNearView, useOnScreen, useThumb, useThumbStatus } from "./hooks";
 import { liveLink, progressText, ShareRequest, timeLeft } from "./Share";
 import { Timeline } from "./Timeline";
 import { DamagedStatus, damagedText } from "./Health";
@@ -108,11 +108,11 @@ function ClipRow({
 }) {
   const [rowRef, near] = useNearView<HTMLButtonElement>();
   useOnScreen(rowRef, ["t:" + clip.path + String(clip.modified), "p:" + clip.path + String(clip.modified)]);
-  const thumb = useThumb(clip.path, clip.modified, near);
+  const { src: thumb, loading } = useThumbStatus(clip.path, clip.modified, near);
   const time = new Date(clip.modified).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
   return (
     <button ref={rowRef} className={`clip-row ${selected ? "selected" : ""}`} onClick={onClick} title={clip.path} data-path={clip.path}>
-      <div className="clip-row-thumb">{thumb && <img src={thumb} alt="" decoding="async" />}</div>
+      <div className={`clip-row-thumb ${loading ? "loading" : ""}`}>{thumb && <img src={thumb} alt="" decoding="async" />}</div>
       <div className="clip-row-main">
         <div className="card-title">{clip.name}</div>
         <div className="card-meta">
@@ -194,7 +194,7 @@ function ClipCard({
   // clips (or a slow hard drive) the ones you're looking at come first.
   const [cardRef, near] = useNearView<HTMLButtonElement>();
   useOnScreen(cardRef, ["t:" + clip.path + String(clip.modified), "p:" + clip.path + String(clip.modified)]);
-  const thumb = useThumb(clip.path, clip.modified, near);
+  const { src: thumb, loading } = useThumbStatus(clip.path, clip.modified, near);
   const [info, setInfo] = useState<Probe | null>(null);
   useEffect(() => {
     if (!near) return;
@@ -231,7 +231,7 @@ function ClipCard({
       title={clip.path}
       data-path={clip.path}
     >
-      <div className={`thumb ${nasState ? "has-nas" : ""}`}>
+      <div className={`thumb ${nasState ? "has-nas" : ""} ${loading ? "loading" : ""}`}>
         {thumb && <img src={thumb} alt="" decoding="async" />}
         <span
           className={`check ${selected ? "on" : ""}`}

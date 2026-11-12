@@ -133,11 +133,22 @@ export function useOnScreen<T extends Element>(ref: React.RefObject<T | null>, k
 export const RETRY_MS = [2500, 8000, 20000];
 
 export function useThumb(path: string, key: string | number = "", want = true) {
+  return useThumbStatus(path, key, want).src;
+}
+
+/**
+ * useThumb, plus whether it's still coming: `loading` while it's wanted and not here
+ * yet (cards shimmer), false once it's shown or every try has failed (a clip that
+ * can't be read doesn't shimmer forever).
+ */
+export function useThumbStatus(path: string, key: string | number = "", want = true) {
   const [src, setSrc] = useState<string | null>(() => (path ? api.thumbNow(path, String(key)) : null));
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     let alive = true;
     const now = path ? api.thumbNow(path, String(key)) : null;
     setSrc(now);
+    setFailed(false);
     if (!path || now || !want) return;
     const k = "t:" + path + String(key);
     wantThumb(k, 1);
@@ -152,6 +163,7 @@ export function useThumb(path: string, key: string | number = "", want = true) {
           // Otherwise (a slow drive, a busy NAS) try again a few times, waiting longer each time.
           if (String(e).includes(NOT_NEEDED)) retry = window.setTimeout(() => load(tries), 50);
           else if (tries < RETRY_MS.length) retry = window.setTimeout(() => load(tries + 1), RETRY_MS[tries]);
+          else setFailed(true);
         });
     load(0);
     return () => {
@@ -160,7 +172,7 @@ export function useThumb(path: string, key: string | number = "", want = true) {
       wantThumb(k, -1); // left the screen: a request still waiting its turn is dropped
     };
   }, [path, key, want]);
-  return src;
+  return { src, loading: !!path && want && !src && !failed };
 }
 
 /** Theme, accent and motion as attributes on <html>, so the CSS can switch
