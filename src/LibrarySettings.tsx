@@ -8,6 +8,7 @@ import { useDetectStatus } from "./GameSort";
 import { HealthSetting } from "./Health";
 import { NasSetup } from "./NasSetup";
 import { OldFolderDialog } from "./OldFolder";
+import { MixTracksSetting } from "./MixTracksSetting";
 
 type MoveJob = {
   folders: string[];
@@ -284,6 +285,8 @@ export function LibrarySettings({
         </span>
         <Toggle label="Prepare thumbnails ahead of time" checked={s.prepareThumbnails} onChange={(v) => set({ prepareThumbnails: v })} />
       </label>
+
+      <MixTracksSetting nasPaired={!!s.nasServer} />
 
       <label className="setting">
         <span>

@@ -196,6 +196,9 @@ export type BenchProgress = { step: string; detail: string; waitingForUser: bool
 export type PreviewAudio ={ firstTitle: string; extra: { index: number; title: string; path: string }[]; /** a track that's the others already mixed */ mix?: number | null };
 
 /** The same clip more than once: "copy" (byte for byte) or "remux" (same recording, another format, e.g. OBS's MKV and MP4). */
+/** The NAS app adding All audio tracks to older clips (server/src/mixtracks.js). */
+export type MixTracksStatus = { running: boolean; checked: number; total: number; added: number; failed: number; lastError: string | null; finishedAt: number | null };
+
 export type DupeSet = { paths: string[]; kind: "copy" | "remux" | "smaller" };
 
 export type DeleteResult ={ deleted: string[]; failed: [string, string][] };
@@ -494,6 +497,8 @@ export const api = {
   gpuEncoders: () => invoke<GpuEncoders>("gpu_encoders"),
   /** Sets of paths holding the very same clip */
   findDuplicates: () => invoke<DupeSet[]>("find_duplicates"),
+  addMixTracks: () => invoke<{ addedHere: number; failedHere: [string, string][]; nasStarted: boolean; nasError: string | null }>("add_mix_tracks"),
+  mixTracksStatus: () => invoke<MixTracksStatus | null>("mix_tracks_status"),
   detectStatus: () => invoke<DetectStatus>("detect_status"),
   detectInstall: () => invoke<void>("detect_install"),
   gameSuggestions: () => invoke<GameSuggestion[]>("game_suggestions"),

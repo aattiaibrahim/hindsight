@@ -1351,6 +1351,70 @@ async fn find_duplicates(app: AppHandle) -> Result<Vec<DupeSet>, String> {
     .await
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MixRun {
+    /// Clips on this PC that got the All audio track (their NAS copies follow)
+    added_here: usize,
+    failed_here: Vec<(String, String)>,
+    /// The NAS app started on the clips only on the NAS
+    nas_started: bool,
+    nas_error: Option<String>,
+}
+
+/// Give older clips the All audio track: the ones on this PC here (their NAS copies
+/// are updated by the sync, old versions kept in the NAS app's Trash), the ones only on
+/// the NAS by the NAS app itself (no copying over the network). Only Hindsight's own
+/// clips (library::needs_mix_track); Medal and OBS files are never touched.
+#[tauri::command]
+async fn add_mix_tracks(app: AppHandle) -> Result<MixRun, String> {
+    if games::game_running() {
+        return Err("Not while a game is running: try again after.".into());
+    }
+    let s = settings_of(&app);
+    let a = app.clone();
+    blocking(move || {
+        let clips_dir = PathBuf::from(&s.clips_dir);
+        let here: Vec<String> = library::scan_all(&clips_dir, &[], &[], &[], &s.nas_dir)
+            .into_iter()
+            .filter(|c| c.location == "local")
+            .map(|c| c.path)
+            .collect();
+        let (mut added_here, mut failed_here) = (0, Vec::new());
+        for (i, p) in here.iter().enumerate() {
+            match library::add_mix_track(p) {
+                Ok(true) => {
+                    added_here += 1;
+                    nas::edited(&s, std::path::Path::new(p), std::path::Path::new(p));
+                }
+                Ok(false) => {}
+                Err(e) => failed_here.push((p.clone(), e)),
+            }
+            let _ = a.emit("mix-progress", (i + 1, here.len()));
+        }
+        // The NAS app does the rest, skipping the clips this PC just did (their copies come from here).
+        let skip: Vec<String> = here.iter().filter_map(|p| library::rel_in(&clips_dir, p)).collect();
+        let (nas_started, nas_error) = if s.nas_dir.is_empty() || s.nas_server.is_empty() {
+            (false, None)
+        } else {
+            match nas::ask_app(&s.nas_server, "/api/mix-tracks", serde_json::json!({ "skip": skip })) {
+                Ok(_) => (true, None),
+                Err(e) => (false, Some(e)),
+            }
+        };
+        let _ = a.emit("clips-changed", ());
+        Ok(MixRun { added_here, failed_here, nas_started, nas_error })
+    })
+    .await
+}
+
+/// How far the NAS app has got adding All audio tracks (None if it can't be asked).
+#[tauri::command]
+async fn mix_tracks_status(app: AppHandle) -> Result<Option<serde_json::Value>, String> {
+    let server = settings_of(&app).nas_server;
+    blocking(move || Ok(nas::app_get(&server, "/api/mix-tracks").ok())).await
+}
+
 /// Where the app's player loads clips from (a local server that streams only
 /// the bytes it asks for), or None to use the file protocol.
 #[tauri::command]
@@ -1900,6 +1964,8 @@ pub fn run() {
             media_base,
             old_folders,
             remove_old_folder,
+            add_mix_tracks,
+            mix_tracks_status,
             find_duplicates,
             detect_status,
             detect_install,

@@ -333,6 +333,37 @@ pub fn refresh_mix_track(path: &str) -> Result<(), String> {
     let titles = track_titles(path);
     let Some(mix) = mix_copy(&titles) else { return Ok(()) };
     let others: Vec<usize> = (0..titles.len()).filter(|i| *i != mix).collect();
+    write_with_mix(path, &titles, &others).map_err(|e| format!("Saved, but couldn't update the All audio track: {e}"))
+}
+
+/// Hindsight's own names for a clip's tracks (only these clips get a mix track added:
+/// OBS's unnamed tracks often start with a mix already, and Medal has its own).
+const OWN_TRACKS: [&str; 3] = ["desktop audio", "microphone", "discord audio"];
+
+/// Does this clip (by its track names) need an All audio track added?
+pub fn needs_mix_track(titles: &[String]) -> bool {
+    titles.len() >= 2 && titles.iter().all(|t| OWN_TRACKS.contains(&t.trim().to_lowercase().as_str()))
+}
+
+/// Give an older Hindsight clip its All audio track, in place, keeping its date.
+/// Ok(false) when it doesn't need one. The video and the separate tracks are copied untouched.
+pub fn add_mix_track(path: &str) -> Result<bool, String> {
+    let titles = track_titles(path);
+    if !needs_mix_track(&titles) {
+        return Ok(false);
+    }
+    let dates = dates_of(Path::new(path));
+    let all: Vec<usize> = (0..titles.len()).collect();
+    write_with_mix(path, &titles, &all)?;
+    if let Some(d) = dates {
+        set_dates(Path::new(path), d);
+    }
+    Ok(true)
+}
+
+/// Rewrite `path` as: video, then a mix of `others` (titled All audio), then `others`
+/// themselves, copied. Checked (same length, every track there) before it replaces the file.
+fn write_with_mix(path: &str, titles: &[String], others: &[usize]) -> Result<(), String> {
     let file = Path::new(path);
     let tmp = file.with_file_name(format!(".{}.mix{}", file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), PART_EXT_SUFFIX));
     let ins: String = others.iter().map(|i| format!("[0:a:{i}]aresample=48000,aformat=channel_layouts=stereo[m{i}];")).collect();
@@ -344,7 +375,7 @@ pub fn refresh_mix_track(path: &str) -> Result<(), String> {
         &format!("{ins}{refs}amix=inputs={}:duration=longest:normalize=0[mix]", others.len()),
         "-map", "0:v", "-map", "[mix]",
     ]));
-    for i in &others {
+    for i in others {
         a.extend(ffmpeg::args(&["-map", &format!("0:a:{i}")]));
     }
     a.extend(ffmpeg::args(&["-c", "copy", "-c:a:0", "aac", "-b:a:0", "192k", "-metadata:s:a:0", &format!("title={MIX_TITLE}")]));
@@ -357,10 +388,12 @@ pub fn refresh_mix_track(path: &str) -> Result<(), String> {
     }
     a.extend(ffmpeg::args(&["-f", if ext_of(file) == "mp4" { "mp4" } else { "matroska" }]));
     a.push(tmp.clone().into());
-    let done = ffmpeg::run("ffmpeg", &a).and_then(|_| verify_output(&tmp, probe(path).ok().map(|p| p.duration)));
+    let done = ffmpeg::run("ffmpeg", &a)
+        .and_then(|_| verify_output(&tmp, probe(path).ok().map(|p| p.duration)))
+        .and_then(|_| if track_titles(&tmp.to_string_lossy()).len() == others.len() + 1 { Ok(()) } else { Err("a track went missing".into()) });
     if let Err(e) = done {
         let _ = fs::remove_file(&tmp);
-        return Err(format!("Saved, but couldn't update the All audio track: {e}"));
+        return Err(e);
     }
     fs::rename(&tmp, file).map_err(|e| {
         let _ = fs::remove_file(&tmp);
@@ -1495,6 +1528,47 @@ mod tests {
             println!("  {m}: {:?} in {:?}", r.map(|_| "ok"), t.elapsed());
         }
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// An older Hindsight clip gets its All audio track in place and keeps its date;
+    /// an OBS-style clip (unnamed tracks) is left alone.
+    #[test]
+    fn older_clips_get_the_all_audio_track_but_only_hindsights_own() {
+        crate::ffmpeg::init(None);
+        let d = std::env::temp_dir().join(format!("rewind-addmix-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        let make = |name: &str, titles: &[&str]| {
+            let mut a = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=30"]);
+            for _ in titles {
+                a.extend(ffmpeg::args(&["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000"]));
+            }
+            a.extend(ffmpeg::args(&["-t", "3", "-map", "0:v"]));
+            for i in 0..titles.len() {
+                a.extend(ffmpeg::args(&["-map", &format!("{}:a", i + 1)]));
+            }
+            a.extend(ffmpeg::args(&["-c:v", "mpeg4", "-c:a", "aac"]));
+            for (i, t) in titles.iter().enumerate() {
+                a.extend(ffmpeg::args(&[&format!("-metadata:s:a:{i}"), &format!("title={t}")]));
+            }
+            let p = d.join(name);
+            a.push(p.clone().into());
+            ffmpeg::run("ffmpeg", &a).unwrap();
+            p.to_string_lossy().into_owned()
+        };
+        let ours = make("Desktop 2026-11-12 02-34-09 - ADMIN.mkv", &["Desktop audio", "Microphone", "Discord audio"]);
+        let obs = make("OBS 2026-09-07 03-14-17.mkv", &["", ""]);
+        let taken = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_794_000_000);
+        fs::File::options().write(true).open(&ours).unwrap().set_modified(taken).unwrap();
+        assert_eq!(add_mix_track(&ours), Ok(true));
+        assert_eq!(track_titles(&ours), vec!["All audio", "Desktop audio", "Microphone", "Discord audio"]);
+        assert_eq!(tracks_to_mix(&ours, 4), vec![1, 2, 3], "Hindsight's own mixes leave it out");
+        let m = fs::metadata(&ours).unwrap().modified().unwrap();
+        assert!(m.duration_since(taken).unwrap_or_default() < std::time::Duration::from_secs(2), "keeps its date");
+        assert_eq!(add_mix_track(&ours), Ok(false), "not added twice");
+        assert_eq!(add_mix_track(&obs), Ok(false), "an OBS file is left alone");
+        assert_eq!(track_titles(&obs).len(), 2);
+        let _ = fs::remove_dir_all(&d);
     }
     #[test]
     fn a_track_that_mixes_the_others_is_found_by_name() {

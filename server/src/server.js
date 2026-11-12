@@ -125,7 +125,7 @@ async function jsonBody(req) {
   return text ? JSON.parse(text) : {};
 }
 
-export async function createServer({ library, media, cleanup = null, shares = null, montages = null, store = null, logos = null, edits = null, pairing = null }) {
+export async function createServer({ library, media, cleanup = null, shares = null, montages = null, store = null, logos = null, edits = null, pairing = null, mixTracks = null }) {
   const withMeta = (c) => {
     const out = { ...c, ...(media.meta(c) ?? {}) };
     if (store) {
@@ -151,6 +151,18 @@ export async function createServer({ library, media, cleanup = null, shares = nu
       await cleanup.check();
       await library.rescan();
       return send(res, 200, cleanup.list(library.clips.map(withMeta)));
+    }
+    // Adding the All audio track to older clips (mixtracks.js): start it, or see how far it is.
+    if (mixTracks && url.pathname === "/api/mix-tracks") {
+      try {
+        if (post(req)) {
+          const body = await jsonBody(req).catch(() => ({}));
+          return send(res, 200, mixTracks.start(Array.isArray(body.skip) ? body.skip.map(String) : []));
+        }
+        return send(res, 200, mixTracks.status(), { "cache-control": "no-cache" });
+      } catch (e) {
+        return fail(res, e);
+      }
     }
     if (cleanup && url.pathname === "/api/trash") return send(res, 200, cleanup.trashList(), { "cache-control": "no-cache" });
     if (cleanup && url.pathname === "/api/trash/empty" && post(req)) {

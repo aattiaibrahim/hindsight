@@ -373,7 +373,24 @@ const DELETED: &str = ".hindsight-deleted";
 
 /// Ask the paired NAS app to do something with a clip (by its place in the clips
 /// folder). Err when it can't be reached or says no, so the caller can fall back.
-fn ask_app(server: &str, route: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
+/// Ask the NAS app for something (GET), e.g. how far a job has got.
+pub fn app_get(server: &str, route: &str) -> Result<serde_json::Value, String> {
+    let server = server.trim().trim_end_matches('/');
+    if server.is_empty() {
+        return Err("not paired".into());
+    }
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let res = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?
+        .get(format!("{server}{route}"))
+        .send()
+        .map_err(|e| e.to_string())?;
+    res.json().map_err(|e| e.to_string())
+}
+
+pub(crate) fn ask_app(server: &str, route: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
     let server = server.trim().trim_end_matches('/');
     if server.is_empty() {
         return Err("not paired".into());
