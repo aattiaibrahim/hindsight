@@ -41,10 +41,11 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' asset: http://asset.localhost http://127.0.0.1:* blob:; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:*; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'",
+      "devCsp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["**"]
+        "scope": ["$APPLOCALDATA/**"]
       }
     }
   },
