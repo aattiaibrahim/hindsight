@@ -509,7 +509,14 @@ export default function App() {
           />
         )}
       </main>
-      <StatusBar status={status} hotkey={settings?.hotkey ?? "Alt+F10"} recordHotkey={settings?.recordHotkey ?? "Alt+F9"} version={upd?.current} />
+      <StatusBar
+        status={status}
+        hotkey={settings?.hotkey ?? "Alt+F10"}
+        recordHotkey={settings?.recordHotkey ?? "Alt+F9"}
+        version={upd?.current}
+        customArea={!!settings?.captureArea}
+        onFitScreen={() => update({ captureArea: null }).then(() => toast("Recording the whole screen again")).catch((e) => toast(errText(e), true))}
+      />
       {shareReq && settings && (
         <ShareConfirm
           req={shareReq}

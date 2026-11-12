@@ -8,7 +8,22 @@ import { nasActivity, NasBadge, NasProgress, useNasState } from "./NasProgress";
  * the NAS, and the save / record buttons. Replaces the big card that used to
  * sit in the sidebar; its details open from the buffer part.
  */
-export function StatusBar({ status, hotkey, recordHotkey, version }: { status: Status | null; hotkey: string; recordHotkey: string; version?: string }) {
+export function StatusBar({
+  status,
+  hotkey,
+  recordHotkey,
+  version,
+  customArea = false,
+  onFitScreen,
+}: {
+  status: Status | null;
+  hotkey: string;
+  recordHotkey: string;
+  version?: string;
+  /** Only part of the screen is being recorded (Settings → Recording area) */
+  customArea?: boolean;
+  onFitScreen?: () => void;
+}) {
   const nas = useNasState();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -78,13 +93,20 @@ export function StatusBar({ status, hotkey, recordHotkey, version }: { status: S
         )}
       </div>
       {on && (
-        <span className="sb-item quiet">
+        <span className="sb-item quiet" title={customArea ? `Recording only part of the screen: ${status!.width} × ${status!.height}` : undefined}>
           {codecLabel(status!.encoder)} · {status!.height}p{status!.fps}
+          {customArea && " · part of the screen"}
         </span>
       )}
+      {/* A changed recording area is easy to forget (clips come out an odd size): one click back to the whole screen. */}
+      {on && customArea && onFitScreen && (
+        <button className="btn small" onClick={onFitScreen} title="Record the whole screen again (Settings → Recording area)">
+          Fit to screen
+        </button>
+      )}
       {nasText && (
-        <span className={`sb-item quiet sb-nas ${nas && !nas.reachable ? "bad" : ""}`} title={nas?.copying ? `${nas.copying}${nas.lastError ? `\n${nas.lastError}` : ""}` : (nas?.lastError ?? undefined)}>
-          <NasBadge status={nas?.copying ? "copying" : nas?.pending ? "not-synced" : "synced"} />
+        <span className={`sb-item quiet sb-nas ${nas && !nas.reachable && !nas.connecting ? "bad" : ""}`} title={nas?.copying ? `${nas.copying}${nas.lastError ? `\n${nas.lastError}` : ""}` : (nas?.lastError ?? undefined)}>
+          {nas?.connecting ? <span className="sb-spin" aria-hidden="true" /> : <NasBadge status={nas?.copying ? "copying" : nas?.pending ? "not-synced" : "synced"} />}
           {nasText}
           {activity?.pct != null && (
             <span className="sb-meter" aria-hidden="true">

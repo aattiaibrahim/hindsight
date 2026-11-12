@@ -214,6 +214,8 @@ export type ClipFile = {
 };
 
 export type NasState = {
+  /** Just started: still looking for the NAS. */
+  connecting?: boolean;
   enabled: boolean;
   reachable: boolean;
   pending: number;

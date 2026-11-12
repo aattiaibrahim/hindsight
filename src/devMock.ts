@@ -73,7 +73,7 @@ export function installDevMock() {
   const secrets: Record<string, boolean> = {};
   const settings = {
     clipsDir: "C:\\Users\\you\\Videos\\Hindsight", encoder: "auto", quality: 24, fps: 60, bufferSeconds: 120,
-    bufferInRam: true, captureEngine: "native", monitorMode: "primary", fixedMonitor: "", drawCursor: true, captureArea: null, hotkey: "Alt+F10",
+    bufferInRam: true, captureEngine: "native", monitorMode: "primary", fixedMonitor: "", drawCursor: true, captureArea: new URLSearchParams(location.search).has("area") ? { x: 0, y: 0, w: 1, h: 0.952 } : null, hotkey: "Alt+F10",
     recordHotkey: "Alt+F9", bufferEnabled: true, launchOnStartup: false, autoUpdate: true, startMinimized: true,
     keepOriginalAfterRemux: true, replaceOriginalOnEdit: false, externalFiles: [], desktopAudio: true, discordTrack: true,
     micEnabled: true, micMono: true, micDevice: "", micGainDb: 0, theme: "tinted", accent: "winblue", keepWhole: [], reduceMotion: false,
@@ -137,7 +137,9 @@ export function installDevMock() {
     "plugin:opener|open_url": () => null,
     get_nas_state: () =>
       settings.nasDir
-        ? new URLSearchParams(location.search).has("freeing")
+        ? new URLSearchParams(location.search).has("connecting")
+          ? { enabled: true, reachable: false, connecting: true, pending: 0, copying: null, copied: 0, lastError: null, lastSync: null, paused: false, totalFiles: 0, doneFiles: 0, totalBytes: 0, doneBytes: 0, pendingBytes: 0, checking: false, rate: 0, etaSecs: null, freeDone: 0, freeTotal: 0, freeing: false, stopped: false }
+          : new URLSearchParams(location.search).has("freeing")
           ? { enabled: true, reachable: true, pending: 0, copying: "OBS/OBS 2026-07-19 04-09-26.mp4", copied: 0, lastError: null, lastSync: Date.now() - 20_000, paused: false, totalFiles: 0, doneFiles: 0, totalBytes: 0, doneBytes: 0, pendingBytes: 0, checking: true, rate: 0, etaSecs: null, freeDone: 119, freeTotal: 298, freeing: true, stopped: false }
           : { enabled: true, reachable: true, pending: 1, copying: null, copied: 3, lastError: null, lastSync: Date.now() - 20_000, paused: false, totalFiles: 0, doneFiles: 0, totalBytes: 0, doneBytes: 0, pendingBytes: 0, checking: false, rate: 0, etaSecs: null, freeDone: 0, freeTotal: 0, freeing: false, stopped: false }
         : { enabled: false, reachable: false, pending: 0, copying: null, copied: 0, lastError: null, lastSync: null, paused: false, totalFiles: 0, doneFiles: 0, totalBytes: 0, doneBytes: 0, pendingBytes: 0, checking: false, rate: 0, etaSecs: null, freeDone: 0, freeTotal: 0, freeing: false, stopped: false },

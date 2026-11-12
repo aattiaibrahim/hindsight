@@ -73,6 +73,8 @@ pub struct NasState {
     pub freeing: bool,
     /// Stopped by the user (Stop in the status bar) until they press Resume.
     pub stopped: bool,
+    /** Just started: looking for the NAS (the status bar says "Connecting to the NAS…"). */
+    pub connecting: bool,
 }
 
 /// Where a sync pass is up to, for the progress display.
@@ -1099,13 +1101,23 @@ pub fn start(app: AppHandle) {
         let mut verified: HashSet<String> = HashSet::new();
         let mut edits: Vec<(String, String)> = Vec::new();
         let mut synced_root = String::new();
+        // Straight away at startup, not after the first 30 s: until now the status bar
+        // showed nothing about the NAS for a while, and NAS clips appeared late.
+        if !app.state::<crate::AppState>().settings.lock().unwrap().nas_dir.is_empty() {
+            publish(&app, |st| {
+                st.enabled = true;
+                st.connecting = true;
+            });
+        }
+        let mut first = true;
         loop {
-            {
+            if !first {
                 let (m, c) = &WAKE;
                 let g = m.lock().unwrap();
                 let (mut g, _) = c.wait_timeout_while(g, Duration::from_secs(30), |woken| !*woken).unwrap();
                 *g = false;
             }
+            first = false;
             if HOLD.load(std::sync::atomic::Ordering::SeqCst) {
                 continue; // a merge is moving folders; `hold(false)` wakes us again
             }
@@ -1114,6 +1126,26 @@ pub fn start(app: AppHandle) {
                 *LISTING.lock().unwrap() = None;
                 publish(&app, |st| *st = NasState::default());
                 continue;
+            }
+            // A quick look first, even while a game runs (it copies nothing and takes about
+            // 0.1 s): is the NAS there, and which clips are on it, so NAS clips show up now
+            // instead of after a whole pass (or after the game).
+            {
+                let root = PathBuf::from(&s.nas_dir);
+                let here = root.is_dir();
+                publish(&app, |st| {
+                    st.enabled = true;
+                    st.reachable = here;
+                    st.connecting = false;
+                });
+                let ours = here && (s.nas_library_id.is_empty() || read_marker(&root).as_deref() == Some(s.nas_library_id.as_str()));
+                let listed = LISTING.lock().unwrap().as_ref().is_some_and(|l| l.root == s.nas_dir);
+                if ours && !listed {
+                    let files = scan_nas(&root);
+                    let rels: HashSet<String> = files.iter().map(|f| rel_key(&f.rel)).collect();
+                    *LISTING.lock().unwrap() = Some(Listing { root: s.nas_dir.clone(), files, rels });
+                    let _ = app.emit("clips-changed", ());
+                }
             }
             // Copying reads the SSD and uses the network: wait until the game is closed.
             let app_busy = {
