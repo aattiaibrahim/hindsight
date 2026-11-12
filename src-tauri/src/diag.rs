@@ -152,7 +152,28 @@ fn clip_report(out: &mut String, path: &str) {
             let _ = writeln!(out, "  {l}");
         }
     }
+    keyframe_gap(out, path);
     track_levels(out, path);
+}
+
+/// How far apart the keyframes are in the first 30 s. Seeking decodes from the
+/// keyframe before the spot, so a clip with one every 10 s scrubs at a few frames a
+/// second (Hindsight's own recordings have one a second).
+fn keyframe_gap(out: &mut String, path: &str) {
+    let mut a = crate::ffmpeg::args(&["-v", "error", "-select_streams", "v:0", "-skip_frame", "nokey", "-read_intervals", "%+30", "-show_entries", "frame=pts_time", "-of", "csv=p=0"]);
+    a.push(path.into());
+    let Ok(text) = crate::ffmpeg::run("ffprobe", &a) else { return };
+    let keys: Vec<f64> = text.lines().filter_map(|l| l.trim().trim_end_matches(',').parse().ok()).collect();
+    let _ = match keys.len() {
+        0 => writeln!(out, "Keyframes in the first 30 s: none found"),
+        1 => writeln!(out, "Keyframes in the first 30 s: only one (scrubbing will be slow)"),
+        n => {
+            let gaps: Vec<f64> = keys.windows(2).map(|w| w[1] - w[0]).collect();
+            let max = gaps.iter().cloned().fold(0.0, f64::max);
+            let avg = gaps.iter().sum::<f64>() / gaps.len() as f64;
+            writeln!(out, "Keyframes in the first 30 s: {n}, every {avg:.1} s on average, at most {max:.1} s apart{}", if max > 3.0 { " (scrubbing will be slow)" } else { "" })
+        }
+    };
 }
 
 /// How loud each audio track is over the first minute, so a silent "Desktop
