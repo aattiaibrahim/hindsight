@@ -384,6 +384,19 @@ export default function App() {
       window.removeEventListener("keydown", onKey);
     };
   }, [view, studioPath, listView]);
+  // The open clip's copy on this PC was freed up (it's safely on the NAS): carry on
+  // with the NAS copy, same game folder and file name, instead of a dead player.
+  const [movedFrom, setMovedFrom] = useState<{ from: string; to: string } | null>(null);
+  useEffect(() => {
+    if (!studioPath || !clips || clips.some((c) => c.path === studioPath)) return;
+    const tail = (p: string) => p.replace(/\//g, "\\").split("\\").slice(-2).join("\\").toLowerCase();
+    const want = tail(studioPath);
+    const twin = clips.find((c) => c.location === "nas" && tail(c.path) === want);
+    if (twin) {
+      setMovedFrom({ from: studioPath, to: twin.path });
+      setStudioPath(twin.path);
+    }
+  }, [clips, studioPath]);
   // Turning Benchmark mode off while on its page, or the open clip going away
   // (deleted): go back to the clips.
   useEffect(() => {
@@ -466,6 +479,7 @@ export default function App() {
         {view === "studio" && (
           <Studio
             path={studioPath}
+            movedFrom={movedFrom && movedFrom.to === studioPath ? movedFrom.from : null}
             clips={clips}
             onOpen={openInStudio}
             onDone={refresh}

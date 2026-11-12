@@ -219,7 +219,10 @@ export function Studio({
   onShare,
   health,
   onRescued,
+  movedFrom = null,
 }: {
+  /** This clip was open from that path until its copy on this PC was freed up: keep your place. */
+  movedFrom?: string | null;
   health?: Health;
   onRescued?: (path: string) => void;
   onShare?: (r: ShareRequest) => void;
@@ -391,18 +394,25 @@ export function Studio({
   const [cropping, setCropping] = useState(false);
   const [cropRatio, setCropRatio] = useState<number | null>(null);
 
+  // Where you were in the clip, for when it carries on from its NAS copy.
+  const snap = useRef<{ path: string | null; time: number; playing: boolean; range: [number, number]; edits: TrackEdit[]; crop: Crop | null } | null>(null);
+  const resume = useRef<{ path: string; time: number; playing: boolean } | null>(null);
   useEffect(() => {
+    const was = movedFrom && snap.current?.path === movedFrom ? snap.current : null;
     setInfo(null);
     setPlayErrorFor(null);
     setResult(null);
-    setTime(0);
-    setRange([0, 0]);
+    setTime(was?.time ?? 0);
+    setRange(was?.range ?? [0, 0]);
     setDuration(0);
     setTracks(null);
-    setAudioEdits([]);
+    setAudioEdits(was?.edits ?? []);
     setWaves(null);
-    setCrop(null);
+    setCrop(was?.crop ?? null);
     setCropping(false);
+    // Kept through a retry of the same clip (the player reloads once on a load hiccup).
+    if (was && path) resume.current = { path, time: was.time, playing: was.playing };
+    else if (resume.current?.path !== path) resume.current = null;
     if (!path) return;
     let alive = true;
     // On a hard drive, reading the file for the waveform and the extra audio
@@ -449,6 +459,11 @@ export function Studio({
       window.clearTimeout(fallback);
     };
   }, [path, reload]);
+  useEffect(() => {
+    // Once the file is gone (freed up) the player has already reset: keep the last good place.
+    if (path && clips && !clips.some((c) => c.path === path)) return;
+    snap.current = { path, time: video.current?.currentTime ?? time, playing, range, edits: audioEdits, crop };
+  });
 
   // Seeking: one seek at a time, always to the newest spot. Setting currentTime
   // while a seek is still decoding cancels it, so a fast drag used to show only
@@ -760,6 +775,14 @@ export function Studio({
               // in place (same name); otherwise WebView2 can reuse its cached copy of the old file.
               src={mediaSrc(path, `${(clips ?? []).find((c) => c.path === path)?.modified ?? 0}-${reload}`)}
               onLoadedMetadata={(e) => {
+                // Carrying on from the NAS copy: back to where you were, still playing.
+                const r = resume.current;
+                if (r && r.path === path) {
+                  resume.current = null;
+                  const v = e.currentTarget;
+                  v.currentTime = r.time;
+                  if (r.playing) v.play().catch(() => {});
+                }
                 const d = e.currentTarget.duration;
                 const { videoWidth: vw, videoHeight: vh } = e.currentTarget;
                 if (vw && vh) setAr(vw / vh);

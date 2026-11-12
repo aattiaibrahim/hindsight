@@ -241,7 +241,7 @@ export function installDevMock() {
     install_update: () => {
       throw "Preview mode: nothing to install.";
     },
-    list_clips: () => clips,
+    list_clips: () => clips.map((c) => ({ ...c })), // fresh objects, like the real app
     list_monitors: () => [],
     screen_preview: () => fetch("/thumb-cs2a.jpg").then((r) => r.arrayBuffer()),
     list_audio_inputs: () => [],
@@ -311,6 +311,16 @@ export function installDevMock() {
     },
   };
 
+  // For testing: free up a clip, as the NAS sync does (its copy on this PC goes, the NAS one stays).
+  (w as unknown as { __freeUp: (path: string) => void }).__freeUp = (path) => {
+    const c = clips.find((x) => x.path === path);
+    if (!c) return;
+    const file = path.split("\\").pop();
+    c.path = ["", "", "nas", "clips", c.folder, file].join("\\");
+    c.location = "nas";
+    c.onNas = false;
+    emit("clips-changed");
+  };
   w.__TAURI_INTERNALS__ = {
     metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
     transformCallback: (cb: (e: unknown) => void) => {
@@ -322,7 +332,7 @@ export function installDevMock() {
     // Every sample clip plays the same generated test video (public/preview-sample.mkv:
     // AV1 1080p60 with a keyframe every second, like Hindsight's own clips).
     convertFileSrc: (p: string) =>
-      p.endsWith("mic.m4a") ? "/preview-mic.m4a" : p.startsWith("C:\\Users\\you\\") ? "/preview-sample.mkv" : p,
+      p.endsWith("mic.m4a") ? "/preview-mic.m4a" : p.startsWith("C:\\Users\\you\\") || p.startsWith("\\\\nas\\") ? "/preview-sample.mkv" : p,
     invoke: async (cmd: string, args: Record<string, unknown> = {}) => {
       const h = handlers[cmd];
       if (!h) {
