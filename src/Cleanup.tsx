@@ -194,7 +194,7 @@ function Duplicates({ clips, onDelete, onChanged, run = 0 }: { clips: ClipFile[]
           ` ${remuxes === found.length ? "They're" : `${remuxes} of them are`} the same recording in two formats (OBS keeps the original when it remuxes to MP4): same name, length and tracks.`}
         {smaller > 0 &&
           ` ${smaller === found.length ? (smaller === 1 ? "It's" : "They're") : `${smaller} ${smaller === 1 ? "is" : "are"}`} the same recording next to a smaller re-encode of it (an export, say): the original is kept unless you pick the smaller copy.`}{" "}
-        Pick the copy to keep; the others go to the Recycle Bin.
+        Pick the copy to keep; the others go to the Recycle Bin (copies on the NAS go to the NAS app's Trash for 30 days).
       </p>
       {found.map(({ kind, clips: set }, i) => {
         const chosen = keep[i] ?? bestCopy(set, kind).path;

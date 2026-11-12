@@ -276,6 +276,30 @@ mod tests {
 #[cfg(test)]
 mod live {
 
+    /// What Cleanup's duplicate search finds in the real library, the way the app does
+    /// it (saved details, NAS listing). REWIND_NAS_DIR, REWIND_CLIPS_DIR; normal terminal.
+    #[test]
+    #[ignore]
+    fn live_cleanup_remuxes() {
+        crate::ffmpeg::init(None);
+        let nas = std::env::var("REWIND_NAS_DIR").unwrap();
+        let clips = std::env::var("REWIND_CLIPS_DIR").unwrap();
+        crate::prepare::init(std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join("com.rewind.app").join("probes.json"));
+        crate::library::set_twin(&nas, &clips);
+        let listing = crate::nas::scan_nas(std::path::Path::new(&nas));
+        let all = crate::library::scan_all(std::path::Path::new(&clips), &[], &listing, &[], &nas);
+        let named: Vec<(String, u64)> = all.iter().map(|c| (c.path.clone(), c.size)).collect();
+        let obs: Vec<&(String, u64)> = named.iter().filter(|(p, _)| p.contains("03-14-17")).collect();
+        println!("{} clips ({} on the NAS only); the OBS pair in the list: {obs:?}", all.len(), all.iter().filter(|c| c.location == "nas").count());
+        for (p, _) in &obs {
+            println!("  {p}: {:?}", crate::prepare::probe(p).map(|x| (x.duration, x.width, x.height, x.codec, x.audio_tracks)));
+        }
+        let sizes: std::collections::HashMap<&str, u64> = named.iter().map(|(p, s)| (p.as_str(), *s)).collect();
+        let size = |p: &str| sizes.get(p).copied().unwrap_or(0);
+        let sets = super::remuxes(&named, |a, b| matches!((crate::prepare::probe(a), crate::prepare::probe(b)), (Ok(x), Ok(y)) if super::same_streams((&x, size(a)), (&y, size(b)))));
+        println!("remux sets: {sets:?}");
+    }
+
     /// Real folder: REWIND_REMUX_DIR=D:\Recordings cargo test live_remuxes -- --ignored --nocapture
     #[test]
     #[ignore]

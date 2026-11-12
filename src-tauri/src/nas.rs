@@ -750,7 +750,7 @@ fn clips_in(root: &Path) -> Vec<(PathBuf, String, String)> {
     out
 }
 
-fn scan_nas(root: &Path) -> Vec<NasFile> {
+pub(crate) fn scan_nas(root: &Path) -> Vec<NasFile> {
     clips_in(root).into_iter().map(|(path, rel, folder)| NasFile { path, rel, folder }).collect()
 }
 
