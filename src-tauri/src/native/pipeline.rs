@@ -498,8 +498,23 @@ fn mux_span(s: &Span, out: &Path, staging: &Path, resumable: bool) -> Result<(),
         let meta = SaveMeta { out: out.to_path_buf(), format: format.to_string(), fps, tracks: tracks.iter().map(|(_, t)| t.clone()).collect() };
         let _ = fs::write(staging.join("save.json"), serde_json::to_vec(&meta).unwrap());
     }
-    mux(&video_path, format, fps, &tracks, out, Duration::from_secs_f64(60.0 + secs))
+    // Written under a hidden name and renamed once it's complete, so a shutdown or a
+    // crash mid-save never leaves a half-written clip under the real name (a resumable
+    // save is redone at the next start; a leftover is cleaned up then).
+    // ".VALORANT 2026-11-17 21-04-11.saving.mkv": the extension stays last (ffmpeg picks the format by it).
+    let stem = out.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let ext = out.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "mkv".into());
+    let tmp = out.with_file_name(format!(".{stem}{SAVING}.{ext}"));
+    let _ = fs::remove_file(&tmp);
+    let done = mux(&video_path, format, fps, &tracks, &tmp, Duration::from_secs_f64(60.0 + secs)).and_then(|_| fs::rename(&tmp, out).map_err(|e| e.to_string()));
+    if done.is_err() {
+        let _ = fs::remove_file(&tmp);
+    }
+    done
 }
+
+/// In a clip's hidden name while it's being written, before the extension (see `mux_span`).
+pub const SAVING: &str = ".saving";
 
 /// Finish saves that were cut off (Hindsight closed or crashed mid-save).
 /// Returns the clips written.

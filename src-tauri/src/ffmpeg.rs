@@ -43,7 +43,20 @@ pub fn exe(name: &str) -> PathBuf {
 }
 
 /// A command with no console window, at below-normal CPU priority.
+/// Is Windows shutting down, restarting or signing out? A program started then can't
+/// load (Windows shows "ffmpeg.exe - Application Error (0xc0000142)"), so nothing new
+/// is started; whatever ffmpeg was running finishes or is stopped with the app.
+pub fn windows_shutting_down() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_SHUTTINGDOWN};
+    unsafe { GetSystemMetrics(SM_SHUTTINGDOWN) != 0 }
+}
+
 pub fn cmd(name: &str) -> Command {
+    if windows_shutting_down() {
+        // A program that doesn't exist: the start fails quietly (an error for the
+        // caller, which leaves its files as they were) instead of that popup.
+        return Command::new("hindsight-not-started-windows-is-shutting-down");
+    }
     let mut c = Command::new(exe(name));
     c.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
     c
