@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { ClipFile, mediaSrc } from "./api";
+import { useMemo, useState } from "react";
+import { ClipFile } from "./api";
 import { useNearView, useThumb } from "./hooks";
 
 export type Memory = { label: string; years: number; clips: ClipFile[] };
@@ -37,13 +36,13 @@ export function memoriesFor(clips: ClipFile[], now = new Date()): Memory[] {
   return out;
 }
 
-function MemoryCard({ m, onOpen }: { m: Memory; onOpen: () => void }) {
+function MemoryCard({ m, on, onOpen }: { m: Memory; on: boolean; onOpen: () => void }) {
   const [ref, near] = useNearView<HTMLButtonElement>(".lib-page", "200px");
   const cover = m.clips[0];
   const thumb = useThumb(near ? cover.path : "", cover.modified);
   const games = [...new Set(m.clips.map((c) => c.folder))];
   return (
-    <button ref={ref} className="memory-card" onClick={onOpen} title={`${m.clips.length} clip${m.clips.length === 1 ? "" : "s"}: ${games.join(", ")}`}>
+    <button ref={ref} className={`memory-card ${on ? "on" : ""}`} aria-expanded={on} onClick={onOpen} title={`${m.clips.length} clip${m.clips.length === 1 ? "" : "s"}: ${games.join(", ")}`}>
       {thumb && <img src={thumb} alt="" />}
       <span className="memory-shade" />
       <span className="memory-text">
@@ -52,6 +51,19 @@ function MemoryCard({ m, onOpen }: { m: Memory; onOpen: () => void }) {
           {new Date(cover.modified).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })} · {m.clips.length} clip
           {m.clips.length === 1 ? "" : "s"}
         </small>
+      </span>
+    </button>
+  );
+}
+
+function MemoryClip({ clip, onOpen }: { clip: ClipFile; onOpen: () => void }) {
+  const thumb = useThumb(clip.path, clip.modified);
+  return (
+    <button className="card memory-clip" onClick={onOpen} title={clip.path}>
+      <div className={`thumb ${thumb ? "" : "loading"}`}>{thumb && <img src={thumb} alt="" />}</div>
+      <span className="card-title">{clip.name}</span>
+      <span className="card-meta">
+        {clip.folder} · {new Date(clip.modified).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
       </span>
     </button>
   );
@@ -91,115 +103,17 @@ export function OnThisDay({ clips, onOpenClip }: { clips: ClipFile[]; onOpenClip
       </div>
       <div className="memories-row">
         {memories.map((m) => (
-          <MemoryCard key={m.label} m={m} onOpen={() => setOpen(m)} />
+          <MemoryCard key={m.label} m={m} on={open?.label === m.label} onOpen={() => setOpen((o) => (o?.label === m.label ? null : m))} />
         ))}
       </div>
-      {open && <MemoryViewer memory={open} onClose={() => setOpen(null)} onOpenClip={onOpenClip} />}
+      {/* That day's clips, like the gallery: each opens in Studio like any other clip. */}
+      {open && (
+        <div className="memory-clips">
+          {open.clips.map((c) => (
+            <MemoryClip key={c.path} clip={c} onOpen={() => onOpenClip(c.path)} />
+          ))}
+        </div>
+      )}
     </section>
-  );
-}
-
-/** Watch a memory's clips one after another: plays through, swipe or ← → to move. */
-export function MemoryViewer({ memory, onClose, onOpenClip }: { memory: Memory; onClose: () => void; onOpenClip: (path: string) => void }) {
-  const [i, setI] = useState(0);
-  const [muted, setMuted] = useState(true);
-  const n = memory.clips.length;
-  const clip = memory.clips[Math.min(i, n - 1)];
-  const go = useCallback((d: number) => setI((x) => Math.min(n - 1, Math.max(0, x + d))), [n]);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      else if (e.key === "ArrowLeft") go(-1);
-      else if (e.key === "ArrowRight") go(1);
-      else return;
-      e.preventDefault();
-      e.stopPropagation();
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [go, onClose]);
-  const start = useRef<number | null>(null);
-  const when = new Date(clip.modified).toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" });
-  return createPortal(
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal del-preview memory-viewer" role="dialog" aria-modal="true" aria-label={memory.label} onClick={(e) => e.stopPropagation()}>
-        <div className="row" style={{ alignItems: "baseline" }}>
-          <h2 style={{ flex: 1 }}>{memory.label}</h2>
-          <span className="muted mono" style={{ fontSize: 12 }}>
-            {i + 1} / {n}
-          </span>
-        </div>
-        <div
-          className="del-stage"
-          onPointerDown={(e) => {
-            start.current = e.pointerType === "mouse" && (e.target as HTMLElement).tagName === "VIDEO" ? null : e.clientX;
-          }}
-          onPointerUp={(e) => {
-            if (start.current == null) return;
-            const dx = e.clientX - start.current;
-            start.current = null;
-            if (Math.abs(dx) >= 60) go(dx < 0 ? 1 : -1);
-          }}
-        >
-          <MemorySlide key={clip.path} clip={clip} muted={muted} onEnded={() => (i < n - 1 ? go(1) : undefined)} />
-          <button className="del-nav prev round" aria-label="Previous clip (←)" disabled={i === 0} onClick={() => go(-1)}>
-            ‹
-          </button>
-          <button className="del-nav next round" aria-label="Next clip (→)" disabled={i >= n - 1} onClick={() => go(1)}>
-            ›
-          </button>
-        </div>
-        <div className="row del-meta">
-          <span style={{ flex: 1, minWidth: 0 }}>
-            <strong className="del-name" title={clip.path}>
-              {clip.name}
-            </strong>
-            <small className="muted">
-              {clip.folder} · {when}
-            </small>
-          </span>
-          <button className="btn small" onClick={() => setMuted((m) => !m)}>
-            {muted ? "Sound on" : "Mute"}
-          </button>
-        </div>
-        <div className="row" style={{ justifyContent: "flex-end" }}>
-          <span className="muted" style={{ fontSize: 12, marginRight: "auto" }}>
-            Plays straight through. ← → or swipe to move.
-          </span>
-          <button className="btn" onClick={onClose}>
-            Close
-          </button>
-          <button
-            className="btn primary"
-            onClick={() => {
-              onClose();
-              onOpenClip(clip.path);
-            }}
-          >
-            Open in editor
-          </button>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
-function MemorySlide({ clip, muted, onEnded }: { clip: ClipFile; muted: boolean; onEnded: () => void }) {
-  const thumb = useThumb(clip.path, clip.modified);
-  const [failed, setFailed] = useState(false);
-  if (failed) return thumb ? <img className="del-media" src={thumb} alt="" /> : <div className="del-media" />;
-  return (
-    <video
-      className="del-media"
-      src={mediaSrc(clip.path)}
-      poster={thumb ?? undefined}
-      autoPlay
-      muted={muted}
-      playsInline
-      controls
-      onEnded={onEnded}
-      onError={() => setFailed(true)}
-    />
   );
 }

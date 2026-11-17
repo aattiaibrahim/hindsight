@@ -306,8 +306,11 @@ fn list_monitors() -> Vec<monitors::Monitor> {
 async fn screen_preview(app: AppHandle) -> Result<tauri::ipc::Response, String> {
     let s = settings_of(&app);
     tauri::async_runtime::spawn_blocking(move || {
-        if games::game_running() {
-            return Err("game".to_string());
+        // A game in front, or left within the last 10 minutes and still open. (Not
+        // game_running: that counts a game left open in the background for hours,
+        // which kept the preview paused with no game being played.)
+        if let Some(g) = games::current_game() {
+            return Err(format!("game:{g}"));
         }
         let mons = monitors::list();
         let m = monitors::pick(&s.monitor_mode, &s.fixed_monitor, &mons).ok_or("No screen found")?;

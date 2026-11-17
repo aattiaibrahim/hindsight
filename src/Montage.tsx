@@ -3,6 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ClipFile, errText, fmtDb, fmtTime, Waveform, mediaSrc } from "./api";
+import { useMediaReady } from "./hooks";
+import { Pause, Play, Plus, SkipBack, SkipForward } from "lucide-react";
 import { GameIcon } from "./GameIcon";
 import { useThumb } from "./hooks";
 import { Slider } from "./Slider";
@@ -55,7 +57,7 @@ function cut(length: number, seconds: number, take: Take): [number, number] {
 const total = (p: Piece[]) => p.reduce((n, x) => n + (x.end - x.start), 0);
 
 /** Step 1: what kind of montage. */
-function Setup({ clips, onCreate }: { clips: ClipFile[]; onCreate: (pieces: Piece[]) => void }) {
+function Setup({ clips, untrimmed, onCreate }: { clips: ClipFile[]; untrimmed: ClipFile[] | null; onCreate: (pieces: Piece[]) => void }) {
   const [length, setLength] = useState(120);
   const [source, setSource] = useState<Source>("random");
   const [from, setFrom] = useState("");
@@ -75,7 +77,9 @@ function Setup({ clips, onCreate }: { clips: ClipFile[]; onCreate: (pieces: Piec
     for (const c of clips) if (c.folder !== "Montages" && !by.has(key(c.folder))) by.set(key(c.folder), c.folder);
     return ["All", ...[...by.values()].sort()];
   }, [clips]);
-  const isEdited = (c: ClipFile) => edited.has(c.path) || EDIT_MARK.test(c.name) || /^edits$/i.test(c.folder);
+  // Trimmed or not, by the same rule as To trim (so "Untrimmed" is exactly that list).
+  const waiting = useMemo(() => (untrimmed ? new Set(untrimmed.map((c) => c.path)) : null), [untrimmed]);
+  const isEdited = (c: ClipFile) => (waiting ? !waiting.has(c.path) : edited.has(c.path) || EDIT_MARK.test(c.name) || /^edits$/i.test(c.folder));
   const pool = clips.filter((c) => {
     if (c.folder === "Montages") return false;
     if (game !== "All" && key(c.folder) !== key(game)) return false;
@@ -126,8 +130,8 @@ function Setup({ clips, onCreate }: { clips: ClipFile[]; onCreate: (pieces: Piec
             [
               ["random", "Random clips", "A shuffle of your library"],
               ["range", "From a time frame", "Between two dates, in order"],
-              ["edited", "Edited clips only", "Ones you've trimmed or exported"],
-              ["unedited", "Unedited clips only", "Straight from the replay buffer"],
+              ["edited", "Trimmed clips", "Ones you've trimmed or kept whole"],
+              ["unedited", "Untrimmed clips", "The ones waiting in To trim"],
             ] as [Source, string, string][]
           ).map(([v, t, d]) => (
             <button key={v} className={`setup-card ${source === v ? "on" : ""}`} onClick={() => setSource(v)}>
@@ -280,6 +284,8 @@ function Editor({
   const [fps, setFps] = useState(60);
   const [render, setRender] = useState<{ progress: number; out?: string; err?: string } | null>(null);
   const [binQuery, setBinQuery] = useState("");
+  const [picking, setPicking] = useState(false);
+  const mediaReady = useMediaReady();
   const video = useRef<HTMLVideoElement>(null);
   const audio = useRef<HTMLAudioElement>(null);
   const playingIdx = useRef(-1);
@@ -355,7 +361,39 @@ function Editor({
       }
     }
   };
-  useEffect(() => show(time, false), []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Show the first frame as soon as the player can load clips (it may not be ready
+  // when the editor opens), and again when the montage changes under the playhead.
+  useEffect(() => {
+    if (mediaReady && !playing) show(Math.min(time, Math.max(0, length - 0.05)), false);
+  }, [mediaReady, pieces]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The start of each piece on the montage's clock, for jumping clip to clip.
+  const starts = useMemo(() => {
+    let acc = 0;
+    return pieces.map((p) => {
+      const s = acc;
+      acc += p.end - p.start;
+      return s;
+    });
+  }, [pieces]);
+  const jump = (dir: -1 | 1) => {
+    const cur = locate(time)?.i ?? 0;
+    // Back: to this clip's start, or the one before if already there.
+    const i = dir < 0 ? (time - (starts[cur] ?? 0) > 0.5 ? cur : cur - 1) : cur + 1;
+    if (i < 0) return seek(0);
+    if (i >= pieces.length) return seek(length);
+    seek(starts[i] + 0.001);
+  };
+  // Space plays and pauses (not while typing).
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (e.code !== "Space" || /INPUT|TEXTAREA|SELECT/.test(t.tagName) || t.isContentEditable) return;
+      e.preventDefault();
+      togglePlay();
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  });
 
   useEffect(() => {
     const un = listen<number>("montage-progress", (e) => setRender((r) => (r && !r.out && !r.err ? { progress: e.payload } : r)));
@@ -419,6 +457,7 @@ function Editor({
   };
 
   const addClip = async (c: ClipFile) => {
+    setPicking(false);
     const info = await api.probe(c.path, String(c.modified)).catch(() => null);
     if (!info) return;
     const [start, end] = cut(info.duration, 15, "end");
@@ -463,32 +502,25 @@ function Editor({
   return (
     <div className="montage-editor">
       <div className="me-top">
-        <div className="me-bin">
-          <div className="label">Clips</div>
-          <input className="text-input" placeholder="Search…" value={binQuery} onChange={(e) => setBinQuery(e.target.value)} />
-          <div className="me-bin-list">
-            {bin.map((c) => (
-              <button key={c.path} className="me-bin-item" onClick={() => addClip(c)} title="Add to the end of the montage">
-                <GameIcon name={c.folder} size={16} />
-                <span>{c.name}</span>
-                <b>+</b>
-              </button>
-            ))}
-          </div>
-        </div>
         <div className="me-monitor">
-          <video ref={video} className="me-video" onTimeUpdate={onTime} playsInline />
+          <div className="me-screen" onClick={togglePlay}>
+            <video ref={video} className="me-video" onTimeUpdate={onTime} playsInline preload="auto" />
+          </div>
           {song && <audio ref={audio} src={mediaSrc(song.path)} loop preload="auto" />}
-          <div className="row me-transport">
-            <button className="btn small" onClick={() => seek(0)} title="To the start">
-              ⏮
+          <div className="me-transport">
+            <button className="round" onClick={() => jump(-1)} aria-label="Previous clip" title="Previous clip">
+              <SkipBack size={16} aria-hidden="true" />
             </button>
-            <button className="btn small primary" onClick={togglePlay}>
-              {playing ? "Pause" : "Play"}
+            <button className="round me-play" onClick={togglePlay} aria-label={playing ? "Pause (Space)" : "Play (Space)"} title={playing ? "Pause (Space)" : "Play (Space)"}>
+              {playing ? <Pause size={18} aria-hidden="true" /> : <Play size={18} aria-hidden="true" />}
             </button>
-            <span className="mono">
+            <button className="round" onClick={() => jump(1)} aria-label="Next clip" title="Next clip">
+              <SkipForward size={16} aria-hidden="true" />
+            </button>
+            <span className="mono me-time">
               {fmtTime(time)} / {fmtTime(length)}
             </span>
+            <span className="muted me-now">{pieces[locate(time)?.i ?? -1]?.clip.name ?? ""}</span>
           </div>
         </div>
         <div className="me-inspector">
@@ -553,10 +585,12 @@ function Editor({
               <option value={720}>720p</option>
               <option value={1080}>1080p</option>
               <option value={1440}>1440p</option>
+              <option value={2160}>4K (2160p)</option>
             </Select>
             <Select className="select" value={fps} onChange={(e) => setFps(Number(e.target.value))} aria-label="Frame rate">
               <option value={30}>30 fps</option>
               <option value={60}>60 fps</option>
+              <option value={120}>120 fps</option>
             </Select>
           </div>
         </div>
@@ -564,9 +598,29 @@ function Editor({
 
       <div className="me-timeline">
         <div className="row me-tl-bar">
-          <button className="btn small" onClick={onBack}>
-            ← Start over
+          <button className="btn small" onClick={onBack} title="Make a new montage (this one is let go)">
+            New montage…
           </button>
+          <div className="me-pick-wrap">
+            <button className="btn small" onClick={() => setPicking((v) => !v)} aria-expanded={picking}>
+              <Plus size={14} aria-hidden="true" /> Add clips
+            </button>
+            {picking && (
+              <div className="me-pick" role="dialog" aria-label="Add clips">
+                <input className="text-input" autoFocus placeholder="Search clips…" value={binQuery} onChange={(e) => setBinQuery(e.target.value)} />
+                <div className="me-bin-list">
+                  {bin.map((c) => (
+                    <button key={c.path} className="me-bin-item" onClick={() => addClip(c)} title="Add to the end of the montage">
+                      <GameIcon name={c.folder} size={16} />
+                      <span>{c.name}</span>
+                      <b>+</b>
+                    </button>
+                  ))}
+                  {!bin.length && <small className="muted">No clips match.</small>}
+                </div>
+              </div>
+            )}
+          </div>
           <span className="muted">
             {pieces.length} clips · {fmtTime(length)}
           </span>
@@ -666,7 +720,7 @@ function Editor({
 // Kept while you pop into the clip editor and come back.
 let kept: Piece[] | null = null;
 
-export function MontageView({ clips, onOpen }: { clips: ClipFile[] | null; onOpen: (path: string) => void }) {
+export function MontageView({ clips, untrimmed, onOpen }: { clips: ClipFile[] | null; untrimmed: ClipFile[] | null; onOpen: (path: string) => void }) {
   const [pieces, setPiecesState] = useState<Piece[] | null>(kept);
   const setPieces = (p: Piece[] | null) => {
     kept = p;
@@ -680,7 +734,7 @@ export function MontageView({ clips, onOpen }: { clips: ClipFile[] | null; onOpe
       {!clips ? null : pieces ? (
         <Editor pieces={pieces} setPieces={setPieces} clips={clips} onBack={() => setPieces(null)} onOpen={onOpen} />
       ) : (
-        <Setup clips={clips} onCreate={setPieces} />
+        <Setup clips={clips} untrimmed={untrimmed} onCreate={setPieces} />
       )}
     </div>
   );

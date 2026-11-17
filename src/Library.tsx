@@ -1031,41 +1031,80 @@ clips === null ? null : clips.length === 0 && trimMode ? (
   );
 }
 
+// Clip lengths, kept between visits to To trim (keyed by path and date), so the
+// estimate is there at once instead of probing every clip again each time.
+const trimLens = new Map<string, number>();
+const lenKey = (c: ClipFile) => `${c.path}|${c.modified}`;
+
 /**
  * To trim: how much these clips take, and about how much trimming each to its
  * best 30 seconds would free (from their lengths, worked out in the background).
+ * Can be hidden until the number of clips to trim changes.
  */
 function TrimStatus({ clips }: { clips: ClipFile[] }) {
-  const [lens, setLens] = useState<Record<string, number>>({});
+  const [, setTick] = useState(0);
+  // Hidden until the number of clips to trim changes.
+  const [hiddenAt, setHiddenAt] = useState(() => {
+    try {
+      return Number(localStorage.getItem("rewind.trimStatusHidden") ?? "-1");
+    } catch {
+      return -1;
+    }
+  });
   useEffect(() => {
     let alive = true;
+    const todo = clips.filter((c) => !trimLens.has(lenKey(c)));
+    if (!todo.length) return;
     const t = setTimeout(async () => {
-      for (const c of clips) {
+      let since = 0;
+      for (const c of todo) {
         if (!alive) return;
         try {
           const p = await api.probe(c.path, String(c.modified));
-          if (alive) setLens((l) => ({ ...l, [c.path]: p.duration }));
+          trimLens.set(lenKey(c), p.duration);
         } catch {
-          /* unreadable: left out of the estimate */
+          trimLens.set(lenKey(c), 0); // unreadable: left out of the estimate
+        }
+        // One re-draw every 40 clips, not one per clip.
+        if (++since >= 40) {
+          since = 0;
+          setTick((n) => n + 1);
         }
       }
+      if (alive) setTick((n) => n + 1);
     }, 600);
     return () => {
       alive = false;
       clearTimeout(t);
     };
   }, [clips]);
+  if (hiddenAt === clips.length) return null;
   const bytes = clips.reduce((n, c) => n + c.size, 0);
   let freed = 0;
   let known = 0;
   for (const c of clips) {
-    const d = lens[c.path];
+    const d = trimLens.get(lenKey(c));
     if (!d) continue;
     known++;
     if (d > 30) freed += c.size * (1 - 30 / d);
   }
   return (
     <div className="trim-status">
+      <button
+        className="round trim-status-x"
+        aria-label="Hide this"
+        title="Hide until there are more clips to trim"
+        onClick={() => {
+          setHiddenAt(clips.length);
+          try {
+            localStorage.setItem("rewind.trimStatusHidden", String(clips.length));
+          } catch {
+            /* hidden for this visit only */
+          }
+        }}
+      >
+        <Icon name="close" size={14} />
+      </button>
       <strong>
         {clips.length} clip{clips.length === 1 ? "" : "s"} not trimmed yet · {fmtSize(bytes)}
       </strong>

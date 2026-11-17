@@ -3,7 +3,7 @@ import { api, CropRect, Monitor } from "./api";
 import { CropBox, cropPixels, fitRatio, isWhole, WHOLE } from "./CropBox";
 
 /** How often the preview refreshes while it's on screen. */
-const EVERY_MS = 400;
+const EVERY_MS = 100;
 
 const SHAPES: [string, number | null][] = [
   ["Free", null],
@@ -28,7 +28,7 @@ export function RecordingArea({
   onSave: (a: CropRect | null) => void;
 }) {
   const [frame, setFrame] = useState<string | null>(null);
-  const [paused, setPaused] = useState<"" | "game" | "error">("");
+  const [paused, setPaused] = useState<string>(""); // "", "error" or "game:<name>"
   const [draft, setDraft] = useState<CropRect>(area ?? WHOLE);
   const [ratio, setRatio] = useState<number | null>(null);
   const urlRef = useRef<string | null>(null);
@@ -57,7 +57,8 @@ export function RecordingArea({
       } catch (e) {
         if (stop) return;
         // A game started: stop grabbing the screen, check again now and then.
-        setPaused(String(e).includes("game") ? "game" : "error");
+        const why = String(e);
+        setPaused(why.startsWith("game") ? why : "error");
         timer = window.setTimeout(tick, 3000);
       }
     };
@@ -83,7 +84,9 @@ export function RecordingArea({
         <CropBox value={draft} onChange={setDraft} ratio={ratio} videoAr={ar} editing label={isWhole(draft) ? "Whole screen" : `${pw} × ${ph}`} />
         {paused && (
           <div className="rec-area-paused">
-            {paused === "game" ? "Preview paused while a game is running, so it doesn't cost FPS." : "Couldn't show the screen right now."}
+            {paused.startsWith("game")
+              ? `Preview paused while ${paused.slice(5) || "a game"} is running, so it doesn't cost FPS. It comes back 10 minutes after you leave the game.`
+              : "Couldn't show the screen right now."}
           </div>
         )}
       </div>

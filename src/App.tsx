@@ -482,7 +482,7 @@ export default function App() {
             onChanged={refresh}
           />
         )}
-        {view === "montage" && <MontageView clips={clips} onOpen={openInStudio} />}
+        {view === "montage" && <MontageView clips={clips} untrimmed={trimClips} onOpen={openInStudio} />}
         {view === "notifications" && <NotificationsPage state={noticeState} />}
         {view === "studio" && (
           <Studio
