@@ -233,7 +233,23 @@ export function installDevMock() {
       folders: [["VALORANT", 30], ["Tom Clancys Rainbow Six Siege", 12]],
       examples: [["Valorant_20261028_213344.mp4", "VALORANT\\VALORANT 2026-10-28 21-33-44.mp4"]],
     }),
-    move_into_rewind: () => ({ moved: 42, failed: [] }),
+    // Runs "in the background": move-status every 300 ms, pausing a moment like a game started.
+    move_into_rewind: () =>
+      new Promise((done) => {
+        const send = (p: Record<string, unknown>) =>
+          (listeners.get("move-status") ?? []).forEach((id) => callbacks.get(id)?.({ event: "move-status", id: 0, payload: { verb: "Moving", label: "Recordings, Clips", total: 42, stopping: false, finished: null, paused: false, ...p } }));
+        let i = 0;
+        const t = setInterval(() => {
+          i += 3;
+          if (i >= 42) {
+            clearInterval(t);
+            send({ running: false, done: 42, finished: "Moved 42 clips into Hindsight" });
+            done({ moved: 42, failed: [], stopped: 0 });
+          } else send({ running: true, done: i, paused: i > 15 && i < 24 });
+        }, 300);
+      }),
+    move_status: () => null,
+    stop_move: () => null,
     last_move: () => null,
     find_clip_folders: async () => {
       await new Promise((r) => setTimeout(r, 900));

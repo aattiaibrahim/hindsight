@@ -54,6 +54,9 @@ pub struct Outcome {
     pub moved: usize,
     /// (file, reason)
     pub failed: Vec<(String, String)>,
+    /// Files left where they were because the move was stopped.
+    #[serde(default)]
+    pub stopped: usize,
 }
 
 /// Same idea as the library's game chips: "Counter-Strike 2" == "counter strike 2".
@@ -229,14 +232,40 @@ pub fn as_copy(mut plan: Plan) -> Plan {
     plan
 }
 
+/// Before each file: carry on, wait a moment (a game is running), or stop here.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Hold {
+    Go,
+    Wait,
+    Stop,
+}
+
 /// Carry out a plan. Each finished move is logged immediately (one JSON line).
-pub fn run(plan: &Plan, log: &Path, mut progress: impl FnMut(usize, usize)) -> Outcome {
+pub fn run(plan: &Plan, log: &Path, progress: impl FnMut(usize, usize)) -> Outcome {
+    run_held(plan, log, progress, || Hold::Go)
+}
+
+/// `run`, asking `hold` before each file: a long move in the background waits while
+/// you play or a clip saves, and can be stopped (what's moved stays moved, and logged,
+/// so Undo still puts it back).
+pub fn run_held(plan: &Plan, log: &Path, mut progress: impl FnMut(usize, usize), hold: impl Fn() -> Hold) -> Outcome {
     let mut out = Outcome::default();
     if let Some(d) = log.parent() {
         let _ = fs::create_dir_all(d);
     }
     let mut f = fs::OpenOptions::new().create(true).append(true).open(log).ok();
     for (i, m) in plan.moves.iter().enumerate() {
+        loop {
+            match hold() {
+                Hold::Go => break,
+                Hold::Wait => std::thread::sleep(std::time::Duration::from_secs(2)),
+                Hold::Stop => {
+                    out.stopped = plan.moves.len() - i;
+                    progress(i, plan.moves.len());
+                    return out;
+                }
+            }
+        }
         progress(i, plan.moves.len());
         let done = if m.copied { copy_file(&m.from, &m.to) } else { move_file(&m.from, &m.to) };
         match done {
@@ -295,6 +324,39 @@ pub fn undo(log: &Path) -> Outcome {
         let _ = fs::write(log, text.join("\n") + "\n");
     }
     out
+}
+
+#[cfg(test)]
+mod hold_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn a_held_move_waits_then_goes_and_a_stop_leaves_the_rest() {
+        let d = std::env::temp_dir().join(format!("hs-hold-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(d.join("from")).unwrap();
+        let mut plan = Plan::default();
+        for i in 0..4 {
+            let f = d.join("from").join(format!("{i}.mp4"));
+            fs::write(&f, b"x").unwrap();
+            plan.moves.push(Move { from: f, to: d.join("to").join(format!("{i}.mp4")), size: 1, copied: false });
+        }
+        // Wait twice (a game), then move two, then Stop.
+        let asked = Cell::new(0);
+        let out = run_held(&plan, &d.join("log.jsonl"), |_, _| {}, || {
+            asked.set(asked.get() + 1);
+            match asked.get() {
+                1 | 2 => Hold::Wait,
+                3 | 4 => Hold::Go,
+                _ => Hold::Stop,
+            }
+        });
+        assert_eq!((out.moved, out.stopped), (2, 2));
+        assert!(d.join("to").join("1.mp4").is_file() && d.join("from").join("2.mp4").is_file());
+        assert_eq!(read_log(&d.join("log.jsonl")).len(), 2, "what moved is logged, so Undo works");
+        let _ = fs::remove_dir_all(&d);
+    }
 }
 
 #[cfg(test)]

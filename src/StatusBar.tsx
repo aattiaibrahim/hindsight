@@ -3,6 +3,7 @@ import { api, codecLabel, errText, fmtDuration, Status } from "./api";
 import { audioLine, folderLine, RecordButton } from "./BufferCard";
 import { NasProgress, useNasState } from "./NasProgress";
 import { SyncStatus } from "./SyncStatus";
+import { MoveStatusItem } from "./MoveStatus";
 
 /**
  * One thin line along the bottom of the window: the buffer, what it records,
@@ -104,6 +105,7 @@ export function StatusBar({
         </button>
       )}
       <SyncStatus nas={nas} />
+      <MoveStatusItem />
       <span style={{ flex: 1 }} />
       {err && <span className="sb-item bad">{err}</span>}
       {version && <span className="sb-item quiet">v{version} beta</span>}

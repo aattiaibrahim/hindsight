@@ -1476,3 +1476,7 @@ p.small { font-size: 12px; margin: 0; }
 /* Studio: the smooth-scrubbing copy being made, or in use. */
 .studio-smooth { font-size: 12px; color: var(--muted); white-space: nowrap; padding: 0 6px; }
 .studio-smooth.bad { color: var(--danger); }
+
+/* A move into Hindsight in the background (MoveStatus.tsx). */
+.sb-move svg { flex: none; }
+.sb-move-on { color: var(--accent); }

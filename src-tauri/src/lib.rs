@@ -419,6 +419,103 @@ async fn plan_move_into_rewind(app: AppHandle, folders: Vec<String>) -> Result<c
     blocking(move || move_plan(&s, &folders)).await
 }
 
+// ---------- A move into Hindsight, in the background ----------
+
+/// What the status bar shows about a move running in the background.
+#[derive(serde::Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct MoveStatus {
+    running: bool,
+    /// "Moving" or "Copying"
+    verb: String,
+    /// The folders it comes from ("Recordings, Clips")
+    label: String,
+    done: usize,
+    total: usize,
+    /// Waiting: a game is running, or a clip is being saved or recorded
+    paused: bool,
+    stopping: bool,
+    /// When it's over: what happened ("Moved 810 clips", "Stopped: 120 moved…")
+    finished: Option<String>,
+}
+static MOVE_STATUS: Mutex<Option<MoveStatus>> = Mutex::new(None);
+static MOVE_STOP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn move_status_set(app: &AppHandle, f: impl FnOnce(&mut MoveStatus)) {
+    let snap = {
+        let mut s = MOVE_STATUS.lock().unwrap();
+        let st = s.get_or_insert_with(MoveStatus::default);
+        f(st);
+        st.clone()
+    };
+    let _ = app.emit("move-status", snap);
+}
+
+#[tauri::command]
+fn move_status() -> Option<MoveStatus> {
+    MOVE_STATUS.lock().unwrap().clone()
+}
+
+/// Stop the background move after the file it's on.
+#[tauri::command]
+fn stop_move(app: AppHandle) {
+    MOVE_STOP.store(true, std::sync::atomic::Ordering::SeqCst);
+    move_status_set(&app, |s| s.stopping = true);
+}
+
+/// Run a move plan in the background: progress for the status bar, waiting while
+/// a game runs or a clip is saved or recorded (copying hundreds of GB shouldn't
+/// cost FPS or slow a save), and Stop.
+fn run_in_background(app: &AppHandle, plan: &consolidate::Plan, log: &Path, verb: &str) -> consolidate::Outcome {
+    if MOVE_STATUS.lock().unwrap().as_ref().is_some_and(|s| s.running) {
+        let mut out = consolidate::Outcome::default();
+        out.failed.push((plan.label.clone(), "another move is still running; try again when it's done".into()));
+        return out;
+    }
+    MOVE_STOP.store(false, std::sync::atomic::Ordering::SeqCst);
+    let total = plan.moves.len();
+    move_status_set(app, |s| {
+        *s = MoveStatus { running: true, verb: verb.into(), label: plan.label.clone(), total, ..Default::default() };
+    });
+    let (a, h) = (app.clone(), app.clone());
+    let out = consolidate::run_held(
+        plan,
+        log,
+        |done, total| move_status_set(&a, |s| {
+            s.done = done;
+            s.total = total;
+        }),
+        || {
+            if MOVE_STOP.load(std::sync::atomic::Ordering::SeqCst) {
+                return consolidate::Hold::Stop;
+            }
+            let st = h.state::<AppState>();
+            let busy = games::game_running() || st.engine.is_recording() || engine::saves_in_progress() > 0;
+            let was = MOVE_STATUS.lock().unwrap().as_ref().is_some_and(|s| s.paused);
+            if busy != was {
+                move_status_set(&h, |s| s.paused = busy);
+            }
+            if busy { consolidate::Hold::Wait } else { consolidate::Hold::Go }
+        },
+    );
+    let past = if verb == "Copying" { "Copied" } else { "Moved" };
+    let summary = if out.stopped > 0 {
+        format!("Stopped: {} {} clips, {} left where they were", past.to_lowercase(), out.moved, out.stopped)
+    } else if out.failed.is_empty() {
+        format!("{past} {} clips into Hindsight", out.moved)
+    } else {
+        format!("{past} {} clips; {} couldn't be", out.moved, out.failed.len())
+    };
+    move_status_set(app, |s| {
+        s.running = false;
+        s.paused = false;
+        s.stopping = false;
+        s.done = s.total;
+        s.finished = Some(summary);
+    });
+    out
+}
+
 #[tauri::command]
 async fn move_into_rewind(app: AppHandle, folders: Vec<String>) -> Result<consolidate::Outcome, String> {
     let s = settings_of(&app);
@@ -430,9 +527,7 @@ async fn move_into_rewind(app: AppHandle, folders: Vec<String>) -> Result<consol
         // "Medal, NVIDIA" → "Medal+NVIDIA" in the file name (shown again as "Medal, NVIDIA").
         let tag = plan.label.replace(", ", "+").replace(|c: char| !c.is_ascii_alphanumeric() && c != '+', "_");
         let log = dir.join(format!("{stamp}-{tag}.jsonl"));
-        Ok(consolidate::run(&plan, &log, |done, total| {
-            let _ = a.emit("move-progress", (done, total));
-        }))
+        Ok(run_in_background(&a, &plan, &log, if plan.copy { "Copying" } else { "Moving" }))
     })
     .await?;
     let _ = app.emit("clips-changed", ());
@@ -600,9 +695,7 @@ async fn import_folder(app: AppHandle, path: String, copy: bool) -> Result<conso
         let tag = format!("{}{}", plan.label, if copy { "+copied" } else { "" })
             .replace(|c: char| !c.is_ascii_alphanumeric() && c != '+', "_");
         let log = dir.join(format!("{stamp}-{tag}.jsonl"));
-        Ok(consolidate::run(&plan, &log, |done, total| {
-            let _ = a.emit("move-progress", (done, total));
-        }))
+        Ok(run_in_background(&a, &plan, &log, if copy { "Copying" } else { "Moving" }))
     })
     .await?;
     let _ = app.emit("clips-changed", ());
@@ -2007,7 +2100,9 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            smooth_copy,
+            move_status,
+stop_move,
+smooth_copy,
 get_settings,
             set_settings,
             screen_preview,

@@ -20,8 +20,8 @@ type MoveJob = {
   importOf?: { path: string; copy: boolean };
 };
 
-function outcomeText(verb: string, o: { moved: number; failed: [string, string][] }) {
-  const base = `${verb} ${o.moved} clip${o.moved === 1 ? "" : "s"}.`;
+function outcomeText(verb: string, o: { moved: number; failed: [string, string][]; stopped?: number }) {
+  const base = `${verb} ${o.moved} clip${o.moved === 1 ? "" : "s"}.${o.stopped ? ` Stopped: ${o.stopped} left where they were.` : ""}`;
   if (!o.failed.length) return base;
   const [file, why] = o.failed[0];
   return `${base} ${o.failed.length} couldn't be: ${file.split("\\").pop()} (${why})${o.failed.length > 1 ? " and others" : ""}.`;
@@ -164,22 +164,21 @@ export function LibrarySettings({
     }
   };
 
-  const doMove = async () => {
+  // The move runs in the background: the dialog closes at once and the status bar
+  // shows how it's going (with Stop); the app stays usable, and clips still save.
+  const doMove = () => {
     if (!job?.plan) return;
-    setJob({ ...job, running: true });
-    try {
-      if (job.importOf) {
-        setNote(outcomeText(job.importOf.copy ? "Copied" : "Moved", await api.importFolder(job.importOf.path, job.importOf.copy)));
-        api.findClipFolders().then(setDrives).catch(() => {});
-        return;
-      }
-      setNote(outcomeText("Moved", await api.moveIntoRewind(job.folders)));
-    } catch (e) {
-      setNote(errText(e));
-    } finally {
-      setJob(null);
-      refreshLast();
-    }
+    const j = job;
+    setJob(null);
+    setNote(`${j.plan!.copy ? "Copying" : "Moving"} in the background: see the bottom of the window.`);
+    const done = j.importOf ? api.importFolder(j.importOf.path, j.importOf.copy) : api.moveIntoRewind(j.folders);
+    done
+      .then((o) => {
+        setNote(outcomeText(j.importOf?.copy ? "Copied" : "Moved", o));
+        if (j.importOf) api.findClipFolders().then(setDrives).catch(() => {});
+      })
+      .catch((e) => setNote(errText(e)))
+      .finally(refreshLast);
   };
   const undo = async () => {
     try {

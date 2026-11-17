@@ -216,6 +216,7 @@ export type ClipFile = {
   source: string;
 };
 
+export type MoveStatus = { running: boolean; verb: string; label: string; done: number; total: number; paused: boolean; stopping: boolean; finished: string | null };
 export type NasEvent = { at: number; kind: "ok" | "info" | "bad"; text: string };
 export type NasState = {
   /** Just started: still looking for the NAS. */
@@ -601,6 +602,9 @@ export const api = {
   repairClip: (path: string) => invoke<string>("repair_clip", { path }),
   secretsSet: () => invoke<{ discordWebhook: boolean; streamablePassword: boolean }>("secrets_set"),
   syncNasNow: () => invoke<void>("sync_nas_now"),
+  /** A move into Hindsight running in the background (or the last one's result). */
+  moveStatus: () => invoke<MoveStatus | null>("move_status"),
+  stopMove: () => invoke<void>("stop_move"),
   /** A copy of the clip that scrubs smoothly (keyframes close together), or null when it doesn't need one. */
   smoothCopy: (path: string) => invoke<string | null>("smooth_copy", { path }),
   /** Stop (true) or resume (false) NAS copying and freeing up. */
