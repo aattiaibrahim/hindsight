@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Cloud, CloudAlert, CloudOff, RefreshCw } from "lucide-react";
 import { api, NasState } from "./api";
 import { nasActivity, NasProgress } from "./NasProgress";
+import { GameIcon } from "./GameIcon";
 
 /** "just now", "4 min ago", "2 h ago", "yesterday 21:14", "Nov 12, 21:14". */
 export function ago(ms: number, now = Date.now()) {
@@ -94,7 +95,7 @@ export function SyncStatus({ nas, onSyncWhilePlaying }: { nas: NasState | null; 
         <div className="sb-pop sync-pop" role="dialog" aria-label="NAS sync">
           <div className="sync-head">
             <span className={`sync-badge ${look}`}>
-              <SyncIcon look={look} />
+              {nas.paused && nas.pausedFor ? <GameIcon name={nas.pausedFor} size={22} /> : <SyncIcon look={look} />}
             </span>
             <div className="sync-title">
               <strong>{activity.text}</strong>
@@ -140,7 +141,7 @@ export function SyncStatus({ nas, onSyncWhilePlaying }: { nas: NasState | null; 
               <ul>
                 {recent.slice(0, 12).map((e, i) => (
                   <li key={`${e.at}-${i}`} className={e.kind}>
-                    <span className="sync-dot" aria-hidden="true" />
+                    {e.game ? <GameIcon name={e.game} size={14} /> : <span className="sync-dot" aria-hidden="true" />}
                     <span className="sync-text">{e.text}</span>
                     <time className="muted" dateTime={new Date(e.at).toISOString()} title={new Date(e.at).toLocaleString()}>
                       {ago(e.at, now)}

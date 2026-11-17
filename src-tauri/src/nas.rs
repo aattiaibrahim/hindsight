@@ -90,6 +90,9 @@ pub struct NasEvent {
     /// "ok" (something done), "info", or "bad" (a problem)
     pub kind: &'static str,
     pub text: String,
+    /// The game a line is about ("Paused while you play X"), for its icon
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub game: Option<String>,
 }
 
 const RECENT_KEEP: usize = 30;
@@ -104,7 +107,7 @@ fn push_event(st: &mut NasState, kind: &'static str, text: String) {
         first.at = at;
         return;
     }
-    st.recent.insert(0, NasEvent { at, kind, text });
+    st.recent.insert(0, NasEvent { at, kind, text, game: None });
     st.recent.truncate(RECENT_KEEP);
 }
 
@@ -119,7 +122,8 @@ fn note_changes(before: &NasState, after: &mut NasState) {
     } else if !after.connecting && before.reachable != after.reachable {
         lines.push(if after.reachable { ("ok", "Connected to the NAS again".into()) } else { ("bad", "Lost the connection to the NAS".into()) });
     }
-    if !before.paused && after.paused {
+    let paused_now = !before.paused && after.paused;
+    if paused_now {
         lines.push((
             "info",
             match &after.paused_for {
@@ -144,6 +148,13 @@ fn note_changes(before: &NasState, after: &mut NasState) {
     }
     for (kind, text) in lines {
         push_event(after, kind, text);
+    }
+    // The pause line carries its game, so the panel can show the game's icon.
+    if paused_now
+        && let Some(g) = after.paused_for.clone()
+        && let Some(e) = after.recent.iter_mut().find(|e| e.text == format!("Paused while you play {g}"))
+    {
+        e.game = Some(g);
     }
 }
 

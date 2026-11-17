@@ -221,7 +221,7 @@ export type ClipFile = {
 };
 
 export type MoveStatus = { running: boolean; verb: string; label: string; done: number; total: number; paused: boolean; stopping: boolean; finished: string | null };
-export type NasEvent = { at: number; kind: "ok" | "info" | "bad"; text: string };
+export type NasEvent = { at: number; kind: "ok" | "info" | "bad"; text: string; game?: string };
 export type NasState = {
   /** Just started: still looking for the NAS. */
   connecting?: boolean;

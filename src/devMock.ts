@@ -145,7 +145,7 @@ export function installDevMock() {
               recent: [
                 { at: Date.now() - 20_000, kind: "ok", text: "Copied 3 clips to the NAS" },
                 { at: Date.now() - 9 * 60_000, kind: "info", text: "Game closed: syncing again" },
-                { at: Date.now() - 52 * 60_000, kind: "info", text: "Paused while you play" },
+                { at: Date.now() - 52 * 60_000, kind: "info", text: "Paused while you play VALORANT", game: "VALORANT" },
                 { at: Date.now() - 70 * 60_000, kind: "ok", text: "Sent your edit of VALORANT 2026-11-09 00-40-07.mkv to the NAS" },
                 { at: Date.now() - 3 * 3600_000, kind: "bad", text: "Lost the connection to the NAS" },
                 { at: Date.now() - 3.1 * 3600_000, kind: "ok", text: "Connected to the NAS" },

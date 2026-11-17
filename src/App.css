@@ -1480,3 +1480,4 @@ p.small { font-size: 12px; margin: 0; }
 /* A move into Hindsight in the background (MoveStatus.tsx). */
 .sb-move svg { flex: none; }
 .sb-move-on { color: var(--accent); }
+.sync-recent li .game-icon { transform: translateY(2px); }
