@@ -45,7 +45,7 @@ impl Host {
     /// Largest file the host takes (bytes).
     fn limit(self) -> u64 {
         match self {
-            Host::Catbox => 200 * 1_000_000,
+            Host::Catbox => CATBOX_LIMIT,
             Host::Litterbox => 1_000 * 1_000_000,
             // Discord without Nitro or a boosted server: 10 MB.
             Host::Discord => 10 * 1024 * 1024,
@@ -108,8 +108,13 @@ pub fn valid_webhook(url: &str) -> bool {
 /// Make the file a host can take and Discord can play: H.264 MP4, under the size limit.
 /// Returns the file to send (the clip itself when it already fits).
 pub fn prepare(path: &str, host: Host, work: &Path) -> Result<PathBuf, String> {
-    let p = crate::library::probe(path)?;
     let size = fs::metadata(path).map_err(|e| e.to_string())?.len();
+    // Catbox keeps clips for good, so a clip too big for it isn't squeezed (a slow,
+    // lossy re-encode): it goes to Litterbox, or is trimmed first.
+    if host == Host::Catbox && size > host.limit() {
+        return Err(too_big_for_catbox(size));
+    }
+    let p = crate::library::probe(path)?;
     let is_mp4 = Path::new(path).extension().is_some_and(|e| e.eq_ignore_ascii_case("mp4"));
     let playable = p.codec == "h264" && is_mp4 && p.audio_tracks <= 1;
     if playable && size <= host.limit() {
@@ -125,6 +130,10 @@ pub fn prepare(path: &str, host: Host, work: &Path) -> Result<PathBuf, String> {
     } else {
         crate::library::export_h264_into(path, out.clone(), &Default::default())?;
         let made = fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
+        if host == Host::Catbox && made > host.limit() {
+            let _ = fs::remove_file(&out);
+            return Err(too_big_for_catbox(made));
+        }
         if made > host.limit() {
             let mb = (host.limit() / 1_000_000 * 9 / 10) as u32;
             let squeezed = work.join(format!("{stem} ({mb} MB).mp4"));
@@ -138,6 +147,17 @@ pub fn prepare(path: &str, host: Host, work: &Path) -> Result<PathBuf, String> {
         return Err(format!("Couldn't get the clip under {} MB for {}.", host.limit() / 1_000_000, host.label()));
     }
     Ok(out)
+}
+
+/// Catbox takes up to 200 MB.
+pub const CATBOX_LIMIT: u64 = 200 * 1_000_000;
+
+fn too_big_for_catbox(bytes: u64) -> String {
+    format!(
+        "This clip is {} MB, and Catbox takes up to {} MB. Upload it to Litterbox (up to 1 GB) instead, or trim it first.",
+        bytes.div_ceil(1_000_000),
+        CATBOX_LIMIT / 1_000_000
+    )
 }
 
 /// Counts bytes as reqwest reads the file, for a progress bar.
@@ -579,6 +599,11 @@ mod tests {
             assert!(out.extension().unwrap() == "mp4");
             assert!(size <= host.limit());
         }
+        // Too big for Catbox: refused before any work, with the way out.
+        let big = d.join("big.mp4");
+        fs::File::create(&big).unwrap().set_len(CATBOX_LIMIT + 1).unwrap();
+        let e = prepare(&big.to_string_lossy(), Host::Catbox, &d.join("work")).unwrap_err();
+        assert!(e.contains("Catbox takes up to 200 MB") && e.contains("Litterbox"), "{e}");
         // An MP4 that already fits goes up as it is.
         let ready = prepare(&s, Host::Catbox, &d.join("work")).unwrap();
         assert_eq!(prepare(&ready.to_string_lossy(), Host::Catbox, &d.join("work2")).unwrap(), ready);

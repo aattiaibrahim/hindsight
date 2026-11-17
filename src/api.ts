@@ -266,6 +266,14 @@ export const UPLOAD_HOSTS: { id: UploadHost; label: string; hint: string }[] = [
   { id: "discord", label: "Discord webhook", hint: "Posts the clip into your channel. Compressed under Discord's 10 MB." },
   { id: "streamable", label: "Streamable", hint: "Clip page with a player. Needs a Streamable account." },
 ];
+/** Catbox takes clips up to this size (bytes); bigger ones go to Litterbox. */
+export const CATBOX_LIMIT = 200 * 1_000_000;
+/** Why a host can't take a clip of this size, or null if it can. */
+export function hostRefuses(host: UploadHost, bytes: number | undefined): string | null {
+  if (host === "catbox" && bytes != null && bytes > CATBOX_LIMIT)
+    return `This clip is ${Math.ceil(bytes / 1_000_000)} MB, and Catbox takes up to 200 MB. Use Litterbox (up to 1 GB), or trim it first.`;
+  return null;
+}
 export type Upload = { host: UploadHost; url: string; at: number; bytes: number; expires: number | null };
 export type UploadProgress = {
   path: string;

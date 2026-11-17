@@ -5,7 +5,7 @@ import { useHealth } from "./Health";
 import type { UploadProgress } from "./api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
-import { api, errText } from "./api";
+import { api, errText, hostRefuses } from "./api";
 import { StatusBar } from "./StatusBar";
 import { Icon, IconName } from "./icons";
 import { Cleanup } from "./Cleanup";
@@ -90,7 +90,9 @@ export default function App() {
   // Share: ask first (unless turned off in Settings → Sharing), then upload.
   const requestShare = useCallback(
     (r: ShareRequest) => {
-      if (settings && !settings.confirmUploads) api.uploadClip(r.path, r.host).catch((e) => toast(errText(e), true));
+      const no = hostRefuses(r.host ?? settings?.uploadHost ?? "catbox", r.size);
+      if (settings && !settings.confirmUploads && no) toast(no, true);
+      else if (settings && !settings.confirmUploads) api.uploadClip(r.path, r.host).catch((e) => toast(errText(e), true));
       else setShareReq(r);
     },
     [settings, toast],

@@ -842,7 +842,7 @@ clips === null ? null : clips.length === 0 && trimMode ? (
                       upload={uploads?.[c.path]}
                       link={liveLink(links?.[c.path])}
                       damage={health?.[c.path]}
-                      onShare={() => onShare?.({ path: c.path })}
+                      onShare={() => onShare?.({ path: c.path, size: c.size })}
                       returned={c.path === returnedTo}
                       onKeepWhole={onKeepWhole ? () => onKeepWhole([c.path]) : undefined}
                     />

@@ -1127,7 +1127,7 @@ export function Studio({
           </div>
           <div className={group("share")}>
           <div className="label">Share</div>
-          <SharePanel path={path} settings={settings} progress={uploads?.[path]} links={links?.[path]} onShare={(r) => onShare?.(r)} />
+          <SharePanel path={path} size={(clips ?? []).find((c) => c.path === path)?.size} settings={settings} progress={uploads?.[path]} links={links?.[path]} onShare={(r) => onShare?.(r)} />
           </div>
           <div className={group("save")}>
           <div className="label">This file only</div>

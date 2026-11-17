@@ -2,7 +2,7 @@ import { Select } from "./Select";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useState } from "react";
-import { api, errText, fmtSize, Reach, Settings, Upload, UPLOAD_HOSTS, UploadHost, UploadProgress } from "./api";
+import { api, errText, fmtSize, hostRefuses, Reach, Settings, Upload, UPLOAD_HOSTS, UploadHost, UploadProgress } from "./api";
 import { ConfirmDialog } from "./ConfirmUpdate";
 import { Icon } from "./icons";
 
@@ -66,7 +66,7 @@ export function liveLink(links: Upload[] | undefined): Upload | null {
   return null;
 }
 
-export type ShareRequest = { path: string; host?: UploadHost };
+export type ShareRequest = { path: string; host?: UploadHost; size?: number };
 
 /** Asks before uploading (unless turned off), then uploads. Lives once in App. */
 export function ShareConfirm({
@@ -84,7 +84,12 @@ export function ShareConfirm({
   onOpenSettings: () => void;
   onError: (m: string) => void;
 }) {
-  const [host, setHost] = useState<UploadHost>(req.host ?? settings.uploadHost);
+  // A clip too big for the chosen host starts on Litterbox instead.
+  const [host, setHost] = useState<UploadHost>(() => {
+    const h = req.host ?? settings.uploadHost;
+    return hostRefuses(h, req.size) ? "litterbox" : h;
+  });
+  const refused = hostRefuses(host, req.size);
   const [dontAsk, setDontAsk] = useState(false);
   const [have, setHave] = useState<{ discordWebhook: boolean; streamablePassword: boolean } | null>(null);
   const [reach, setReach] = useState<[UploadHost, Reach[]][] | null>(null);
@@ -101,6 +106,7 @@ export function ShareConfirm({
       onOpenSettings();
       return;
     }
+    if (refused) return;
     if (dontAsk) await update({ confirmUploads: false }).catch(() => {});
     onClose();
     api.uploadClip(req.path, host).catch((e) => onError(errText(e)));
@@ -116,13 +122,15 @@ export function ShareConfirm({
         <span>Upload to</span>
         <Select className="select" value={host} onChange={(e) => setHost(e.target.value as UploadHost)}>
           {UPLOAD_HOSTS.map((h) => (
-            <option key={h.id} value={h.id}>
+            <option key={h.id} value={h.id} disabled={!!hostRefuses(h.id, req.size)}>
               {h.label}
+              {hostRefuses(h.id, req.size) ? " (too big)" : ""}
             </option>
           ))}
         </Select>
       </label>
       <ul className="modal-list wrap">
+        {refused && <li className="err-text">{refused}</li>}
         <li>{UPLOAD_HOSTS.find((h) => h.id === host)?.hint}</li>
         <li>Hindsight makes an MP4 that plays inside Discord, uploads it, and copies the link.</li>
         <li>Anyone who has the link can watch the clip.</li>
@@ -152,12 +160,14 @@ export function ShareConfirm({
 /** Studio's Share box: pick a service, upload, copy or open the link. */
 export function SharePanel({
   path,
+  size,
   settings,
   progress,
   links,
   onShare,
 }: {
   path: string;
+  size?: number;
   settings: Settings | null;
   progress: UploadProgress | undefined;
   links: Upload[] | undefined;
@@ -167,6 +177,7 @@ export function SharePanel({
   const [copied, setCopied] = useState(false);
   useEffect(() => setHost(settings?.uploadHost ?? "catbox"), [settings?.uploadHost]);
   const busy = progress && (progress.stage === "preparing" || progress.stage === "uploading");
+  const refused = hostRefuses(host, size);
   const last = liveLink(links);
   const left = last ? timeLeft(last) : null;
   const copy = (url: string) =>
@@ -185,7 +196,7 @@ export function SharePanel({
             </option>
           ))}
         </Select>
-        <button className="btn primary" style={{ flex: 1, minWidth: 0 }} disabled={!!busy} onClick={() => onShare({ path, host })}>
+        <button className="btn primary" style={{ flex: 1, minWidth: 0 }} disabled={!!busy || !!refused} onClick={() => onShare({ path, host, size })}>
           {busy ? progressText(progress!) : "Upload & copy link"}
         </button>
       </div>
@@ -194,6 +205,7 @@ export function SharePanel({
           <i style={{ width: `${pct}%` }} />
         </div>
       )}
+      {refused && !busy && <small className="err-text">{refused}</small>}
       {progress?.stage === "error" && <small className="err-text">{progress.error}</small>}
       {progress?.stage === "done" && progress.warning && <small className="err-text">{progress.warning}</small>}
       {last && !busy && (
