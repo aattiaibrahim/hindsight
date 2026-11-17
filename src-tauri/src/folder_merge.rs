@@ -45,7 +45,29 @@ fn hidden(name: &str) -> bool {
     name.starts_with('.')
 }
 
-/// Game folders at the top of `root` with how many clips each holds.
+/// Clips and bytes in `dir`, its subfolders included (up to three deep).
+fn videos_under(dir: &Path, depth: u32) -> (usize, u64) {
+    let Ok(r) = fs::read_dir(dir) else { return (0, 0) };
+    let mut out = (0, 0);
+    for f in r.flatten() {
+        if hidden(&f.file_name().to_string_lossy()) {
+            continue;
+        }
+        let p = f.path();
+        if p.is_dir() {
+            if depth < 3 {
+                let (n, b) = videos_under(&p, depth + 1);
+                out = (out.0 + n, out.1 + b);
+            }
+        } else if crate::library::is_video(&p) {
+            out = (out.0 + 1, out.1 + fs::metadata(&p).map(|m| m.len()).unwrap_or(0));
+        }
+    }
+    out
+}
+
+/// Game folders at the top of `root` with how many clips each holds, subfolders
+/// included (a folder whose clips are all in "Game/nate moaning/" isn't empty).
 pub fn folder_counts(root: &Path) -> Vec<(String, usize)> {
     let Ok(entries) = fs::read_dir(root) else { return Vec::new() };
     entries
@@ -54,16 +76,37 @@ pub fn folder_counts(root: &Path) -> Vec<(String, usize)> {
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .filter(|n| !hidden(n))
         .map(|n| {
-            let count = fs::read_dir(root.join(&n))
-                .map(|r| {
-                    r.flatten()
-                        .filter(|f| !hidden(&f.file_name().to_string_lossy()) && crate::library::is_video(&f.path()))
-                        .count()
-                })
-                .unwrap_or(0);
+            let count = videos_under(&root.join(&n), 1).0;
             (n, count)
         })
         .collect()
+}
+
+/// Moves that put everything in `from` into `dest`: files (renamed if the name is
+/// taken), and subfolders whole (or merged into one of the same name already there).
+/// Before, subfolders were left behind, and the old folder with them.
+fn move_contents(from: &Path, dest: &Path, moves: &mut Vec<Move>, depth: u32) {
+    let Ok(r) = fs::read_dir(from) else { return };
+    let mut taken: HashSet<String> = HashSet::new();
+    for f in r.flatten() {
+        let name = f.file_name().to_string_lossy().into_owned();
+        if hidden(&name) {
+            continue;
+        }
+        let p = f.path();
+        if p.is_file() {
+            let to = free_name(dest, &name, &mut taken);
+            let size = fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
+            moves.push(Move { from: p, to, size, copied: false });
+        } else if p.is_dir() {
+            let to = dest.join(&name);
+            if to.exists() && depth < 3 {
+                move_contents(&p, &to, moves, depth + 1);
+            } else if !to.exists() {
+                moves.push(Move { from: p, to, size: 0, copied: false });
+            }
+        }
+    }
 }
 
 /// Games that sit under more than one spelling. `dismissed` holds keys the user
@@ -141,8 +184,7 @@ pub fn plan(roots: &[PathBuf], key: &str, target: &str) -> Result<Plan, String> 
             if files.iter().any(|f| f.file_name().is_some_and(|n| n.to_string_lossy().ends_with(".rewind-partial"))) {
                 return Err(format!("A clip is still being copied into \"{name}\". Try again in a minute."));
             }
-            let clips = files.iter().filter(|f| crate::library::is_video(f)).count();
-            let bytes: u64 = files.iter().filter_map(|f| fs::metadata(f).ok()).map(|m| m.len()).sum();
+            let (clips, bytes) = videos_under(&from, 1);
             if !labels.contains(name) {
                 labels.push((*name).clone());
             }
@@ -153,16 +195,7 @@ pub fn plan(roots: &[PathBuf], key: &str, target: &str) -> Result<Plan, String> 
                 plan.moves.push(Move { from, to: dest.clone(), size: 0, copied: false });
                 continue;
             }
-            let mut taken: HashSet<String> = HashSet::new();
-            for f in files {
-                let fname = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                if hidden(&fname) || !f.is_file() {
-                    continue;
-                }
-                let to = free_name(&dest, &fname, &mut taken);
-                let size = fs::metadata(&f).map(|m| m.len()).unwrap_or(0);
-                plan.moves.push(Move { from: f, to, size, copied: false });
-            }
+            move_contents(&from, &dest, &mut plan.moves, 1);
         }
     }
     plan.label = labels.join(", ");
@@ -192,10 +225,22 @@ pub fn remove_empty(roots: &[PathBuf], key: &str, target: &str) {
         for e in entries.flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
             if name != target && !hidden(&name) && folder_key(&name) == key && e.path().is_dir() {
-                let _ = fs::remove_dir(e.path()); // only succeeds when empty
+                remove_empty_tree(&e.path());
             }
         }
     }
+}
+
+/// Remove `dir` and the folders in it, if nothing but empty folders is left.
+fn remove_empty_tree(dir: &Path) {
+    if let Ok(r) = fs::read_dir(dir) {
+        for f in r.flatten() {
+            if f.path().is_dir() {
+                remove_empty_tree(&f.path());
+            }
+        }
+    }
+    let _ = fs::remove_dir(dir); // only succeeds when empty
 }
 
 #[cfg(test)]
@@ -318,6 +363,26 @@ mod tests {
         assert_eq!(names(&nas.join(target)), vec!["a.mkv", "c.mov"]);
         let _ = fs::remove_dir_all(&pc);
         let _ = fs::remove_dir_all(&nas);
+    }
+
+    #[test]
+    fn a_folder_of_clips_inside_a_spelling_is_counted_and_moved_too() {
+        let root = tmp("nested");
+        put(&root.join("Tom Clancys Rainbow Six Siege").join("a.mp4"), 10);
+        put(&root.join("Tom Clancy's Rainbow Six  Siege").join("nate moaning").join("b.mp4"), 20);
+        put(&root.join("Tom Clancy's Rainbow Six  Siege").join("nate moaning").join("c.mp4"), 20);
+        let counts = folder_counts(&root);
+        assert!(counts.contains(&("Tom Clancy's Rainbow Six  Siege".into(), 2)), "{counts:?}");
+        let found = find_similar(&counts, &[], &[]);
+        assert_eq!(found.len(), 1);
+        let p = plan(std::slice::from_ref(&root), &found[0].key, "Tom Clancys Rainbow Six Siege").unwrap();
+        assert_eq!(p.count, 2);
+        let _ = consolidate::run(&p, &tmp("nested-log").join("log.txt"), |_, _| {});
+        remove_empty(std::slice::from_ref(&root), &found[0].key, "Tom Clancys Rainbow Six Siege");
+        let kept = root.join("Tom Clancys Rainbow Six Siege");
+        assert!(kept.join("nate moaning").join("b.mp4").is_file() && kept.join("a.mp4").is_file());
+        assert!(!root.join("Tom Clancy's Rainbow Six  Siege").exists(), "the old spelling's folder is gone");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

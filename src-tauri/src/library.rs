@@ -225,14 +225,24 @@ pub fn scan(clips_dir: &Path, external: &[String]) -> Vec<ClipFile> {
                 if folder.starts_with('.') {
                     continue; // in-progress recordings and other hidden folders
                 }
-                if let Ok(inner) = fs::read_dir(&p) {
+                // Folders of clips inside a game's folder count as that game's (up to three deep).
+                fn walk(dir: &Path, folder: &str, depth: u32, out: &mut Vec<ClipFile>) {
+                    let Ok(inner) = fs::read_dir(dir) else { return };
                     for f in inner.flatten() {
                         let fp = f.path();
-                        if fp.is_file() && is_video(&fp) && !is_sidecar(&fp) {
-                            out.extend(clip_file(&fp, folder.clone(), false));
+                        if f.file_name().to_string_lossy().starts_with('.') {
+                            continue;
+                        }
+                        if fp.is_dir() {
+                            if depth < 3 {
+                                walk(&fp, folder, depth + 1, out);
+                            }
+                        } else if is_video(&fp) && !is_sidecar(&fp) {
+                            out.extend(clip_file(&fp, folder.to_string(), false));
                         }
                     }
                 }
+                walk(&p, &folder, 1, &mut out);
             } else if is_video(&p) && !is_sidecar(&p) {
                 out.extend(clip_file(&p, "Other".into(), false));
             }

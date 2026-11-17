@@ -816,7 +816,27 @@ fn hidden(name: &str) -> bool {
 }
 
 /// Videos in `<root>` and its game folders (one level, like the clips folder).
+/// Clips under `root`: (path, "Game/clip.mp4", game folder). Up to three folders
+/// deep, so a folder of clips inside a game's folder ("Game/nate moaning/clip.mp4")
+/// counts as that game's; before, those clips weren't seen at all.
 fn clips_in(root: &Path) -> Vec<(PathBuf, String, String)> {
+    fn walk(dir: &Path, rel: &str, game: &str, depth: u32, out: &mut Vec<(PathBuf, String, String)>) {
+        let Ok(entries) = fs::read_dir(dir) else { return };
+        for f in entries.flatten() {
+            let fname = f.file_name().to_string_lossy().into_owned();
+            if hidden(&fname) {
+                continue;
+            }
+            let fp = f.path();
+            if fp.is_dir() {
+                if depth < 3 {
+                    walk(&fp, &format!("{rel}/{fname}"), game, depth + 1, out);
+                }
+            } else if is_video(&fp) {
+                out.push((fp, format!("{rel}/{fname}"), game.to_string()));
+            }
+        }
+    }
     let mut out = Vec::new();
     let Ok(entries) = fs::read_dir(root) else { return out };
     for e in entries.flatten() {
@@ -826,15 +846,7 @@ fn clips_in(root: &Path) -> Vec<(PathBuf, String, String)> {
         }
         let p = e.path();
         if p.is_dir() {
-            if let Ok(inner) = fs::read_dir(&p) {
-                for f in inner.flatten() {
-                    let fname = f.file_name().to_string_lossy().into_owned();
-                    let fp = f.path();
-                    if !hidden(&fname) && fp.is_file() && is_video(&fp) {
-                        out.push((fp, format!("{name}/{fname}"), name.clone()));
-                    }
-                }
-            }
+            walk(&p, &name, &name, 1, &mut out);
         } else if is_video(&p) {
             out.push((p, name.clone(), "Other".into()));
         }
