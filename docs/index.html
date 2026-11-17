@@ -20,6 +20,7 @@
       <nav aria-label="Site">
         <a href="#features">Features</a>
         <a href="#nas">NAS</a>
+        <a href="#privacy">Privacy</a>
         <a href="#compare">Compare</a>
         <a href="changelog.html">Changelog</a>
         <a href="https://github.com/aattiaibrahim/hindsight">GitHub</a>
@@ -76,7 +77,7 @@
         <div class="text">
           <h2>A library that keeps itself tidy</h2>
           <p>Your clips by game and by day, with the game's logo. To trim lists every clip you haven't cut down yet and how much space trimming would free.</p>
-          <p>Clips from Medal, OBS, NVIDIA and other recorders show up in the same place. Damaged clips, duplicates and folders spelled two ways are pointed out, never changed without asking.</p>
+          <p>Clips from Medal, OBS, NVIDIA and other recorders show up in the same place, even in folders inside folders. Damaged clips, duplicates (OBS's MKV next to its MP4 too) and folders spelled two ways are pointed out, never changed without asking, and Cleanup clears them in one go.</p>
         </div>
         <div class="shot"><img src="img/totrim.jpg" alt="To trim: clips not trimmed yet, grouped by day, with how much space trimming would free" width="2000" height="1175" loading="lazy"></div>
       </section>
@@ -84,7 +85,8 @@
       <section class="panel row flip" id="nas">
         <div class="text">
           <h2>On your NAS, checked</h2>
-          <p>Clips save to your PC first, then copy to your NAS once you've closed the game. Each copy is read back and compared byte for byte before it counts.</p>
+          <p>Clips save to your PC first, then copy to your NAS once you've closed the game (or while you play, if you'd rather). Each copy is read back and compared byte for byte before it counts, so a crash, a restart or a pulled cable never costs you a clip: the copy just starts again.</p>
+          <p>The status bar shows what it's doing, which game it's waiting for, and when it last synced.</p>
           <p>The Hindsight Server app runs on TrueNAS or any Docker host and puts your library in the browser, on any phone or PC at home. <a href="https://github.com/aattiaibrahim/hindsight/tree/main/server">Set it up</a>.</p>
         </div>
         <div class="flow" aria-label="Your PC saves the clip, your NAS keeps a checked copy, and you watch it on a phone or laptop">
@@ -105,6 +107,34 @@
         <div class="shot narrow"><img src="img/share.jpg" alt="The editor's side panel: the clip's details, Share with Upload and copy link, and the other ways to save it" width="440" height="1021" loading="lazy"></div>
       </section>
 
+      <section class="panel" id="more">
+        <h2>And there's more</h2>
+        <div class="more">
+          <div><b>Montages</b><p>Pick a length and which clips (trimmed, untrimmed, a game, a time frame) and get a montage to fine-tune: crossfades or fades through black, a song under it, each clip's own volume, up to 4K at 120 fps.</p></div>
+          <div><b>Smooth scrubbing</b><p>Clips from other recorders that skip frames when you drag through them get a quick preview copy on your graphics card, so scrubbing stays smooth. Your edits still use the original.</p></div>
+          <div><b>On this day</b><p>Clips from this day in earlier years, at the top of your library.</p></div>
+          <div><b>Sound you can hear everywhere</b><p>Every clip carries an "All audio" track, so phones, browsers and other players hear your game, mic and friends together, without anything playing twice.</p></div>
+          <div><b>Moves in the background</b><p>Bringing hundreds of clips over from another recorder or drive happens in the background, waits while you play, and can be undone.</p></div>
+          <div><b>Diagnostics in one click</b><p>One file with what's needed to fix a problem (your PC, audio devices, the clip's tracks), with your user name taken out.</p></div>
+        </div>
+      </section>
+
+      <section class="panel row flip" id="privacy">
+        <div class="text">
+          <h2>Yours, not ours</h2>
+          <p>No ads, no account, no tracking. Hindsight doesn't make money from you, so there's nothing to sell: not your clips, not your playtime, not what games you play.</p>
+          <p>Your clips stay on your PC and your NAS. Nothing is uploaded to anyone's cloud unless you press Share, and then only to the host you pick. The source code is open, so anyone can check that.</p>
+        </div>
+        <ul class="perks" aria-label="What you don't get with Hindsight">
+          <li><b>No ads</b><small>in the app or on your clips</small></li>
+          <li><b>No account</b><small>nothing to sign up for or log into</small></li>
+          <li><b>No watermark</b><small>your clips are yours</small></li>
+          <li><b>No tracking</b><small>no analytics, no telemetry</small></li>
+          <li><b>No cloud you don't control</b><small>your PC and your NAS</small></li>
+          <li><b>No subscription</b><small>free, and open source</small></li>
+        </ul>
+      </section>
+
       <section class="panel" id="compare">
         <h2>How it compares</h2>
         <p style="margin-bottom:20px">Only the things that are different. What Hindsight can't do yet is in here too.</p>
@@ -116,6 +146,7 @@
             <tbody>
               <tr><td>Source code</td><td class="us">Open</td><td>Closed</td><td>Closed</td><td>Open</td></tr>
               <tr><td>Account needed</td><td class="us">No</td><td>Yes</td><td>No</td><td>No</td></tr>
+              <tr><td>Ads</td><td class="us"><span class="yes">None</span></td><td>Yes</td><td>No</td><td>No</td></tr>
               <tr><td>Discord on its own audio track</td><td class="us"><span class="yes">Automatic</span></td><td>No</td><td>No</td><td>With manual setup</td></tr>
               <tr><td>Copies clips to your own NAS</td><td class="us"><span class="yes">Yes, checked</span></td><td>No (its own cloud)</td><td>No</td><td>No</td></tr>
               <tr><td>Finds and heals damaged clips</td><td class="us"><span class="yes">Yes</span></td><td>No</td><td>No</td><td>No</td></tr>
@@ -131,7 +162,9 @@
         <h2>Questions</h2>
         <details><summary>Do I need an NVIDIA graphics card?</summary><p>Yes, for now: a GTX 10-series or newer. Hindsight picks the best format your card has: AV1 on an RTX 40 or 50 series, HEVC or H.264 on older ones.</p></details>
         <details><summary>Windows says it "protected my PC". Is it safe?</summary><p>The installer isn't code-signed yet, so SmartScreen doesn't recognise it. Click <b>More info</b>, then <b>Run anyway</b>. The source code is on GitHub for anyone to check.</p></details>
-        <details><summary>Will it slow my game down?</summary><p>Very little: about 3% of one CPU core at 1080p60, with encoding on the GPU's video chip. Copying to the NAS, thumbnails and damage checks wait until you're out of game.</p></details>
+        <details><summary>Will it slow my game down?</summary><p>Very little: about 3% of one CPU core at 1080p60, with encoding on the GPU's video chip. Copying to the NAS, thumbnails, damage checks and duplicate searches wait until you're out of game (turn on Sync while you play if you'd rather the NAS copy carries on).</p></details>
+        <details><summary>What if my PC crashes or restarts while it's copying?</summary><p>Nothing is lost. A copy goes to a hidden file first and only counts once it's been read back and matches the original byte for byte; the original is never removed before that. After a crash the unfinished copy is cleaned up and that clip is simply copied again. Updates also wait until a copy is done.</p></details>
+        <details><summary>Are there ads, or a paid version?</summary><p>No ads and no paid version. Hindsight is free and open source, and it doesn't collect anything about you to sell.</p></details>
         <details><summary>If I delete a clip on my PC, is it deleted on the NAS too?</summary><p>No. The NAS keeps your safe copy. Deleting on your PC sends the clip to the Recycle Bin and leaves the NAS copy alone.</p></details>
         <details><summary>Can I bring my clips from Medal, NVIDIA or OBS?</summary><p>Yes. Hindsight shows their clips by game and can move them into its own folders, with undo. Once a recorder's folder has no clips left, it offers to send it to the Recycle Bin.</p></details>
         <details><summary>Something's broken, or I have an idea.</summary><p>Run <b>Settings → About → Run diagnostics</b> and attach the file to a <a href="https://github.com/aattiaibrahim/hindsight/issues/new?template=bug_report.yml">bug report</a>. Ideas go in a <a href="https://github.com/aattiaibrahim/hindsight/issues/new?template=feature_request.yml">feature request</a>.</p></details>

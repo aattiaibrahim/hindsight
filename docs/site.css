@@ -116,3 +116,17 @@ kbd { display: inline-grid; place-items: center; min-width: 64px; height: 56px; 
 .status-demo { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 13px; }
 .status-demo .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
 .status-demo .sep { width: 1px; height: 12px; background: #333; }
+
+/* And there's more: a grid of short features. */
+#more h2 { margin-bottom: 20px; }
+.more { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.more > div { padding: 18px; border-radius: 10px; background: var(--raised); }
+.more b { display: block; font-family: var(--head); font-size: 16px; margin-bottom: 6px; }
+.more p { color: var(--muted); font-size: 14.5px; }
+
+/* Yours, not ours: what you don't get. */
+.perks { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.perks li { padding: 14px 16px; border-radius: 10px; background: var(--raised); display: flex; flex-direction: column; gap: 2px; }
+.perks b { font-size: 15px; }
+.perks small { color: var(--muted); font-size: 13px; }
+@media (max-width: 520px) { .perks { grid-template-columns: 1fr; } }
