@@ -985,7 +985,7 @@ pub fn sweep_partials(root: &Path) -> usize {
                 if depth < 3 && !name.starts_with(".hindsight") {
                     walk(&p, depth + 1, n);
                 }
-            } else if (name.ends_with(PARTIAL) || (name.starts_with('.') && name.contains(&format!("{}.", crate::native::pipeline::SAVING))))
+            } else if (name.ends_with(PARTIAL) || (name.starts_with('.') && (name.contains(&format!("{}.", crate::native::pipeline::SAVING)) || name.contains(".part."))))
                 && settled(&p, Duration::from_secs(24 * 3600))
                 && fs::remove_file(&p).is_ok()
             {

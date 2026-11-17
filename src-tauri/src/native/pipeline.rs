@@ -506,7 +506,9 @@ fn mux_span(s: &Span, out: &Path, staging: &Path, resumable: bool) -> Result<(),
     let ext = out.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "mkv".into());
     let tmp = out.with_file_name(format!(".{stem}{SAVING}.{ext}"));
     let _ = fs::remove_file(&tmp);
-    let done = mux(&video_path, format, fps, &tracks, &tmp, Duration::from_secs_f64(60.0 + secs)).and_then(|_| fs::rename(&tmp, out).map_err(|e| e.to_string()));
+    let done = mux(&video_path, format, fps, &tracks, &tmp, Duration::from_secs_f64(60.0 + secs))
+        .and_then(|_| crate::library::flush_to_disk(&tmp))
+        .and_then(|_| fs::rename(&tmp, out).map_err(|e| e.to_string()));
     if done.is_err() {
         let _ = fs::remove_file(&tmp);
     }
@@ -539,6 +541,7 @@ pub fn recover_saves(clips_dir: &Path) -> Vec<String> {
             // Write next to the clip first, so a half-written older attempt is only replaced by a good one.
             let tmp = meta.out.with_extension("recovering.mkv");
             match mux(&video, &meta.format, meta.fps, &tracks, &tmp, Duration::from_secs_f64(120.0 + est_secs))
+                .and_then(|_| crate::library::flush_to_disk(&tmp))
                 .and_then(|_| fs::rename(&tmp, &meta.out).map_err(|e| e.to_string()))
             {
                 Ok(()) => {

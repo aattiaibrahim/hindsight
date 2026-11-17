@@ -217,6 +217,7 @@ pub(crate) fn copy_file(from: &Path, to: &Path) -> Result<(), String> {
         if fs::metadata(&tmp).map(|m| m.len()).ok() != Some(size) {
             return Err("the copy came out the wrong size".to_string());
         }
+        crate::library::flush_to_disk(&tmp)?;
         fs::rename(&tmp, to).map_err(|e| e.to_string())
     })();
     if res.is_err() {

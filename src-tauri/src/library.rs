@@ -79,11 +79,23 @@ fn part_of(out: &Path) -> PathBuf {
     out.with_file_name(format!(".{stem}.part.{ext}"))
 }
 
+/// Make sure a file's contents are on the disk, not only in Windows' write cache.
+/// Done before a file gets its real name: otherwise a power cut a moment after
+/// the rename can leave the name pointing at a file that was never fully written
+/// (Windows journals the rename, not the data).
+pub(crate) fn flush_to_disk(p: &Path) -> Result<(), String> {
+    fs::OpenOptions::new().write(true).open(p).and_then(|f| f.sync_all()).map_err(|e| format!("couldn't write it to the disk ({e})"))
+}
+
 /// Move a finished edit from its hidden name to its real one.
 fn publish(part: &Path, out: &Path) -> Result<String, String> {
     if fs::metadata(part).map(|m| m.len()).unwrap_or(0) == 0 {
         let _ = fs::remove_file(part);
         return Err("The edit came out empty, so nothing was saved.".into());
+    }
+    if let Err(e) = flush_to_disk(part) {
+        let _ = fs::remove_file(part);
+        return Err(format!("Couldn't save the edit: {e}"));
     }
     fs::rename(part, out).map_err(|e| {
         let _ = fs::remove_file(part);
@@ -345,6 +357,7 @@ pub fn preview_tracks(path: &str, cache: &Path) -> Result<Vec<PreviewTrack>, Str
             a.extend(ffmpeg::args(&["-movflags", "+faststart"]));
             a.push(tmp.clone().into());
             ffmpeg::run("ffmpeg", &a)?;
+            flush_to_disk(&tmp)?;
             fs::rename(&tmp, &file).map_err(|e| e.to_string())?;
         }
         out.push(PreviewTrack { index: i as u32, title, path: file.to_string_lossy().into_owned() });
@@ -428,7 +441,7 @@ fn write_with_mix(path: &str, titles: &[String], others: &[usize]) -> Result<(),
     let done = ffmpeg::run("ffmpeg", &a)
         .and_then(|_| verify_output(&tmp, probe(path).ok().map(|p| p.duration)))
         .and_then(|_| if track_titles(&tmp.to_string_lossy()).len() == others.len() + 1 { Ok(()) } else { Err("a track went missing".into()) });
-    if let Err(e) = done {
+    if let Err(e) = done.and_then(|_| flush_to_disk(&tmp)) {
         let _ = fs::remove_file(&tmp);
         return Err(e);
     }

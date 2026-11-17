@@ -282,6 +282,7 @@ pub fn save(path: &Path, s: &Settings) -> Result<(), String> {
     let json = serde_json::to_string_pretty(s).map_err(|e| e.to_string())?;
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
+    crate::library::flush_to_disk(&tmp)?;
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 

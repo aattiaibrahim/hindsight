@@ -62,6 +62,7 @@ pub fn set(file: &Path, name: &str, value: &str) -> Result<(), String> {
     }
     let tmp = file.with_extension("json.tmp");
     fs::write(&tmp, serde_json::to_string_pretty(&all).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    crate::library::flush_to_disk(&tmp)?;
     fs::rename(&tmp, file).map_err(|e| e.to_string())
 }
 
