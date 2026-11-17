@@ -152,6 +152,21 @@ export function installDevMock() {
               ] }
         : { enabled: false, reachable: false, pending: 0, copying: null, copied: 0, lastError: null, lastSync: null, paused: false, totalFiles: 0, doneFiles: 0, totalBytes: 0, doneBytes: 0, pendingBytes: 0, checking: false, rate: 0, etaSecs: null, freeDone: 0, freeTotal: 0, freeing: false, stopped: false },
     sync_nas_now: () => null,
+    // ?smooth: a clip that needs a smooth-scrubbing copy (made in 2 s, with progress).
+    smooth_copy: (a) =>
+      new URLSearchParams(location.search).has("smooth")
+        ? new Promise((done) => {
+            let pct = 0;
+            const t = setInterval(() => {
+              pct += 25;
+              (listeners.get("scrub-progress") ?? []).forEach((id) => callbacks.get(id)?.({ event: "scrub-progress", id: 0, payload: { path: a.path, pct } }));
+              if (pct >= 100) {
+                clearInterval(t);
+                done("/preview-sample.mkv");
+              }
+            }, 500);
+          })
+        : null,
     add_mix_tracks: () => ({ addedHere: 2, failedHere: [], nasStarted: true, nasError: null }),
     mix_tracks_status: () => ({ running: true, checked: 214, total: 597, added: 131, failed: 0, lastError: null, finishedAt: null }),
     stop_nas_sync: () => null,

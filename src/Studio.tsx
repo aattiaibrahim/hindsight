@@ -397,6 +397,32 @@ export function Studio({
   // Where you were in the clip, for when it carries on from its NAS copy.
   const snap = useRef<{ path: string | null; time: number; playing: boolean; range: [number, number]; edits: TrackEdit[]; crop: Crop | null } | null>(null);
   const resume = useRef<{ path: string; time: number; playing: boolean } | null>(null);
+  // Smooth scrubbing (scrub.rs): a clip with keyframes far apart plays from a copy
+  // with one every half second. The original plays while the copy is made, then the
+  // player switches over where you are. Trims, saves and exports still use the original.
+  const [smooth, setSmooth] = useState<{ for: string; copy: string | null; pct: number | null; err?: string } | null>(null);
+  const clipModified = (clips ?? []).find((c) => c.path === path)?.modified ?? 0;
+  useEffect(() => {
+    if (!path) return;
+    let alive = true;
+    setSmooth({ for: path, copy: null, pct: null });
+    const un = listen<{ path: string; pct: number }>("scrub-progress", (e) => {
+      if (alive && e.payload.path === path) setSmooth((s) => (s && s.for === path && !s.copy ? { ...s, pct: e.payload.pct } : s));
+    });
+    api
+      .smoothCopy(path)
+      .then((copy) => {
+        if (!alive) return;
+        const v = video.current;
+        if (copy && v) resume.current = { path, time: v.currentTime, playing: !v.paused };
+        setSmooth({ for: path, copy, pct: null });
+      })
+      .catch((e) => alive && setSmooth({ for: path, copy: null, pct: null, err: errText(e) }));
+    return () => {
+      alive = false;
+      un.then((f) => f());
+    };
+  }, [path, clipModified]);
   useEffect(() => {
     const was = movedFrom && snap.current?.path === movedFrom ? snap.current : null;
     setInfo(null);
@@ -726,6 +752,17 @@ export function Studio({
         <div className="studio-title" style={{ flex: 1 }} title={path}>
           {name}
         </div>
+        {smooth?.for === path && (smooth.pct != null || smooth.copy || smooth.err) && (
+          <span
+            className={`studio-smooth ${smooth.err ? "bad" : ""}`}
+            title={
+              smooth.err ??
+              "This clip has keyframes far apart, so it scrubbed slowly. Studio plays a copy with one every half second instead; trims, saves and exports still use the original."
+            }
+          >
+            {smooth.err ? "Scrubbing may be slow" : smooth.copy ? "Smooth scrubbing on" : `Making scrubbing smooth… ${smooth.pct}%`}
+          </span>
+        )}
         <StudioNas clip={clips?.find((c) => c.path === path)} />
         {/* One button both ways, with its key, so nobody has to know about T. */}
         <button className="btn" onClick={toggleTheater} aria-pressed={theater} title={theater ? "Show the editing tools again (T)" : "Hide the editing tools for a bigger video (T)"}>
@@ -773,7 +810,7 @@ export function Studio({
               poster={poster ?? undefined}
               // The version tag makes the player load the file fresh after an edit replaced it
               // in place (same name); otherwise WebView2 can reuse its cached copy of the old file.
-              src={mediaSrc(path, `${(clips ?? []).find((c) => c.path === path)?.modified ?? 0}-${reload}`)}
+              src={mediaSrc(smooth?.for === path && smooth.copy ? smooth.copy : path, `${clipModified}-${reload}`)}
               onLoadedMetadata={(e) => {
                 // Carrying on from the NAS copy: back to where you were, still playing.
                 const r = resume.current;

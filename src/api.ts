@@ -601,6 +601,8 @@ export const api = {
   repairClip: (path: string) => invoke<string>("repair_clip", { path }),
   secretsSet: () => invoke<{ discordWebhook: boolean; streamablePassword: boolean }>("secrets_set"),
   syncNasNow: () => invoke<void>("sync_nas_now"),
+  /** A copy of the clip that scrubs smoothly (keyframes close together), or null when it doesn't need one. */
+  smoothCopy: (path: string) => invoke<string | null>("smooth_copy", { path }),
   /** Stop (true) or resume (false) NAS copying and freeing up. */
   stopNasSync: (stop: boolean) => invoke<void>("stop_nas_sync", { stop }),
   recorderClipFolders: () => invoke<ClipFolder[]>("recorder_clip_folders"),

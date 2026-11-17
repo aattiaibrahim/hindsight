@@ -1472,3 +1472,7 @@ p.small { font-size: 12px; margin: 0; }
 }
 .me-pick .me-bin-list { overflow-y: auto; min-height: 0; }
 @media (max-width: 900px) { .me-top { grid-template-columns: minmax(0, 1fr); } .me-inspector { max-height: 260px; } }
+
+/* Studio: the smooth-scrubbing copy being made, or in use. */
+.studio-smooth { font-size: 12px; color: var(--muted); white-space: nowrap; padding: 0 6px; }
+.studio-smooth.bad { color: var(--danger); }

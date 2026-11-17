@@ -1,5 +1,6 @@
 mod app_audio;
 mod audio_sessions;
+mod scrub;
 mod prepare;
 mod game_icons;
 mod duplicates;
@@ -981,6 +982,22 @@ fn progress_to(app: &AppHandle, path: &str, total: Option<f64>) -> impl Fn(f64) 
             let _ = a.emit("edit-progress", serde_json::json!({ "path": which, "pct": pct }));
         }
     }
+}
+
+/// The copy Studio plays for smooth scrubbing (scrub.rs), or None when the clip
+/// scrubs fine as it is. Made on first use, with "scrub-progress" { path, pct }.
+#[tauri::command]
+async fn smooth_copy(app: AppHandle, path: String) -> Result<Option<String>, String> {
+    let dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?.join("scrub");
+    let total = library::probe(&path).ok().map(|p| p.duration).filter(|d| *d > 0.0);
+    let (a, which) = (app.clone(), path.clone());
+    let report = move |secs: f64| {
+        if let Some(t) = total {
+            let pct = (secs / t * 100.0).clamp(0.0, 99.0).round() as u32;
+            let _ = a.emit("scrub-progress", serde_json::json!({ "path": which, "pct": pct }));
+        }
+    };
+    blocking(move || scrub::smooth_copy(&dir, &path, report).map(|o| o.map(|p| p.to_string_lossy().into_owned()))).await
 }
 
 /// Run an edit; if `replace`, swap the checked result in for the original.
@@ -1990,7 +2007,8 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            get_settings,
+            smooth_copy,
+get_settings,
             set_settings,
             screen_preview,
             nas_check,
