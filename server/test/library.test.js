@@ -263,3 +263,23 @@ describe("filters, sorting and folders", async () => {
     assert.deepEqual(facet(clips, "pc"), [["PC1", 2], ["", 1], ["LAPTOP", 1]]);
   });
 });
+
+describe("scanLibrary with folders inside game folders", () => {
+  let root;
+  before(async () => {
+    root = await mkdtemp(path.join(tmpdir(), "hs-nested-"));
+    await mkdir(path.join(root, "Tom Clancy's Rainbow Six  Siege", "nate moaning"), { recursive: true });
+    await writeFile(path.join(root, "Tom Clancy's Rainbow Six  Siege", "nate moaning", "MedalTVTomClancysRainbowSixSiege20230412002943.mp4"), "x");
+    await mkdir(path.join(root, "Tom Clancys Rainbow Six Siege"), { recursive: true });
+    await writeFile(path.join(root, "Tom Clancys Rainbow Six Siege", "a.mp4"), "x");
+  });
+  after(() => rm(root, { recursive: true, force: true }));
+
+  test("a clip in a subfolder is found and counts as that game's", async () => {
+    const clips = await scanLibrary(root);
+    const nested = clips.find((c) => c.rel.includes("nate moaning"));
+    assert.ok(nested, "the nested clip is listed");
+    // Both spellings show as one game.
+    assert.equal(new Set(clips.map((c) => c.game)).size, 1);
+  });
+});

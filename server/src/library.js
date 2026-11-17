@@ -101,7 +101,8 @@ export function makeClip(rel, info) {
 }
 
 /**
- * Scan the library: video files in the root and one level of game folders.
+ * Scan the library: video files in the root and in game folders, up to three
+ * folders deep ("Game/nate moaning/clip.mp4" counts as Game's, like the desktop app).
  * Hidden entries and partial copies are skipped.
  */
 export async function scanLibrary(root) {
@@ -124,15 +125,22 @@ export async function scanLibrary(root) {
   for (const entry of top) {
     if (isSkipped(entry.name)) continue;
     if (entry.isDirectory()) {
-      let files;
-      try {
-        files = await readdir(path.join(root, entry.name), { withFileTypes: true });
-      } catch {
-        continue;
-      }
-      for (const f of files) {
-        if (!isSkipped(f.name) && f.isFile() && isVideo(f.name)) await add(`${entry.name}/${f.name}`);
-      }
+      // Folders of clips inside a game's folder count as that game's (up to three deep).
+      const walk = async (rel, depth) => {
+        let files;
+        try {
+          files = await readdir(path.join(root, rel), { withFileTypes: true });
+        } catch {
+          return;
+        }
+        for (const f of files) {
+          if (isSkipped(f.name)) continue;
+          if (f.isDirectory()) {
+            if (depth < 3) await walk(`${rel}/${f.name}`, depth + 1);
+          } else if (f.isFile() && isVideo(f.name)) await add(`${rel}/${f.name}`);
+        }
+      };
+      await walk(entry.name, 1);
     } else if (entry.isFile() && isVideo(entry.name)) {
       await add(entry.name);
     }
