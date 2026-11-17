@@ -38,6 +38,18 @@ pub fn init(resource_dir: Option<PathBuf>) {
     let _ = DIR.set(dir);
 }
 
+/// For tests that encode or decode real video: skip them where there's no real
+/// ffmpeg or no NVIDIA GPU (GitHub's test machines set HINDSIGHT_NO_MEDIA). On a
+/// developer's PC they all run.
+#[cfg(test)]
+pub fn skip_media_tests() -> bool {
+    let skip = std::env::var_os("HINDSIGHT_NO_MEDIA").is_some() || !exe("ffmpeg").is_file();
+    if skip {
+        eprintln!("(skipped: needs ffmpeg and an NVIDIA GPU)");
+    }
+    skip
+}
+
 pub fn exe(name: &str) -> PathBuf {
     DIR.get().cloned().unwrap_or_default().join(format!("{name}.exe"))
 }

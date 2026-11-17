@@ -317,6 +317,9 @@ mod live {
     #[ignore]
     fn live_diagnostics() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let clip = std::env::var("REWIND_DIAG_CLIP").ok();
         let r = super::report("0.1.25", &[("Settings", super::settings_json(&crate::settings::Settings::default()))], clip.as_deref());
         std::fs::write(std::env::temp_dir().join("rewind-diag-sample.txt"), &r).unwrap();

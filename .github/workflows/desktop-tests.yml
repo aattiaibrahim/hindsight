@@ -1,0 +1,62 @@
+# Checks the desktop app on every push and pull request: the frontend type-checks and
+# builds, and the Rust tests pass. GitHub's machines have no NVIDIA GPU and the repo
+# doesn't carry ffmpeg, so the tests that encode real video skip themselves there
+# (HINDSIGHT_NO_MEDIA); they run on a developer's PC before every release.
+name: Desktop tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "src-tauri/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/desktop-tests.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "src-tauri/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    env:
+      HINDSIGHT_NO_MEDIA: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Frontend (type-check and build)
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # The bundled tools (ffmpeg, PresentMon) aren't in the repo: empty stand-ins
+      # let the build find its resources. Nothing runs them (HINDSIGHT_NO_MEDIA).
+      - name: Stand-ins for the bundled tools
+        shell: pwsh
+        run: |
+          foreach ($f in "vendor/ffmpeg/bin/ffmpeg.exe", "vendor/ffmpeg/bin/ffprobe.exe", "vendor/ffmpeg/bin/placeholder.dll", "vendor/ffmpeg/LICENSE.txt", "vendor/presentmon/PresentMon.exe", "vendor/presentmon/LICENSE.txt") {
+            New-Item -ItemType File -Force -Path $f | Out-Null
+          }
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --lib -- --test-threads=1

@@ -164,6 +164,9 @@ mod tests {
     #[ignore]
     fn live_smooth_copy() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = std::env::temp_dir().join(format!("hs-scrub-{}", std::process::id()));
         fs::create_dir_all(&d).unwrap();
         let src = d.join("slow.mp4");

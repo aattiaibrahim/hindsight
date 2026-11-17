@@ -429,6 +429,9 @@ mod tests {
         use std::process::Stdio;
         use std::time::{Duration, Instant};
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let pm = std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../vendor/presentmon/PresentMon.exe"));
         let mut game = std::process::Command::new(crate::ffmpeg::exe("ffplay"))
             .args(["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=60"])

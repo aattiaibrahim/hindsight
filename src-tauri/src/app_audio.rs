@@ -300,6 +300,10 @@ mod tests {
     /// Opens the real per-app capture on this PC (needs Windows 10 2004+).
     #[test]
     fn per_app_capture_opens() {
+        // Needs a real sound device (GitHub's test machines skip it).
+        if std::env::var_os("HINDSIGHT_NO_MEDIA").is_some() {
+            return;
+        }
         assert!(available(), "process loopback failed to open");
     }
 }

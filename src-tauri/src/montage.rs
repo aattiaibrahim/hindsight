@@ -272,6 +272,10 @@ mod tests {
 
     #[test]
     fn joins_different_sizes_and_tracks_with_a_song() {
+        crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = std::env::temp_dir().join(format!("rewind-montage-{}", std::process::id()));
         let a = sample(&d, "a.mkv", "1280x720", 2); // game + mic
         let b = sample(&d, "b.mp4", "800x600", 0); // no sound, 4:3

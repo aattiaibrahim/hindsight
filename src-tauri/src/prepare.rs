@@ -183,6 +183,9 @@ mod tests {
     #[ignore]
     fn live_nas_probe_count() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let nas = std::env::var("REWIND_NAS_DIR").unwrap();
         let clips = std::env::var("REWIND_CLIPS_DIR").unwrap();
         init(std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join("com.rewind.app").join("probes.json"));
@@ -205,6 +208,9 @@ mod tests {
     #[test]
     fn details_are_read_once_and_again_when_the_file_changes() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let dir = std::env::temp_dir().join(format!("rewind-prepare-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let clip = dir.join("a.mkv");

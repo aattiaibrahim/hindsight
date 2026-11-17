@@ -1631,6 +1631,9 @@ mod tests {
     #[test]
     fn replacing_a_nas_clip_sets_the_original_aside_and_keeps_its_date() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let nas = std::env::temp_dir().join(format!("rewind-nas-replace-{}", std::process::id()));
         let _ = fs::remove_dir_all(&nas);
         fs::create_dir_all(nas.join("Desktop")).unwrap();

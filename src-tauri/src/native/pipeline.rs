@@ -661,6 +661,9 @@ mod tests {
     #[test]
     fn saved_clips_start_with_all_their_sound_mixed() {
         ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = std::env::temp_dir().join(format!("rewind-mixtrack-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
@@ -709,6 +712,9 @@ mod tests {
     #[test]
     fn unfinished_save_is_finished_on_next_start() {
         ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let clips = std::env::temp_dir().join(format!("rewind-recover-save-{}", std::process::id()));
         let game = clips.join("Some Game");
         let staging = game.join(format!("{SAVE_DIR_PREFIX}123"));

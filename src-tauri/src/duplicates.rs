@@ -232,6 +232,9 @@ mod tests {
     fn a_real_remux_is_found_and_a_re_encode_is_not() {
         use crate::ffmpeg;
         ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = std::env::temp_dir().join(format!("rewind-remux-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
@@ -337,6 +340,9 @@ mod live {
     #[ignore]
     fn live_cleanup_remuxes() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let nas = std::env::var("REWIND_NAS_DIR").unwrap();
         let clips = std::env::var("REWIND_CLIPS_DIR").unwrap();
         crate::prepare::init(std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join("com.rewind.app").join("probes.json"));
@@ -360,6 +366,9 @@ mod live {
     #[ignore]
     fn live_remuxes() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let Ok(dir) = std::env::var("REWIND_REMUX_DIR") else { return };
         let mut list = Vec::new();
         let mut stack = vec![std::path::PathBuf::from(dir)];

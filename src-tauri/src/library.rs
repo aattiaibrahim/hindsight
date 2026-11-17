@@ -1518,6 +1518,9 @@ mod tests {
     #[ignore]
     fn live_medal_trim_keeps_track_names() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let src = std::env::var("REWIND_MEDAL_CLIP").unwrap();
         let dir = std::env::temp_dir().join(format!("rewind-medal-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -1571,6 +1574,9 @@ mod tests {
     #[ignore]
     fn live_real_nas_thumbnails() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let dir = std::env::var("REWIND_NAS_DIR").unwrap();
         let app = std::env::var("REWIND_NAS_APP").unwrap();
         set_nas_app(&dir, &app);
@@ -1615,6 +1621,9 @@ mod tests {
     #[ignore]
     fn live_dir_thumb_count() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let root = std::env::var("REWIND_DIR").unwrap();
         let cache = PathBuf::from(std::env::var("LOCALAPPDATA").unwrap()).join("com.rewind.app").join("thumbs");
         let mut stack = vec![PathBuf::from(&root)];
@@ -1643,6 +1652,9 @@ mod tests {
     #[test]
     fn older_clips_get_the_all_audio_track_but_only_hindsights_own() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = std::env::temp_dir().join(format!("rewind-addmix-{}", std::process::id()));
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
@@ -1695,6 +1707,9 @@ mod tests {
     #[test]
     fn mixing_leaves_out_a_track_that_already_mixes_the_others() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let dir = std::env::temp_dir().join(format!("rewind-mixcopy-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
@@ -1775,6 +1790,10 @@ mod tests {
 
     #[test]
     fn cropped_trim_has_the_new_size_and_the_audio() {
+        crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = tmp("crop");
         let src = rewind_like(&d, "c.mkv", "hevc_nvenc");
         let out = trim_cropped(&src, 1.0, 4.0, &AudioEdit::default(), Crop { x: 0.25, y: 0.0, w: 0.5, h: 1.0 }).unwrap();
@@ -1787,6 +1806,10 @@ mod tests {
 
     #[test]
     fn smart_trim_is_exact_and_copies_untouched_frames() {
+        crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = tmp("smart");
         for (codec, name) in [("av1_nvenc", "a.mkv"), ("hevc_nvenc", "h.mkv"), ("h264_nvenc", "x.mp4")] {
             let src = rewind_like(&d, name, codec);
@@ -1829,6 +1852,9 @@ mod tests {
     fn smart_trim_keeps_the_source_level_and_profile() {
         let d = tmp("smart-level");
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         fs::create_dir_all(&d).unwrap();
         for (codec, name, extra) in [
             ("av1_nvenc", "obs.mkv", vec!["-level", "9", "-color_range", "pc"]),
@@ -1872,6 +1898,9 @@ mod tests {
     #[ignore]
     fn smart_trim_real_clip() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let Ok(src) = std::env::var("REWIND_TRIM_CLIP") else { return };
         let len = probe(&src).unwrap().duration;
         let t = std::time::Instant::now();
@@ -1907,6 +1936,10 @@ mod tests {
 
     #[test]
     fn probe_reads_tracks_and_length() {
+        crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = tmp("probe");
         let p = probe(&sample(&d, "a.mkv")).unwrap();
         assert_eq!(p.codec, "av1");
@@ -1917,6 +1950,10 @@ mod tests {
 
     #[test]
     fn preview_tracks_extracts_the_mic_track() {
+        crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = tmp("preview");
         let src = sample(&d, "a.mkv");
         let tracks = preview_tracks(&src, &d.join("cache")).unwrap();
@@ -1934,6 +1971,10 @@ mod tests {
 
     #[test]
     fn trims_fast_and_exact_keep_both_audio_tracks() {
+        crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = tmp("trim");
         let src = sample(&d, "a.mkv");
         let fast = trim(&src, 1.0, 4.0, false, &AudioEdit::default()).unwrap();
@@ -1949,6 +1990,10 @@ mod tests {
 
     #[test]
     fn remux_keeps_everything_and_original() {
+        crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = tmp("remux");
         let src = sample(&d, "a.mkv");
         let out = remux_mp4(&src, true).unwrap();
@@ -1964,6 +2009,10 @@ mod tests {
 
     #[test]
     fn remux_without_keep_removes_original_only_after_success() {
+        crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = tmp("remux-nokeep");
         let src = sample(&d, "a.mkv");
         let out = remux_mp4(&src, false).unwrap();
@@ -1974,6 +2023,10 @@ mod tests {
 
     #[test]
     fn export_h264_mixes_audio_into_one_track() {
+        crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = tmp("export");
         let out = export_h264(&sample(&d, "a.mkv"), &AudioEdit::default(), None).unwrap();
         let p = probe(&out).unwrap();
@@ -1996,6 +2049,10 @@ mod tests {
 
     #[test]
     fn export_audio_is_an_mp3_of_the_range() {
+        crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = tmp("export-audio");
         let src = sample(&d, "a.mkv");
         let mixed = export_audio(&src, 0.5, 1.5, None, "", &AudioEdit::default()).unwrap();
@@ -2011,6 +2068,10 @@ mod tests {
 
     #[test]
     fn compress_hits_target_size() {
+        crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = tmp("compress");
         let out = compress(&sample(&d, "a.mkv"), 1, &AudioEdit::default(), None).unwrap();
         let size = fs::metadata(&out).unwrap().len();
@@ -2029,6 +2090,10 @@ mod tests {
 
     #[test]
     fn trim_mutes_and_boosts_the_chosen_track_only() {
+        crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         use crate::audio_edit::TrackEdit;
         let d = tmp("audio-edit");
         let src = sample(&d, "a.mkv");
@@ -2057,6 +2122,10 @@ mod tests {
 
     #[test]
     fn replace_original_swaps_in_the_edit() {
+        crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = tmp("replace");
         let src = sample(&d, "a.mkv");
         let edited = trim(&src, 1.0, 3.0, true, &AudioEdit::default()).unwrap();
@@ -2075,6 +2144,10 @@ mod tests {
 
     #[test]
     fn replace_original_refuses_a_bad_edit() {
+        crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = tmp("replace-bad");
         let src = sample(&d, "a.mkv");
         let bad = d.join("broken.mkv");
@@ -2216,6 +2289,9 @@ mod live_audio_save {
     fn live_audio_save() {
         let Ok(src) = std::env::var("REWIND_AUDIO_CLIP") else { return };
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let dir = std::env::temp_dir().join(format!("hindsight-audio-save-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let copy = dir.join(std::path::Path::new(&src).file_name().unwrap());

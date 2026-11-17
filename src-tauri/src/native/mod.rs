@@ -51,6 +51,9 @@ mod tests {
     #[ignore]
     fn native_pipeline_saves_synced_clip() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let s = crate::settings::Settings { buffer_seconds: 30, ..Default::default() };
         let m = crate::monitors::list().into_iter().find(|m| m.primary).unwrap();
         let (w, h) = crate::engine::output_size(&m, s.output_height);
@@ -80,6 +83,9 @@ mod tests {
     #[ignore]
     fn native_area_records_only_the_area() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let area = crate::settings::Area { x: 0.3, y: 0.1, w: 0.3, h: 0.8 };
         let s = crate::settings::Settings {
             buffer_seconds: 10,
@@ -118,6 +124,9 @@ mod tests {
     #[ignore]
     fn native_encode_all_codecs_and_sizes() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let (adapter, hmon, name) = gpu::find_output(&primary()).expect("output");
         let g = gpu::Gpu::new(&adapter, name).unwrap();
         let cap = capture::Capture::start(&g, hmon, true).unwrap();

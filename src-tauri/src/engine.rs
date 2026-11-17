@@ -1385,6 +1385,9 @@ mod tests {
 
     fn live_run(engine_kind: &str, in_ram: bool) {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let base = std::env::temp_dir().join(format!("rewind-test-live-{engine_kind}-{in_ram}-{}", std::process::id()));
         let clips = base.join("clips");
         let s = Settings {

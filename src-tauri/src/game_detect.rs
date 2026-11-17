@@ -486,6 +486,9 @@ mod tests {
     #[ignore]
     fn live_game_detect() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let Ok(spec) = std::env::var("REWIND_DETECT") else { return };
         let parts: Vec<&str> = spec.split('|').collect();
         let mut model = Model::load(Path::new(parts[0]), Path::new(parts[1])).expect("model");
@@ -549,6 +552,9 @@ mod live_pipeline {
     #[ignore]
     fn live_detect_pipeline() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let Ok(pack) = std::env::var("REWIND_DETECT_PACK") else { return };
         init(PathBuf::from(&pack));
         assert!(installed(), "pack files missing or wrong size");

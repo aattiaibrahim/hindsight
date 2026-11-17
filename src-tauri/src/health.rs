@@ -446,6 +446,9 @@ mod tests {
     #[test]
     fn repair_keeps_the_full_length_of_a_damaged_clip() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = std::env::temp_dir().join(format!("rewind-repair-{}", std::process::id()));
         fs::create_dir_all(&d).unwrap();
         let clip = d.join("a.mp4");
@@ -485,6 +488,9 @@ mod tests {
     #[ignore]
     fn live_health() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let Ok(p) = std::env::var("REWIND_HEALTH_CLIP") else { return };
         let t = std::time::Instant::now();
         let h = check(&p, &|| true).unwrap();
@@ -508,6 +514,9 @@ mod live_heal {
     #[ignore]
     fn live_heal() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let Ok(p) = std::env::var("REWIND_HEAL_CLIP") else { return };
         let before = std::fs::metadata(&p).unwrap().modified().unwrap();
         let h = super::check(&p, &|| true).unwrap();

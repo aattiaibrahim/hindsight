@@ -578,6 +578,9 @@ mod tests {
     #[test]
     fn clips_become_discord_playable_mp4s_that_fit() {
         crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
         let d = std::env::temp_dir().join(format!("rewind-upload-prep-{}", std::process::id()));
         fs::create_dir_all(&d).unwrap();
         let src = d.join("clip.mkv");
