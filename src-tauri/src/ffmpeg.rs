@@ -264,6 +264,9 @@ mod tests {
     #[test]
     fn a_stuck_ffmpeg_is_stopped() {
         init(None);
+        if skip_media_tests() {
+            return;
+        }
         let t = Instant::now();
         // -re reads in real time: this would take 60 s.
         let r = run_limited("ffmpeg", &["-hide_banner", "-nostdin", "-re", "-f", "lavfi", "-i", "anullsrc=d=60", "-f", "null", "-"], Some(Duration::from_secs(2)));
@@ -299,6 +302,9 @@ mod progress_tests {
     #[test]
     fn edits_report_how_far_ffmpeg_has_got() {
         init(None);
+        if skip_media_tests() {
+            return;
+        }
         let out = std::env::temp_dir().join(format!("rewind-progress-{}.mkv", std::process::id()));
         let seen = std::rc::Rc::new(std::cell::RefCell::new(Vec::<f64>::new()));
         let s = seen.clone();
