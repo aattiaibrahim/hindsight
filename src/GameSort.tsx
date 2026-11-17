@@ -43,15 +43,17 @@ export function useDetectStatus() {
 
 function Row({ s, on, game, games, onToggle, onGame }: { s: GameSuggestion; on: boolean; game: string; games: string[]; onToggle: () => void; onGame: (g: string) => void }) {
   const thumb = useThumb(s.path);
+  const [err, setErr] = useState<string | null>(null);
   return (
     <label className={`sort-row ${on ? "" : "off"}`}>
       <input type="checkbox" checked={on} onChange={onToggle} aria-label={`Move ${s.name}`} />
-      <span className="sort-thumb">{thumb && <img src={thumb} alt="" />}</span>
+      <span className={`sort-thumb ${thumb ? "" : "loading"}`}>{thumb && <img src={thumb} alt="" />}</span>
       <span className="sort-main">
         <strong title={s.path}>{s.name}</strong>
         <small className="muted">
           in {s.folder} · {Math.round(s.confidence * 100)}% sure
         </small>
+        {err && <small className="err-text">{err}</small>}
       </span>
       {/* Have a look at the file itself (it's inside a label: don't tick the box too). */}
       <button
@@ -60,7 +62,8 @@ function Row({ s, on, game, games, onToggle, onGame }: { s: GameSuggestion; on: 
         title={`Show ${s.path} in File Explorer`}
         onClick={(e) => {
           e.preventDefault();
-          api.reveal(s.path).catch(() => {});
+          setErr(null);
+          api.reveal(s.path).catch((x) => setErr(errText(x)));
         }}
       >
         Show in folder

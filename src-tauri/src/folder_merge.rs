@@ -36,9 +36,53 @@ pub struct Similar {
     pub suggested: String,
 }
 
-/// The game a folder is for: "SpeciesUnknown-Win64-Shipping" counts as "Species Unknown".
+/// The game a folder is for: "SpeciesUnknown-Win64-Shipping" counts as "Species Unknown",
+/// and "Minecraft Windows Edition" as "Minecraft" (see `without_edition`).
 pub fn folder_key(name: &str) -> String {
-    game_key(&crate::games::tidy_program_name(name).unwrap_or_else(|| name.to_string()))
+    game_key(&without_edition(&crate::games::tidy_program_name(name).unwrap_or_else(|| name.to_string())))
+}
+
+/// Words at the end of a folder name that name an edition, a platform or a store,
+/// not a different game. ("Remastered" and "Remake" are left alone: those are
+/// different releases.)
+const EDITION_ENDINGS: &[&str] = &[
+    "windows 10 edition", "windows edition", "java edition", "bedrock edition", "pc edition", "microsoft store edition",
+    "steam edition", "epic games edition", "game of the year edition", "goty edition", "goty", "definitive edition",
+    "complete edition", "deluxe edition", "ultimate edition", "gold edition", "standard edition", "enhanced edition",
+    "anniversary edition", "for windows 10", "for windows", "for pc", "windows 10", "windows", "launcher", "pc", "(pc)",
+    "early access", "game preview", "beta", "demo", "playtest",
+];
+/// Names at the start that are a publisher's brand on the title.
+const BRAND_STARTS: &[&str] = &["tom clancy's ", "tom clancys ", "sid meier's ", "sid meiers ", "microsoft "];
+
+/// A folder name without its edition, platform or store words, publisher brand, and
+/// trademark signs: "Minecraft Windows Edition", "Minecraft: Java Edition" and
+/// "Minecraft™" are all "minecraft"; "Tom Clancy's Rainbow Six Siege" is "rainbow six siege".
+pub fn without_edition(name: &str) -> String {
+    let mut s: String = name.to_lowercase().replace(['™', '®', '©'], "");
+    s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    for b in BRAND_STARTS {
+        if let Some(rest) = s.strip_prefix(b) {
+            s = rest.to_string();
+        }
+    }
+    // Strip endings one after another ("Minecraft - Windows 10 Edition (PC)").
+    loop {
+        let t = s.trim_end_matches(|c: char| c == ' ' || c == '-' || c == ':' || c == ',' || c == '(' || c == ')').to_string();
+        let Some(rest) = EDITION_ENDINGS.iter().find_map(|e| {
+            t.strip_suffix(e).filter(|r| r.is_empty() || r.ends_with([' ', '-', ':', '(', ','])).map(|r| r.to_string())
+        }) else {
+            s = t;
+            break;
+        };
+        // Never strip a whole name away ("Demo" alone stays "Demo").
+        if rest.trim_end_matches([' ', '-', ':', '(', ',']).is_empty() {
+            s = t;
+            break;
+        }
+        s = rest;
+    }
+    s
 }
 
 fn hidden(name: &str) -> bool {
@@ -318,7 +362,7 @@ mod tests {
         ];
         let found = find_similar(&here, &nas, &[]);
         assert_eq!(found.len(), 2, "{found:?}");
-        let r6 = found.iter().find(|s| s.key == "tomclancysrainbowsixsiege").unwrap();
+        let r6 = found.iter().find(|s| s.key == "rainbowsixsiege").unwrap();
         assert_eq!(r6.suggested, "Tom Clancy's Rainbow Six  Siege");
         assert_eq!(r6.names[1], Spelling { name: "Tom Clancys Rainbow Six Siege".into(), here: 27, nas: 0 });
         let val = found.iter().find(|s| s.key == "valorant").unwrap();
@@ -340,13 +384,13 @@ mod tests {
         put(&nas.join("Tom Clancys Rainbow Six Siege/b.mkv"), 11); // already copied by the sync
         let roots = vec![pc.clone(), nas.clone()];
         let target = "Tom Clancy's Rainbow Six  Siege";
-        let plan = plan(&roots, "tomclancysrainbowsixsiege", target).unwrap();
+        let plan = plan(&roots, "rainbowsixsiege", target).unwrap();
         assert_eq!(plan.label, "Tom Clancys Rainbow Six Siege");
 
         let log = pc.join("merge.jsonl");
         let out = consolidate::run(&plan, &log, |_, _| {});
         assert!(out.failed.is_empty(), "{:?}", out.failed);
-        remove_empty(&roots, "tomclancysrainbowsixsiege", target);
+        remove_empty(&roots, "rainbowsixsiege", target);
 
         // This PC had no rival folder: renamed as a whole.
         assert_eq!(names(&pc), vec!["Tom Clancy's Rainbow Six  Siege", "merge.jsonl"]);
@@ -363,6 +407,25 @@ mod tests {
         assert_eq!(names(&nas.join(target)), vec!["a.mkv", "c.mov"]);
         let _ = fs::remove_dir_all(&pc);
         let _ = fs::remove_dir_all(&nas);
+    }
+
+    #[test]
+    fn editions_platforms_and_brands_are_the_same_game() {
+        let same = |a: &str, b: &str| assert_eq!(folder_key(a), folder_key(b), "{a} / {b}");
+        same("Minecraft", "Minecraft Windows Edition");
+        same("Minecraft", "Minecraft: Java Edition");
+        same("Minecraft", "Minecraft - Windows 10 Edition (PC)");
+        same("Minecraft", "Minecraft™");
+        same("Rainbow Six Siege", "Tom Clancy's Rainbow Six  Siege");
+        same("Civilization VI", "Sid Meier's Civilization VI");
+        same("The Witcher 3 Wild Hunt", "The Witcher 3: Wild Hunt - Game of the Year Edition");
+        same("Fortnite", "Fortnite Launcher");
+        let differ = |a: &str, b: &str| assert_ne!(folder_key(a), folder_key(b), "{a} / {b}");
+        differ("Resident Evil 3", "Resident Evil 3 Remake");
+        differ("Halo 2", "Halo 3");
+        differ("Counter-Strike 2", "Counter-strike Global Offensive");
+        assert_eq!(without_edition("Demo"), "demo");
+        assert_eq!(without_edition("PC"), "pc");
     }
 
     #[test]

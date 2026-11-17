@@ -429,13 +429,16 @@ pub fn suggestions(clips: &[crate::library::ClipFile], dismissed: &[String]) -> 
 }
 
 /// The moves that put each chosen clip in `<clips>/<Game>/`, never overwriting.
-pub fn plan(clips_dir: &Path, picks: &[(String, String)]) -> crate::consolidate::Plan {
+/// A clip that's only on the NAS moves into the game's folder there (a rename on the
+/// NAS, not a copy back to this PC).
+pub fn plan(clips_dir: &Path, nas_dir: &Path, picks: &[(String, String)]) -> crate::consolidate::Plan {
     let mut plan = crate::consolidate::Plan { label: "Sorted by game".into(), ..Default::default() };
     let mut taken = std::collections::HashSet::new();
     for (path, game) in picks {
         let from = PathBuf::from(path);
         let Some(name) = from.file_name() else { continue };
-        let dir = clips_dir.join(crate::consolidate::safe_name(game));
+        let on_nas = !nas_dir.as_os_str().is_empty() && crate::library::tidy_path(path).to_lowercase().starts_with(&crate::library::tidy_path(&nas_dir.to_string_lossy()).to_lowercase());
+        let dir = if on_nas { nas_dir } else { clips_dir }.join(crate::consolidate::safe_name(game));
         let mut to = dir.join(name);
         let stem = from.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let ext = from.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();

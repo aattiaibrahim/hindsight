@@ -1410,7 +1410,24 @@ async fn game_suggestions(app: AppHandle) -> Result<Vec<game_detect::Suggestion>
     blocking(move || {
         let linked = linked_roots(&s);
         let all = library::scan_all(PathBuf::from(&s.clips_dir).as_path(), &s.external_files, &[], &linked, &s.nas_dir);
-        Ok(game_detect::suggestions(&all, &s.detect_dismissed))
+        // A clip looked at here may since have been freed up (only on the NAS now) or
+        // moved: point at its NAS copy, or leave it out. A suggestion for a file that
+        // isn't there showed no picture, and Show in folder and Move did nothing.
+        let clips_dir = PathBuf::from(&s.clips_dir);
+        Ok(game_detect::suggestions(&all, &s.detect_dismissed)
+            .into_iter()
+            .filter_map(|mut g| {
+                if Path::new(&g.path).is_file() {
+                    return Some(g);
+                }
+                let rel = Path::new(&g.path).strip_prefix(&clips_dir).ok()?;
+                let on_nas = Path::new(&s.nas_dir).join(rel);
+                (!s.nas_dir.is_empty() && on_nas.is_file()).then(|| {
+                    g.path = on_nas.to_string_lossy().into_owned();
+                    g
+                })
+            })
+            .collect())
     })
     .await
 }
@@ -1422,7 +1439,7 @@ async fn apply_game_sort(app: AppHandle, picks: Vec<(String, String)>) -> Result
     let dir = moves_dir(&app)?;
     let a = app.clone();
     let out = blocking(move || {
-        let plan = game_detect::plan(std::path::Path::new(&s.clips_dir), &picks);
+        let plan = game_detect::plan(std::path::Path::new(&s.clips_dir), std::path::Path::new(&s.nas_dir), &picks);
         let _ = std::fs::create_dir_all(&dir);
         let log = dir.join(format!("{}-Sorted_by_game.jsonl", chrono::Local::now().format("%Y%m%d-%H%M%S")));
         Ok(consolidate::run(&plan, &log, |done, total| {
