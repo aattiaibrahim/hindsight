@@ -39,7 +39,7 @@ function nasLine(s: Settings, n: NasState | null) {
   if (!n || !n.enabled) return "Starting…";
   if (!n.reachable) return `Can't reach it right now. Clips keep saving here and copy over once it's back. (${n.lastError ?? ""})`;
   if (n.paused)
-    return `Paused while you play${n.pending ? ` (${n.pending} clip${n.pending === 1 ? "" : "s"} waiting)` : ""}. Copying starts again once the game is closed.`;
+    return `Paused while you play${n.pausedFor ? ` ${n.pausedFor}` : ""}${n.pending ? ` (${n.pending} clip${n.pending === 1 ? "" : "s"} waiting)` : ""}. Copying starts again once the game is closed.`;
   if (n.copying) return n.checking ? "Checking the copy matches the original…" : "Copying…";
   const parts = [n.pending ? `${n.pending} clip${n.pending === 1 ? "" : "s"} waiting to copy` : "Everything is copied"];
   if (n.lastSync) parts.push(`checked ${ago(n.lastSync)}`);

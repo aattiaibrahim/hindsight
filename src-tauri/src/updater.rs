@@ -133,7 +133,10 @@ pub fn start(app: AppHandle) {
 /// Not recording and no game in front.
 pub fn safe_to_restart(app: &AppHandle) -> bool {
     let st = app.state::<crate::AppState>().engine.status();
-    !st.recording && st.game.is_none() && crate::engine::saves_in_progress() == 0
+    // Not while a clip is copying to the NAS or clips are moving into Hindsight either:
+    // nothing would be lost (copies are checked before they count), but it'd start over.
+    let nas = crate::nas::state();
+    !st.recording && st.game.is_none() && crate::engine::saves_in_progress() == 0 && nas.copying.is_none() && !crate::move_running()
 }
 
 async fn tokio_sleep(d: Duration) {

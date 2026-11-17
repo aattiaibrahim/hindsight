@@ -234,6 +234,16 @@ pub fn current_game() -> Option<String> {
     (s.at.elapsed() < STICKY && still_running(s.pid)).then(|| s.game.clone())
 }
 
+/// The game `game_running` means: the one in front, or the last one played if it's
+/// still open. For saying what something is waiting for.
+pub fn running_game() -> Option<String> {
+    if let Some(g) = foreground_game() {
+        return Some(g);
+    }
+    let last = LAST.lock().unwrap();
+    last.as_ref().filter(|s| still_running(s.pid)).map(|s| s.game.clone())
+}
+
 /// Is a game being played: in front, or still running after you tabbed out
 /// of it (however long ago). For work that should wait until you're done.
 pub fn game_running() -> bool {

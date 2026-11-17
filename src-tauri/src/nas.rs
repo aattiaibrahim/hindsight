@@ -77,6 +77,8 @@ pub struct NasState {
     pub connecting: bool,
     /// What happened lately, newest first (the status bar's sync panel).
     pub recent: Vec<NasEvent>,
+    /// The game it's waiting for while paused (None: a clip being saved or recorded)
+    pub paused_for: Option<String>,
 }
 
 /// One line of the sync panel's history.
@@ -118,7 +120,13 @@ fn note_changes(before: &NasState, after: &mut NasState) {
         lines.push(if after.reachable { ("ok", "Connected to the NAS again".into()) } else { ("bad", "Lost the connection to the NAS".into()) });
     }
     if !before.paused && after.paused {
-        lines.push(("info", "Paused while you play".into()));
+        lines.push((
+            "info",
+            match &after.paused_for {
+                Some(g) => format!("Paused while you play {g}"),
+                None => "Paused while a clip is saved".into(),
+            },
+        ));
     }
     if before.paused && !after.paused && !after.stopped {
         lines.push(("info", "Game closed: syncing again".into()));
@@ -1325,10 +1333,11 @@ pub fn start(app: AppHandle) {
                 continue;
             }
             // A game waits the copying until you're done, unless you chose to sync anyway.
-            let gaming = !s.nas_sync_while_gaming && crate::games::game_running();
-            if gaming || app_busy {
+            let game = if s.nas_sync_while_gaming { None } else { crate::games::running_game() };
+            if game.is_some() || app_busy {
                 publish(&app, |st| {
                     st.enabled = true;
+                    st.paused_for = game;
                     st.paused = true;
                     st.stopped = false;
                     st.copying = None;

@@ -451,6 +451,11 @@ fn move_status_set(app: &AppHandle, f: impl FnOnce(&mut MoveStatus)) {
     let _ = app.emit("move-status", snap);
 }
 
+/// Is a move into Hindsight running in the background (the updater waits for it)?
+pub(crate) fn move_running() -> bool {
+    MOVE_STATUS.lock().unwrap().as_ref().is_some_and(|s| s.running)
+}
+
 #[tauri::command]
 fn move_status() -> Option<MoveStatus> {
     MOVE_STATUS.lock().unwrap().clone()

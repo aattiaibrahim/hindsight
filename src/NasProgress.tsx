@@ -42,7 +42,7 @@ export function nasActivity(n: NasState | null): { text: string; pct: number | n
     const count = n.totalFiles ? ` · ${Math.min(n.doneFiles + 1, n.totalFiles)} of ${n.totalFiles}` : "";
     return { text: `${n.checking ? "Checking the NAS copy" : "Copying to the NAS"}${count}${pct != null ? ` · ${pct}%` : ""}`, pct, busy: true };
   }
-  if (n.paused && n.pending) return { text: `${n.pending} to copy after your game`, pct: null, busy: false };
+  if (n.paused && n.pending) return { text: `${n.pending} to copy after ${n.pausedFor ?? "your game"}`, pct: null, busy: false };
   if (n.pending) return { text: `${n.pending} waiting for the NAS`, pct: null, busy: false };
   return { text: "NAS up to date", pct: null, busy: false };
 }
@@ -64,7 +64,7 @@ export function NasProgress({ n, compact = false }: { n: NasState | null; compac
   const pctText = pct >= 10 || pct === 0 ? Math.floor(pct) : pct.toFixed(1);
   const clipsLeft = n.totalFiles ? n.totalFiles - n.doneFiles : n.pending;
   const state = n.paused
-    ? "Paused while you play"
+    ? `Paused while you play${n.pausedFor ? ` ${n.pausedFor}` : ""}`
     : n.checking
       ? "Checking the copy"
       : n.copying

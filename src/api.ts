@@ -227,6 +227,8 @@ export type NasState = {
   connecting?: boolean;
   /** What happened lately, newest first (nas::NasEvent). */
   recent?: NasEvent[];
+  /** The game the copying is waiting for */
+  pausedFor?: string | null;
   enabled: boolean;
   reachable: boolean;
   pending: number;
