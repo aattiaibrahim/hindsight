@@ -1,6 +1,7 @@
 mod app_audio;
 mod audio_sessions;
 mod scrub;
+mod session_end;
 mod prepare;
 mod game_icons;
 mod duplicates;
@@ -2007,6 +2008,7 @@ pub fn run() {
             }
             control::start(handle.clone());
             media_server::start();
+            session_end::start(handle.clone());
 
             if let Err(e) = apply_hotkeys(&handle, &s.hotkey, &s.record_hotkey) {
                 crate::log!("{e}");

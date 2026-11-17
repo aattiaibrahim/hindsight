@@ -6,7 +6,8 @@
 
 <p align="center">
   <b>The lightweight game clipper for Windows.</b><br />
-  Always-on replay buffer on your NVIDIA GPU, a frame-exact trimmer, and one-click sharing that plays inside Discord.
+  Always-on replay buffer on your NVIDIA GPU, a frame-exact trimmer, and one-click sharing that plays inside Discord.<br />
+  Free and open source. No ads, no account, no watermark, no tracking: your clips stay on your PC and your NAS.
 </p>
 
 <p align="center">
@@ -65,27 +66,32 @@
 - **Tray app**: left-click opens a quick flyout (save 30 s / 60 s / full, monitor mode, last clips); right-click shows a menu. Closing the window keeps it running in the tray.
 - **Launch with Windows** (starts in the tray), single instance.
 - **Library**: clips grouped by day and game, with search, thumbnails, codec and length.
-  - Each game shows its own logo (its program's icon, found from the game you played, Steam, Epic, Battle.net and Riot installs). Games saved under different spellings, or folders named after a program file ("SpeciesUnknown-Win64-Shipping"), are offered a merge or a tidy name.
-  - **On this day**: clips from this date in earlier years ("1 year ago today") at the top, played straight through in a slideshow.
+  - Each game shows its own logo (its program's icon, found from the game you played, Steam, Epic, Battle.net and Riot installs). Games saved under different spellings are offered a merge: case, spaces, punctuation, editions and platforms ("Minecraft Windows 10 Edition", "Java Edition", "Game of the Year Edition"), publisher names ("Tom Clancy's") and folders named after a program file ("SpeciesUnknown-Win64-Shipping") don't make a different game. Merging brings subfolders along.
+  - Clips in folders inside a game's folder (`<Game>\my best plays\`, up to three deep) count as that game's, here and on the NAS.
+  - **On this day**: clips from this date in earlier years ("1 year ago today") at the top; open one to see that day's clips.
+  - Sound-only files (some recorders save a clip with no video) are marked **No video** rather than damaged.
   - Only the clips near the screen load, newest requests first, and thumbnails and lengths are kept on the app's own folder, so big libraries and clips on a hard drive open quickly. **Prepare thumbnails ahead of time** makes them all in the background while you're not gaming.
   - A NAS icon on each clip: a check when it's safely on the NAS, a minus when it isn't copied yet, an arrow when it's only on the NAS.
 - **NAS library** (Settings → Library & NAS):
   - Clips save to this PC first, so saving stays instant and works offline. They then copy in the background to a network folder in the same `<Game>\` layout. Each copy is read back from the NAS and checked byte for byte (SHA-256) against the original before it counts.
   - Several PCs can share one NAS: file names include the PC's name, and clips from other PCs show up in the library.
-  - Copying waits until your game is closed (in front or tabbed out of) and stops between files if one starts, so it never costs frames.
+  - Copying waits until your game is closed (in front or tabbed out of) and stops between files if one starts, so it never costs frames. **Sync while you play** keeps it going instead.
+  - The status bar shows what it's doing, which game it's waiting for (with its logo) and when it last synced; click it for Sync now, Stop and the recent activity.
+  - A copy goes to a hidden file first and counts only once it's checked, so a crash, a restart, an update or a pulled cable never costs a clip: that clip is copied again, and leftovers are cleaned up at start. Updates wait until a copy is done.
   - Optionally, the local copy goes to the Recycle Bin once its NAS copy is checked identical.
   - Progress shows in the sidebar and in Settings: clips and GB left, percent, speed and time left.
   - Edits stay in step: a clip you trim, heal or export in place replaces its NAS copy (verified the same way); the old NAS version is kept in a hidden `.hindsight-replaced` folder for 30 days. Clips that are only on the NAS are never replaced, since a network folder has no Recycle Bin.
   - **Hindsight Server** runs on the NAS (TrueNAS or any Docker host): the library in any browser at home, with share links, montages and "On this day". See [server/README.md](server/README.md).
   - Other recorders' clips (Medal, NVIDIA, OBS) aren't copied until you move them into Hindsight's folders; the setting says so and has a button for it.
 - **Clips from other recorders**: Medal, OBS, NVIDIA, Ascent, AMD ReLive, Xbox Game Bar, Outplayed, Insights Capture, SteelSeries Moments and Streamlabs folders are found (from their own settings where they keep them) and shown in the library in place, grouped by game. Nothing is moved or copied. Any other folder can be added too.
-- **Duplicates** (Cleanup): the same clip saved in two places (a copy instead of a move, Medal's Clips and Imported, Ascent's Clips and Downloads) is found by size and a fingerprint of its start and end, confirmed by reading it whole. Pick the copy to keep; the others go to the Recycle Bin.
+- **Duplicates** (Cleanup): the same clip saved in two places (a copy instead of a move, Medal's Clips and Imported, Ascent's Clips and Downloads) is found by size and a fingerprint of its start and end, confirmed by reading it whole. OBS remuxes (the MKV next to the MP4 made from it, even named a few seconds apart) and smaller re-encodes are found too. One button removes every extra copy (the better one is kept), or review them one by one side by side. The search is remembered until your clips change and never runs while you play.
 - **Move into Hindsight**: tidies a linked folder into Hindsight's layout (`<Game>\<Game> <date time>`), merging game names across spellings.
-  - Same-drive moves are instant renames. Other drives copy, check the size, and only then remove the original.
+  - Same-drive moves are instant renames. Other drives copy, read the copy back and compare it byte for byte, and only then remove the original.
+  - It runs in the background with progress and Stop in the status bar, and waits while you play or a clip is saved.
   - Every move is logged as it happens, so **Undo** puts everything back, even after a crash.
 - **Share** (Share on a clip, or the Share box in Studio; set up under Settings → Sharing):
   - Uploads the clip and copies a link. The clip is first turned into an H.264 MP4 that plays inside Discord for everyone, no Nitro needed.
-  - **Catbox** (free, no account, permanent, up to 200 MB) and **Litterbox** (free, temporary, up to 1 GB) give direct links that play inline in Discord.
+  - **Catbox** (free, no account, permanent, up to 200 MB) and **Litterbox** (free, temporary, up to 1 GB) give direct links that play inline in Discord. A clip over 200 MB starts on Litterbox; Catbox isn't offered for it.
   - A **Discord webhook** posts the clip straight into a channel, compressed under Discord's 10 MB. Links from the other services can be posted there too.
   - **Streamable** needs an account.
   - Optional auto-upload of every new clip, ShareX-style.
@@ -96,9 +102,10 @@
 - **Mic volume** (Settings → Recording → Audio): makes the microphone louder or quieter for everything you record, ±20 dB, applied straight away without restarting the buffer.
 - **Damaged section**: every clip the health check finds broken, in one place, with the same date timeline as the library. A badge on the sidebar shows how many there are.
 - **Studio**: preview, drag in/out handles, one frame-exact **Save trim** that re-encodes only the moment before the first keyframe (under a second) and copies the rest untouched, so it takes a few seconds and keeps full quality.
+  - **Smooth scrubbing**: clips from other recorders that keep keyframes far apart (dragging through them looked frozen or torn) get a preview copy made on the GPU with a keyframe every half second, kept in a cache. Edits still use the original.
 - **Per-file tools**: change to .mp4 (instant, lossless), export H.264 (plays everywhere), audio only (MP3), compress to 10/25/50/100 MB. Originals are never changed.
-- **Montage** (the Montage page): pick a length (30 s to 10 min), which clips (random, a date range, edited or unedited ones), a game, and how much of each clip (the end, where a replay's action usually is, the middle or the start). Then edit it on a Premiere-style timeline: a preview that plays the whole montage with your song, drag clips to reorder, drag their edges to trim, a music track with the song's waveform, and volumes for the clips and the song. It's saved as an H.264 MP4 in `Videos\Hindsight\Montages`.
-- **Beta tools** (Settings → About): **Run diagnostics** saves a text file in Downloads with your PC, GPU and driver, Hindsight's settings, status and recent messages (your Windows user name, NAS name, email and webhook are left out) to attach to a bug report. **Report a problem with this clip** in the editor adds that clip's details. A thank-you list for the early users and beta testers.
+- **Montage** (the Montage page): pick a length (30 s to 10 min), which clips (random, a date range, trimmed or untrimmed ones), a game, and how much of each clip (the end, where a replay's action usually is, the middle or the start). Then edit it on a timeline: a preview with play, previous and next clip (Space plays), Add clips, drag clips to reorder, drag their edges to trim, a music track with the song's waveform, a volume for each clip and the song, and cuts, fades through black or crossfades between clips. It's saved as an H.264 MP4, 720p to 4K at up to 120 fps, in `Videos\Hindsight\Montages`.
+- **Beta tools** (Settings → About): **Run diagnostics** saves a text file in Downloads with your PC, GPU and driver, every audio output and what's playing on it, Hindsight's settings, folders, status and recent messages (and for a clip: its tracks, how loud each is, and how far apart its keyframes are) (your Windows user name, NAS name, email and webhook are left out) to attach to a bug report. **Report a problem with this clip** in the editor adds that clip's details. A thank-you list for the early users and beta testers.
 
 - **Audio**: desktop sound (track 1), the microphone (mono by default, track 2) and Discord on its own track (track 3, left out of desktop sound, Windows 10 2004 or later), all on by default. Synced to video within about 10 ms. Exports and compresses mix the tracks into one.
 - **Replace original** option: trims, exports and compresses overwrite the edited file, and the old one goes to the Recycle Bin.
@@ -152,6 +159,8 @@ Clip resolution can be **same as screen** (captured fully on the GPU), 4K, 1440p
 - Settings are written atomically. A corrupted settings file falls back to defaults and is kept as `settings.json.bak`.
 - Settings values are clamped to usable ranges. If a hotkey can't be registered, the previous one is restored.
 - Clip names never overwrite an existing file. Saving needs at least 300 MB free.
+- Every file is written under a hidden name and only gets its real one when it's complete: saved clips, edits, NAS copies and moves. A shutdown or crash mid-write leaves your files as they were, and leftovers are cleaned up at the next start.
+- When Windows shuts down, signs out or an installer needs Hindsight closed, it finishes a recording or a save and quits (it stays in the tray otherwise), and starts nothing new once Windows is shutting down.
 - ffmpeg runs in a job object, so it can't outlive the app.
 
 ## Tests
