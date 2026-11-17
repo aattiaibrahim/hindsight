@@ -84,7 +84,7 @@ export function SyncStatus({ nas, onSyncWhilePlaying }: { nas: NasState | null; 
         title="NAS sync: what it's doing and when it last synced"
       >
         <SyncIcon look={look} />
-        {activity.text}
+        <span className="sb-text">{activity.text}</span>
         {activity.pct != null && (
           <span className="sb-meter" aria-hidden="true">
             <i style={{ width: `${activity.pct}%` }} />

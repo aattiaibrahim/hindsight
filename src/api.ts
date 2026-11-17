@@ -220,7 +220,7 @@ export type ClipFile = {
   source: string;
 };
 
-export type MoveStatus = { running: boolean; verb: string; label: string; done: number; total: number; paused: boolean; stopping: boolean; finished: string | null };
+export type MoveStatus = { running: boolean; verb: string; label: string; done: number; total: number; paused: boolean; pausedFor?: string | null; forced?: boolean; stopping: boolean; finished: string | null };
 export type NasEvent = { at: number; kind: "ok" | "info" | "bad"; text: string; game?: string };
 export type NasState = {
   /** Just started: still looking for the NAS. */
@@ -611,6 +611,8 @@ export const api = {
   /** A move into Hindsight running in the background (or the last one's result). */
   moveStatus: () => invoke<MoveStatus | null>("move_status"),
   stopMove: () => invoke<void>("stop_move"),
+  /** Carry on with the background move while a game is open */
+  moveAnyway: () => invoke<void>("move_anyway"),
   /** A copy of the clip that scrubs smoothly (keyframes close together), or null when it doesn't need one. */
   smoothCopy: (path: string) => invoke<string | null>("smooth_copy", { path }),
   /** Stop (true) or resume (false) NAS copying and freeing up. */

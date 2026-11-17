@@ -435,12 +435,26 @@ struct MoveStatus {
     total: usize,
     /// Waiting: a game is running, or a clip is being saved or recorded
     paused: bool,
+    /// The game it's waiting for (None: a save or a recording)
+    paused_for: Option<String>,
+    /// "Move anyway" was pressed: it no longer waits for games
+    forced: bool,
     stopping: bool,
     /// When it's over: what happened ("Moved 810 clips", "Stopped: 120 moved…")
     finished: Option<String>,
 }
 static MOVE_STATUS: Mutex<Option<MoveStatus>> = Mutex::new(None);
 static MOVE_STOP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// "Move anyway": don't wait for a game (a game left open in the background kept a
+/// move waiting with nothing being played).
+static MOVE_FORCE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Carry on with the background move while a game is open (it still waits for saves).
+#[tauri::command]
+fn move_anyway(app: AppHandle) {
+    MOVE_FORCE.store(true, std::sync::atomic::Ordering::SeqCst);
+    move_status_set(&app, |s| s.forced = true);
+}
 
 fn move_status_set(app: &AppHandle, f: impl FnOnce(&mut MoveStatus)) {
     let snap = {
@@ -479,6 +493,7 @@ fn run_in_background(app: &AppHandle, plan: &consolidate::Plan, log: &Path, verb
         return out;
     }
     MOVE_STOP.store(false, std::sync::atomic::Ordering::SeqCst);
+    MOVE_FORCE.store(false, std::sync::atomic::Ordering::SeqCst);
     let total = plan.moves.len();
     move_status_set(app, |s| {
         *s = MoveStatus { running: true, verb: verb.into(), label: plan.label.clone(), total, ..Default::default() };
@@ -496,10 +511,14 @@ fn run_in_background(app: &AppHandle, plan: &consolidate::Plan, log: &Path, verb
                 return consolidate::Hold::Stop;
             }
             let st = h.state::<AppState>();
-            let busy = games::game_running() || st.engine.is_recording() || engine::saves_in_progress() > 0;
-            let was = MOVE_STATUS.lock().unwrap().as_ref().is_some_and(|s| s.paused);
-            if busy != was {
-                move_status_set(&h, |s| s.paused = busy);
+            let game = if MOVE_FORCE.load(std::sync::atomic::Ordering::SeqCst) { None } else { games::running_game() };
+            let busy = game.is_some() || st.engine.is_recording() || engine::saves_in_progress() > 0;
+            let (was, was_for) = MOVE_STATUS.lock().unwrap().as_ref().map(|s| (s.paused, s.paused_for.clone())).unwrap_or_default();
+            if busy != was || game != was_for {
+                move_status_set(&h, |s| {
+                    s.paused = busy;
+                    s.paused_for = game.clone();
+                });
             }
             if busy { consolidate::Hold::Wait } else { consolidate::Hold::Go }
         },
@@ -2128,7 +2147,8 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            move_status,
+            move_anyway,
+move_status,
 stop_move,
 smooth_copy,
 get_settings,

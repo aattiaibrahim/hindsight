@@ -1131,7 +1131,10 @@ p.small { font-size: 12px; margin: 0; }
 .song-name { position: absolute; left: 8px; top: 5px; font-size: 11px; color: #c9f7dc; }
 .song-x { position: absolute; right: 4px; top: 3px; border: 0; background: rgba(0, 0, 0, 0.4); color: #fff; border-radius: 4px; cursor: pointer; }
 .me-add-song { align-self: center; }
-.me-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #ff4d4d; pointer-events: none; }
+.me-playhead { position: absolute; top: 0; bottom: 0; width: 2px; background: #ff4d4d; cursor: ew-resize; touch-action: none; }
+/* A wider grab area than the 2 px line. */
+.me-playhead::after { content: ""; position: absolute; top: 0; bottom: 0; left: -6px; width: 14px; }
+.me-ruler { touch-action: none; }
 .me-playhead::before { content: ""; position: absolute; top: 0; left: -5px; border: 6px solid transparent; border-top-color: #ff4d4d; }
 
 /* Notification center */
@@ -1481,3 +1484,19 @@ p.small { font-size: 12px; margin: 0; }
 .sb-move svg { flex: none; }
 .sb-move-on { color: var(--accent); }
 .sync-recent li .game-icon { transform: translateY(2px); }
+
+/* The status bar never runs off the window: the items on the left give up room
+   (their text is cut with "…"), Record and Save clip keep their full size, and on
+   narrow windows the least important bits go. */
+.statusbar > * { flex-shrink: 0; }
+.statusbar .sb-item, .statusbar .sb-sync, .statusbar .sb-buffer { flex-shrink: 1; min-width: 0; }
+.sb-sync > .sb-item, .sb-buffer > .sb-item { max-width: 100%; }
+.sb-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sb-item > svg, .sb-item > .dot, .sb-item > .sb-spin { flex: none; }
+@media (max-width: 1250px) { .statusbar .sb-meter, .statusbar .sb-version { display: none; } }
+@media (max-width: 1050px) { .statusbar .sb-enc { display: none; } }
+
+/* Montage: a saved draft, at the top of the setup. */
+.me-draft { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: var(--raised); margin-bottom: 12px; }
+.me-draft > div { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.me-draft small { font-size: 12px; }

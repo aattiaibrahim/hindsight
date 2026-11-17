@@ -75,7 +75,7 @@ export function StatusBar({
       <div className="sb-buffer" ref={wrap}>
         <button className={`sb-item ${problem ? "bad" : ""}`} onClick={() => setOpen((o) => !o)} aria-expanded={open} title="Buffer details">
           <span className={`dot ${bufferOn ? "on" : problem ? "err" : ""}`} />
-          {bufferText}
+          <span className="sb-text">{bufferText}</span>
         </button>
         {open && (
           <div className="sb-pop" role="dialog" aria-label="Buffer details">
@@ -96,7 +96,7 @@ export function StatusBar({
         )}
       </div>
       {on && (
-        <span className="sb-item quiet" title={customArea ? `Recording only part of the screen: ${status!.width} × ${status!.height}` : undefined}>
+        <span className="sb-item quiet sb-enc" title={customArea ? `Recording only part of the screen: ${status!.width} × ${status!.height}` : undefined}>
           {codecLabel(status!.encoder)} · {status!.height}p{status!.fps}
           {customArea && " · part of the screen"}
         </span>
@@ -111,7 +111,7 @@ export function StatusBar({
       <MoveStatusItem />
       <span style={{ flex: 1 }} />
       {err && <span className="sb-item bad">{err}</span>}
-      {version && <span className="sb-item quiet">v{version} beta</span>}
+      {version && <span className="sb-item quiet sb-version">v{version} beta</span>}
       <RecordButton status={status} hotkey={recordHotkey} className="small" />
       <button className="btn small primary" disabled={!bufferOn || busy} onClick={save} title={`Save the last ${status ? fmtDuration(status.bufferSeconds) : "moments"} (${hotkey})`}>
         {busy ? "Saving…" : `Save clip · ${hotkey}`}

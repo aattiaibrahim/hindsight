@@ -2,6 +2,7 @@ import { Select } from "./Select";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { api, ClipFile, errText, fmtDb, fmtTime, Waveform, mediaSrc } from "./api";
 import { useMediaReady } from "./hooks";
 import { Pause, Play, Plus, SkipBack, SkipForward } from "lucide-react";
@@ -37,6 +38,22 @@ const PER_CLIP: [number, string][] = [
 const EDIT_MARK = /\((trim|H\.264|rescued|audio|\d+ MB)( \d+)?\)|\(trim\)/i;
 
 let nextId = 1;
+
+/** Shuffled, then taking turns between games (one from each in turn), so a game
+ *  with most of the clips doesn't fill the whole montage. */
+function spread(list: ClipFile[]) {
+  const key = (c: ClipFile) => c.folder.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const groups = new Map<string, ClipFile[]>();
+  for (const c of shuffle(list)) {
+    const k = key(c);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(c);
+  }
+  const queues = shuffle([...groups.values()]);
+  const out: ClipFile[] = [];
+  while (queues.some((q) => q.length)) for (const q of queues) if (q.length) out.push(q.shift()!);
+  return out;
+}
 
 function shuffle<T>(list: T[]) {
   const a = [...list];
@@ -95,7 +112,8 @@ function Setup({ clips, untrimmed, onCreate }: { clips: ClipFile[]; untrimmed: C
 
   const create = async () => {
     setBusy(true);
-    const order = source === "random" ? shuffle(pool) : [...pool].sort((a, b) => a.modified - b.modified);
+    // A time frame plays in order; everything else is a fair mix across your games.
+    const order = source === "range" ? [...pool].sort((a, b) => a.modified - b.modified) : spread(pool);
     const out: Piece[] = [];
     for (const clip of order) {
       if (total(out) >= length) break;
@@ -374,6 +392,15 @@ function Editor({
   useEffect(() => {
     if (mediaReady && !playing) show(Math.min(time, Math.max(0, length - 0.05)), false);
   }, [mediaReady, pieces]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Volumes apply straight away while it plays (they used to wait for the next play).
+  useEffect(() => {
+    const v = video.current;
+    const at = locate(time);
+    if (v && at) v.volume = gainOf(pieces[at.i]);
+  }, [clipDb, pieces]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (audio.current) audio.current.volume = Math.min(1, Math.pow(10, songDb / 20));
+  }, [songDb]);
   // The start of each piece on the montage's clock, for jumping clip to clip.
   const starts = useMemo(() => {
     let acc = 0;
@@ -457,6 +484,38 @@ function Editor({
       }
     };
     const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  // Drag the playhead (or along the ruler) to move through the montage.
+  const area = useRef<HTMLDivElement>(null);
+  const scrub = (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const at = (x: number) => {
+      const r = area.current?.getBoundingClientRect();
+      return r ? (x - r.left - 36) / px : 0;
+    };
+    seek(at(e.clientX));
+    // At most every 40 ms: each seek reloads a frame from the clip.
+    let last = 0;
+    let pending = 0;
+    const move = (ev: PointerEvent) => {
+      clearTimeout(pending);
+      const wait = 40 - (performance.now() - last);
+      const go = () => {
+        last = performance.now();
+        seek(at(ev.clientX));
+      };
+      if (wait <= 0) go();
+      else pending = window.setTimeout(go, wait);
+    };
+    const up = () => {
+      clearTimeout(pending);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };
@@ -637,7 +696,7 @@ function Editor({
 
       <div className="me-timeline">
         <div className="row me-tl-bar">
-          <button className="btn small" onClick={onBack} title="Make a new montage (this one is let go)">
+          <button className="btn small" onClick={onBack} title="Leave this montage (you can save it as a draft)">
             New montage…
           </button>
           <div className="me-pick-wrap">
@@ -699,14 +758,8 @@ function Editor({
           </div>
         )}
         <div className="me-scroll">
-          <div style={{ width, position: "relative" }}>
-            <div
-              className="me-ruler"
-              onPointerDown={(e) => {
-                const r = e.currentTarget.getBoundingClientRect();
-                seek((e.clientX - r.left) / px);
-              }}
-            >
+          <div style={{ width, position: "relative" }} ref={area}>
+            <div className="me-ruler" onPointerDown={scrub}>
               {ticks.map((t) => (
                 <span key={t} style={{ left: t * px }}>
                   {fmtTime(t).replace(/\.\d+$/, "")}
@@ -747,7 +800,7 @@ function Editor({
                 )}
               </div>
             </div>
-            <div className="me-playhead" style={{ left: 36 + time * px }} />
+            <div className="me-playhead" style={{ left: 36 + time * px }} onPointerDown={scrub} title="Drag to move through the montage" />
           </div>
         </div>
       </div>
@@ -759,22 +812,131 @@ function Editor({
 // Kept while you pop into the clip editor and come back.
 let kept: Piece[] | null = null;
 
+// A montage saved to pick up later (Back → Save draft): the clips and their in and out
+// points, kept on this PC.
+type Draft = { savedAt: number; pieces: { path: string; start: number; end: number; length: number; volumeDb?: number }[] };
+const DRAFT_KEY = "rewind.montageDraft";
+function readDraft(): Draft | null {
+  try {
+    const d = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? "null") as Draft | null;
+    return d && Array.isArray(d.pieces) && d.pieces.length ? d : null;
+  } catch {
+    return null;
+  }
+}
+function writeDraft(d: Draft | null) {
+  try {
+    if (d) localStorage.setItem(DRAFT_KEY, JSON.stringify(d));
+    else localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    /* only kept for this session then */
+  }
+}
+
 export function MontageView({ clips, untrimmed, onOpen }: { clips: ClipFile[] | null; untrimmed: ClipFile[] | null; onOpen: (path: string) => void }) {
   const [pieces, setPiecesState] = useState<Piece[] | null>(kept);
+  const [leaving, setLeaving] = useState(false);
+  const [draft, setDraft] = useState<Draft | null>(readDraft);
   const setPieces = (p: Piece[] | null) => {
     kept = p;
     setPiecesState(p);
   };
+  const saveDraft = () => {
+    if (!pieces) return;
+    const d: Draft = { savedAt: Date.now(), pieces: pieces.map((p) => ({ path: p.clip.path, start: p.start, end: p.end, length: p.length, volumeDb: p.volumeDb })) };
+    writeDraft(d);
+    setDraft(d);
+  };
+  // The draft's clips, as they are now (a clip deleted since is left out).
+  const resume = () => {
+    if (!draft || !clips) return;
+    const by = new Map(clips.map((c) => [c.path, c]));
+    const back = draft.pieces.flatMap((p) => {
+      const clip = by.get(p.path);
+      return clip ? [{ id: nextId++, clip, start: p.start, end: p.end, length: p.length, volumeDb: p.volumeDb }] : [];
+    });
+    if (back.length) setPieces(back);
+  };
+  const dLen = draft ? draft.pieces.reduce((n, p) => n + (p.end - p.start), 0) : 0;
   return (
     <div className="page montage-page">
       <div className="toolbar">
+        {pieces && (
+          <button className="btn back" onClick={() => setLeaving(true)} title="Back to the montage setup">
+            ← Back
+          </button>
+        )}
         <h1 style={{ flex: 1 }}>Montage</h1>
       </div>
       {!clips ? null : pieces ? (
-        <Editor pieces={pieces} setPieces={setPieces} clips={clips} onBack={() => setPieces(null)} onOpen={onOpen} />
+        <Editor pieces={pieces} setPieces={setPieces} clips={clips} onBack={() => setLeaving(true)} onOpen={onOpen} />
       ) : (
-        <Setup clips={clips} untrimmed={untrimmed} onCreate={setPieces} />
+        <>
+          {draft && (
+            <div className="me-draft">
+              <div>
+                <strong>Your draft</strong>
+                <small className="muted">
+                  {draft.pieces.length} clips · {fmtTime(dLen).replace(/\.\d+$/, "")} · saved {new Date(draft.savedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+                </small>
+              </div>
+              <button className="btn small" onClick={() => {
+                writeDraft(null);
+                setDraft(null);
+              }}>
+                Delete draft
+              </button>
+              <button className="btn small primary" onClick={resume}>
+                Continue editing
+              </button>
+            </div>
+          )}
+          <Setup clips={clips} untrimmed={untrimmed} onCreate={setPieces} />
+        </>
+      )}
+      {leaving && (
+        <LeaveDialog
+          onDraft={() => {
+            saveDraft();
+            setLeaving(false);
+            setPieces(null);
+          }}
+          onDiscard={() => {
+            setLeaving(false);
+            setPieces(null);
+          }}
+          onStay={() => setLeaving(false)}
+        />
       )}
     </div>
+  );
+}
+
+/** Leaving the editor: keep it as a draft, throw it away, or stay. */
+function LeaveDialog({ onDraft, onDiscard, onStay }: { onDraft: () => void; onDiscard: () => void; onStay: () => void }) {
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => e.key === "Escape" && onStay();
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [onStay]);
+  return createPortal(
+    <div className="modal-backdrop" onClick={onStay}>
+      <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="leave-title" onClick={(e) => e.stopPropagation()}>
+        <h2 id="leave-title">Leave this montage?</h2>
+        <p className="muted">Save it as a draft to pick up later from the montage page, or discard it. Exported montages aren't affected.</p>
+        <div className="row" style={{ justifyContent: "flex-end" }}>
+          <button className="btn" onClick={onStay} autoFocus>
+            Keep editing
+          </button>
+          <button className="btn danger" onClick={onDiscard}>
+            Discard
+          </button>
+          <button className="btn primary" onClick={onDraft}>
+            Save draft
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }

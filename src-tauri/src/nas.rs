@@ -1112,10 +1112,12 @@ pub fn sync_once(
         let dest = nas.join(rel.replace('/', "\\"));
         let local_size = size(&src);
         if synced.contains(&key) {
-            // Edited outside the app (or by an older version): newer here, different
-            // size there. Update the NAS copy rather than leave two versions.
+            // Edited here (in the app, by an older version, or outside it): a different size
+            // there, and the NAS copy isn't the newer one. Trims and heals keep the clip's
+            // date, so "newer here" missed them and the NAS kept the untrimmed original.
+            // The old NAS version is kept in .hindsight-replaced for 30 days.
             let nas_size = size(&dest);
-            if nas_size.is_some() && nas_size != local_size && newer(&src, &dest) {
+            if nas_size.is_some() && nas_size != local_size && !newer(&dest, &src) {
                 edits.push((rel.clone(), rel.clone()));
                 continue;
             }
@@ -1818,6 +1820,26 @@ mod tests {
         let pass = run(&mut synced, &mut verified, &mut edits); // updates it
         assert_eq!(pass.updated, vec!["Game/c.mkv".to_string()], "{pass:?}");
         assert_eq!(size(&nas.join("Game/c.mkv")), Some(400));
+
+        // Trimmed keeping its date (as trims and heals do): the same time as the NAS copy,
+        // a different size. It still counts as an edit (it used to be missed).
+        let d = clip(&local, "Game/d.mkv", 1000);
+        run(&mut synced, &mut verified, &mut edits);
+        let when = fs::metadata(nas.join("Game/d.mkv")).unwrap().modified().unwrap();
+        fs::write(&d, vec![3u8; 300]).unwrap();
+        fs::File::options().write(true).open(&d).unwrap().set_modified(when).unwrap();
+        run(&mut synced, &mut verified, &mut edits);
+        run(&mut synced, &mut verified, &mut edits);
+        assert_eq!(size(&nas.join("Game/d.mkv")), Some(300));
+        // But a NAS copy that's clearly newer (edited on the NAS) isn't overwritten.
+        let e = clip(&local, "Game/e.mkv", 1000);
+        run(&mut synced, &mut verified, &mut edits);
+        fs::write(nas.join("Game/e.mkv"), vec![4u8; 500]).unwrap();
+        fs::File::options().write(true).open(nas.join("Game/e.mkv")).unwrap().set_modified(SystemTime::now() + Duration::from_secs(900)).unwrap();
+        run(&mut synced, &mut verified, &mut edits);
+        run(&mut synced, &mut verified, &mut edits);
+        assert_eq!(size(&nas.join("Game/e.mkv")), Some(500));
+        assert_eq!(size(&e), Some(1000));
 
         // Old set-aside versions go after 30 days.
         let old_day = nas.join(REPLACED).join("2020-01-01");
