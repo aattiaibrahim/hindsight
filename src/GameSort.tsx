@@ -53,6 +53,18 @@ function Row({ s, on, game, games, onToggle, onGame }: { s: GameSuggestion; on: 
           in {s.folder} · {Math.round(s.confidence * 100)}% sure
         </small>
       </span>
+      {/* Have a look at the file itself (it's inside a label: don't tick the box too). */}
+      <button
+        type="button"
+        className="btn small"
+        title={`Show ${s.path} in File Explorer`}
+        onClick={(e) => {
+          e.preventDefault();
+          api.reveal(s.path).catch(() => {});
+        }}
+      >
+        Show in folder
+      </button>
       <span className="sort-game">
         <GameIcon name={game} size={18} />
         <Select className="select" value={game} onChange={(e) => onGame(e.target.value)} aria-label="Game">

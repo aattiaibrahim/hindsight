@@ -7,6 +7,9 @@
 //! - The song loops if it's shorter than the montage, is cut to its length,
 //!   and fades out over the last two seconds. Clip sound and song each get
 //!   their own volume.
+//! - Between clips: a cut, a fade through black, or a crossfade (the two clips
+//!   overlap, so the montage is a little shorter). Each clip has its own volume
+//!   on top of the clips' overall one.
 //! - Encoded as H.264 on the GPU (plays everywhere), saved to
 //!   `<clips>/Montages/Montage <date time>.mp4`. Progress comes from ffmpeg's
 //!   `-progress` output.
@@ -24,6 +27,9 @@ pub struct Piece {
     pub path: String,
     pub start: f64,
     pub end: f64,
+    /// This clip's own volume, on top of the clips' overall one (dB)
+    #[serde(default)]
+    pub volume_db: f64,
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -50,6 +56,16 @@ pub struct Montage {
     pub height: u32,
     #[serde(default = "default_fps")]
     pub fps: u32,
+    /// Between clips: "cut", "fade" (through black) or "crossfade"
+    #[serde(default)]
+    pub transition: String,
+    /// How long a transition takes (seconds)
+    #[serde(default = "default_transition_secs")]
+    pub transition_secs: f64,
+}
+
+fn default_transition_secs() -> f64 {
+    0.5
 }
 
 fn default_height() -> u32 {
@@ -75,6 +91,12 @@ pub fn args(m: &Montage, audio_tracks: &[Vec<usize>]) -> Result<(Vec<std::ffi::O
     let w = (h * 16 / 9) / 2 * 2;
     let fps = m.fps.clamp(24, 120);
     let mut a = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y", "-progress", "pipe:1", "-nostats"]);
+    let lens: Vec<f64> = m.pieces.iter().map(|p| (p.end - p.start).max(0.1)).collect();
+    let many = m.pieces.len() > 1;
+    // A transition never takes more than half the shortest clip.
+    let shortest = lens.iter().cloned().fold(f64::MAX, f64::min);
+    let d = m.transition_secs.clamp(0.1, 2.0).min(shortest / 2.0);
+    let kind = if many { m.transition.as_str() } else { "cut" };
     let mut total = 0.0;
     for p in &m.pieces {
         let len = (p.end - p.start).max(0.1);
@@ -88,16 +110,34 @@ pub fn args(m: &Montage, audio_tracks: &[Vec<usize>]) -> Result<(Vec<std::ffi::O
         a.push(mu.path.clone().into());
     }
     let mut g = Vec::new();
-    let clip_gain = if m.clip_volume_db <= -60.0 { "volume=0".to_string() } else { format!("volume={:.2}dB", m.clip_volume_db) };
+    let last = m.pieces.len() - 1;
     for (i, p) in m.pieces.iter().enumerate() {
-        let len = (p.end - p.start).max(0.1);
+        let len = lens[i];
+        let db = m.clip_volume_db + p.volume_db;
+        let clip_gain = if m.clip_volume_db <= -60.0 || p.volume_db <= -60.0 { "volume=0".to_string() } else { format!("volume={db:.2}dB") };
+        // Fade through black: each clip fades in from black and out to black (sound too).
+        let (vfade, afade) = if kind == "fade" {
+            let mut v = String::new();
+            let mut a = String::new();
+            if i > 0 {
+                v += &format!(",fade=t=in:st=0:d={d:.3}");
+                a += &format!(",afade=t=in:st=0:d={d:.3}");
+            }
+            if i < last {
+                v += &format!(",fade=t=out:st={:.3}:d={d:.3}", len - d);
+                a += &format!(",afade=t=out:st={:.3}:d={d:.3}", len - d);
+            }
+            (v, a)
+        } else {
+            (String::new(), String::new())
+        };
         g.push(format!(
-            "[{i}:v:0]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,fps={fps},format=yuv420p,setsar=1,trim=duration={len:.3},setpts=PTS-STARTPTS[v{i}]"
+            "[{i}:v:0]scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,fps={fps},format=yuv420p,setsar=1,trim=duration={len:.3},setpts=PTS-STARTPTS{vfade}[v{i}]"
         ));
         // The clip's sound: its tracks mixed (not a track that's already the others
         // mixed, see library::tracks_to_mix), or silence for a clip without any.
         let mix = audio_tracks.get(i).cloned().unwrap_or_default();
-        let tail = format!("aresample=48000,aformat=channel_layouts=stereo,{clip_gain},apad,atrim=duration={len:.3},asetpts=PTS-STARTPTS[a{i}]");
+        let tail = format!("aresample=48000,aformat=channel_layouts=stereo,{clip_gain},apad,atrim=duration={len:.3},asetpts=PTS-STARTPTS{afade}[a{i}]");
         match mix.as_slice() {
             [] => g.push(format!("anullsrc=r=48000:cl=stereo,atrim=duration={len:.3},asetpts=PTS-STARTPTS[a{i}]")),
             [t] => g.push(format!("[{i}:a:{t}]{tail}")),
@@ -107,8 +147,25 @@ pub fn args(m: &Montage, audio_tracks: &[Vec<usize>]) -> Result<(Vec<std::ffi::O
             }
         }
     }
-    let pairs: String = (0..m.pieces.len()).map(|i| format!("[v{i}][a{i}]")).collect();
-    g.push(format!("{pairs}concat=n={}:v=1:a=1[vout][aclips]", m.pieces.len()));
+    if kind == "crossfade" {
+        // Each clip dissolves into the next: they overlap by `d`, so the montage is
+        // that much shorter for every join.
+        let mut vprev = "v0".to_string();
+        let mut aprev = "a0".to_string();
+        let mut at = 0.0;
+        for i in 1..m.pieces.len() {
+            at += lens[i - 1] - d;
+            let (vo, ao) = if i == last { ("vout".to_string(), "aclips".to_string()) } else { (format!("vx{i}"), format!("ax{i}")) };
+            g.push(format!("[{vprev}][v{i}]xfade=transition=fade:duration={d:.3}:offset={at:.3}[{vo}]"));
+            g.push(format!("[{aprev}][a{i}]acrossfade=d={d:.3}[{ao}]"));
+            vprev = vo;
+            aprev = ao;
+        }
+        total -= d * last as f64;
+    } else {
+        let pairs: String = (0..m.pieces.len()).map(|i| format!("[v{i}][a{i}]")).collect();
+        g.push(format!("{pairs}concat=n={}:v=1:a=1[vout][aclips]", m.pieces.len()));
+    }
     if let Some(mu) = &m.music {
         let fade_at = (total - 2.0).max(0.0);
         g.push(format!(
@@ -225,14 +282,16 @@ mod tests {
         ffmpeg::run("ffmpeg", &s).unwrap();
         let m = Montage {
             pieces: vec![
-                Piece { path: a, start: 1.0, end: 3.0 },
-                Piece { path: b, start: 0.0, end: 1.5 },
-                Piece { path: c, start: 2.0, end: 4.0 },
+                Piece { path: a, start: 1.0, end: 3.0, volume_db: 0.0 },
+                Piece { path: b, start: 0.0, end: 1.5, volume_db: -6.0 },
+                Piece { path: c, start: 2.0, end: 4.0, volume_db: 0.0 },
             ],
             music: Some(Music { path: song.to_string_lossy().into_owned(), offset: 0.0, volume_db: -6.0 }),
             clip_volume_db: 0.0,
             height: 720,
             fps: 30,
+            transition: "cut".into(),
+            transition_secs: 0.5,
         };
         let out = d.join("montage.mp4");
         let mut last = 0.0;
@@ -241,12 +300,20 @@ mod tests {
         assert_eq!((p.codec.as_str(), p.width, p.height, p.audio_tracks), ("h264", 1280, 720, 1));
         assert!((p.duration - 5.5).abs() < 0.3, "{}", p.duration);
         assert_eq!(last, 1.0);
+        // A fade through black keeps the length; a crossfade overlaps each join.
+        for (kind, want) in [("fade", 5.5), ("crossfade", 5.5 - 2.0 * 0.5)] {
+            let m2 = Montage { transition: kind.into(), ..m.clone() };
+            let out2 = d.join(format!("montage-{kind}.mp4"));
+            render(&m2, &out2, |_| {}).unwrap();
+            let p2 = library::probe(&out2.to_string_lossy()).unwrap();
+            assert!((p2.duration - want).abs() < 0.3, "{kind}: {}", p2.duration);
+        }
         let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]
     fn empty_montage_is_an_error() {
-        let m = Montage { pieces: vec![], music: None, clip_volume_db: 0.0, height: 1080, fps: 60 };
+        let m = Montage { pieces: vec![], music: None, clip_volume_db: 0.0, height: 1080, fps: 60, transition: String::new(), transition_secs: 0.5 };
         assert!(args(&m, &[]).is_err());
     }
 }

@@ -260,6 +260,18 @@ export function LibrarySettings({
           <Toggle label="Remove local copy" checked={s.nasRemoveLocal} onChange={(v) => set({ nasRemoveLocal: v })} />
         </label>
       )}
+      {s.nasDir && (
+        <label className="setting">
+          <span>
+            Sync while you play
+            <small>
+              Off: copying to the NAS waits until your game is closed, so it never costs FPS or network. On: it carries on while you play
+              (it still waits while a clip is being saved).
+            </small>
+          </span>
+          <Toggle label="Sync while you play" checked={s.nasSyncWhileGaming} onChange={(v) => set({ nasSyncWhileGaming: v })} />
+        </label>
+      )}
 
       {s.nasDir && s.linkedFolders.length > 0 && (
         <div className="setting sub">

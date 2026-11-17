@@ -180,8 +180,10 @@ pub(crate) fn move_file(from: &Path, to: &Path) -> Result<(), String> {
     let size = fs::metadata(from).map_err(|e| e.to_string())?.len();
     let name = to.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let tmp = to.with_file_name(format!(".{name}.rewind-partial"));
+    // Read back and compared byte for byte (like NAS sync) before the original is
+    // removed: a crash or a bad drive mid-copy leaves the original as it was.
     let res = (|| {
-        fs::copy(from, &tmp).map_err(|e| e.to_string())?;
+        crate::nas::copy_verified(from, &tmp, &mut |_, _| {})?;
         if fs::metadata(&tmp).map(|m| m.len()).ok() != Some(size) {
             return Err("the copy came out the wrong size".to_string());
         }

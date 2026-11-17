@@ -41,7 +41,7 @@ function SyncIcon({ look }: { look: Look }) {
   return <Cloud {...p} />;
 }
 
-export function SyncStatus({ nas }: { nas: NasState | null }) {
+export function SyncStatus({ nas, onSyncWhilePlaying }: { nas: NasState | null; onSyncWhilePlaying?: () => void }) {
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [asked, setAsked] = useState(false);
@@ -121,6 +121,11 @@ export function SyncStatus({ nas }: { nas: NasState | null }) {
             >
               {working ? "Syncing…" : "Sync now"}
             </button>
+            {nas.reachable && nas.paused && onSyncWhilePlaying && (
+              <button className="btn small" onClick={onSyncWhilePlaying} title="Copy to the NAS while you play from now on (Settings → Library → Sync while you play)">
+                Sync while playing
+              </button>
+            )}
             {nas.reachable && (activity.busy || nas.stopped) && (
               <button className="btn small" onClick={() => api.stopNasSync(!nas.stopped).catch(() => {})}>
                 {nas.stopped ? "Resume" : "Stop"}

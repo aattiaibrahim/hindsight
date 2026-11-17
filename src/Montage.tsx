@@ -11,7 +11,8 @@ import { Slider } from "./Slider";
 import { Music } from "lucide-react";
 
 /** One piece of the montage: part of a clip. */
-type Piece = { id: number; clip: ClipFile; start: number; end: number; length: number };
+type Piece = { id: number; clip: ClipFile; start: number; end: number; length: number; volumeDb?: number };
+type Transition = "cut" | "fade" | "crossfade";
 type Source = "random" | "range" | "edited" | "unedited";
 type Take = "end" | "middle" | "start";
 
@@ -282,6 +283,8 @@ function Editor({
   const [clipDb, setClipDb] = useState(0);
   const [height, setHeight] = useState(1080);
   const [fps, setFps] = useState(60);
+  const [transition, setTransition] = useState<Transition>("cut");
+  const [transitionSecs, setTransitionSecs] = useState(0.5);
   const [render, setRender] = useState<{ progress: number; out?: string; err?: string } | null>(null);
   const [binQuery, setBinQuery] = useState("");
   const [picking, setPicking] = useState(false);
@@ -317,7 +320,7 @@ function Editor({
         v.src = src;
       }
       v.currentTime = at.local;
-      v.volume = Math.min(1, Math.pow(10, clipDb / 20));
+      v.volume = gainOf(p);
       if (play) v.play().catch(() => {});
       const a = audio.current;
       if (a && song) {
@@ -329,6 +332,11 @@ function Editor({
     },
     [locate, pieces, clipDb, song, songOffset, songDb],
   );
+  // A clip's volume in the preview: the overall clips volume plus its own.
+  function gainOf(p: Piece) {
+    if (clipDb <= -60 || (p.volumeDb ?? 0) <= -60) return 0;
+    return Math.min(1, Math.pow(10, (clipDb + (p.volumeDb ?? 0)) / 20));
+  }
   const seek = (t: number) => {
     const c = Math.max(0, Math.min(length, t));
     setTime(c);
@@ -481,11 +489,13 @@ function Editor({
     setRender({ progress: 0 });
     try {
       const out = await api.renderMontage({
-        pieces: pieces.map((p) => ({ path: p.clip.path, start: p.start, end: p.end })),
+        pieces: pieces.map((p) => ({ path: p.clip.path, start: p.start, end: p.end, volumeDb: p.volumeDb ?? 0 })),
         music: song ? { path: song.path, offset: songOffset, volumeDb: songDb } : null,
         clipVolumeDb: clipDb,
         height,
         fps,
+        transition,
+        transitionSecs,
       });
       setRender({ progress: 1, out });
     } catch (e) {
@@ -541,6 +551,19 @@ function Editor({
                 <Slider value={selected.end} min={0} max={selected.length} step={0.1} onValue={(v) => update(selected.id, (q) => ({ ...q, end: Math.max(v, q.start + 0.5) }))} />
                 <span className="mono">{fmtTime(selected.end)}</span>
               </label>
+              <label className="me-field">
+                Volume
+                <Slider
+                  value={selected.volumeDb ?? 0}
+                  min={-60}
+                  max={10}
+                  step={1}
+                  onValue={(v) => update(selected.id, (q) => ({ ...q, volumeDb: v }))}
+                  onDoubleClick={() => update(selected.id, (q) => ({ ...q, volumeDb: 0 }))}
+                  aria-label="This clip's volume"
+                />
+                <span className="mono">{(selected.volumeDb ?? 0) <= -60 ? "Off" : fmtDb(selected.volumeDb ?? 0)}</span>
+              </label>
               <div className="row">
                 <button className="btn small" onClick={() => onOpen(selected.clip.path)}>
                   Open in editor
@@ -579,6 +602,22 @@ function Editor({
               </label>
             </>
           )}
+          <div className="label">Between clips</div>
+          <div className="row">
+            <Select className="select" value={transition} onChange={(e) => setTransition(e.target.value as Transition)} aria-label="Transition">
+              <option value="cut">Cut</option>
+              <option value="fade">Fade through black</option>
+              <option value="crossfade">Crossfade</option>
+            </Select>
+            {transition !== "cut" && (
+              <Select className="select" value={transitionSecs} onChange={(e) => setTransitionSecs(Number(e.target.value))} aria-label="Transition length">
+                <option value={0.3}>0.3 s</option>
+                <option value={0.5}>0.5 s</option>
+                <option value={1}>1 s</option>
+              </Select>
+            )}
+          </div>
+          {transition !== "cut" && <small className="muted">Shows in the exported video{transition === "crossfade" ? "; each join overlaps, so it's a little shorter" : ""}.</small>}
           <div className="label">Export</div>
           <div className="row">
             <Select className="select" value={height} onChange={(e) => setHeight(Number(e.target.value))} aria-label="Size">

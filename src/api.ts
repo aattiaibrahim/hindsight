@@ -9,11 +9,14 @@ export type DetectStatus = { installed: boolean; downloading: number | null; loo
 export type GameSuggestion = { path: string; name: string; folder: string; game: string; confidence: number; likeness: number };
 /** A montage to render: clip pieces in order, an optional song. */
 export type MontagePlan = {
-  pieces: { path: string; start: number; end: number }[];
+  pieces: { path: string; start: number; end: number; volumeDb?: number }[];
   music: { path: string; offset: number; volumeDb: number } | null;
   clipVolumeDb: number;
   height: number;
   fps: number;
+  /** Between clips: a cut, a fade through black, or a crossfade */
+  transition: "cut" | "fade" | "crossfade";
+  transitionSecs: number;
 };
 /** What this PC's NVIDIA GPU can encode. */
 export type GpuEncoders = { gpu: string; supported: Exclude<Encoder, "auto">[]; auto: Exclude<Encoder, "auto"> };
@@ -45,6 +48,7 @@ export type Settings = {
   /** The paired NAS app's address, "" = not paired. */
   nasServer: string;
   nasRemoveLocal: boolean;
+  nasSyncWhileGaming: boolean;
   linkedFolders: string[];
   /** Game key → the folder spelling picked when merging */
   folderNames: Record<string, string>;
@@ -256,7 +260,7 @@ export type NasState = {
 export type ClipFolder = { label: string; path: string; exists: boolean };
 
 export type Health = {
-  state: "ok" | "damaged" | "unreadable";
+  state: "ok" | "damaged" | "unreadable" | "novideo";
   damaged: [number, number][];
   best: [number, number] | null;
   duration: number;

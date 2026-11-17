@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, ClipFile, errText, fmtSize, Settings, DupeSet } from "./api";
 import { ConfirmDialog } from "./ConfirmUpdate";
 import { useThumb } from "./hooks";
@@ -149,6 +149,10 @@ function bestCopy(set: ClipFile[], kind: DupeSet["kind"] = "copy") {
 
 const extOf = (p: string) => (p.split(".").pop() ?? "").toUpperCase();
 
+// The last search's result, kept while the clips stay the same: opening Cleanup again
+// shows it at once instead of searching every clip again.
+let lastDupes: { key: string; sets: DupeSet[] } | null = null;
+
 /** The kinds of duplicate, in the order they're shown, and what's kept by default. */
 const DUPE_GROUPS: { kind: DupeSet["kind"]; title: string; keeps: string }[] = [
   { kind: "remux", title: "Same recording in two formats", keeps: "keeps the MP4, which plays everywhere" },
@@ -176,7 +180,8 @@ function DupeThumb({ clip }: { clip: ClipFile }) {
  *  is removed until that one button is pressed (and confirmed). */
 function Duplicates({ clips, onDelete, onChanged, run = 0 }: { clips: ClipFile[]; onDelete: (paths: string[]) => Promise<boolean>; onChanged: () => void; run?: number }) {
   const [sets, setSets] = useState<DupeSet[] | null>(null);
-  const progress = useCountProgress("dupes-progress", sets === null);
+  const [waiting, setWaiting] = useState(false);
+  const progress = useCountProgress("dupes-progress", sets === null && !waiting);
   const [keep, setKeep] = useState<Record<string, string>>({});
   const [both, setBoth] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<Set<DupeSet["kind"]>>(new Set());
@@ -185,15 +190,42 @@ function Duplicates({ clips, onDelete, onChanged, run = 0 }: { clips: ClipFile[]
   // Searched again only when the clips really changed (the list is re-read whenever
   // the window gets focus) or on Run cleanup check.
   const key = clips.map((c) => `${c.path}|${c.size}`).join("\n");
+  const lastRun = useRef(run);
   useEffect(() => {
     let alive = true;
+    let retry = 0;
+    // Same clips as last time (and not "Run cleanup check" again): reuse that result.
+    if (lastDupes?.key === key && lastRun.current === run) {
+      setSets(lastDupes.sets);
+      return;
+    }
+    lastRun.current = run;
     setSets(null);
     setReview(null);
-    api.findDuplicates().then((s) => alive && setSets(s)).catch(() => alive && setSets([]));
+    const look = () =>
+      api
+        .findDuplicates()
+        .then((s) => {
+          if (!alive) return;
+          lastDupes = { key, sets: s };
+          setWaiting(false);
+          setSets(s);
+        })
+        .catch((e) => {
+          if (!alive) return;
+          // A game is running: wait, and look once it's closed.
+          if (String(e) === "game") {
+            setWaiting(true);
+            retry = window.setTimeout(look, 15_000);
+          } else setSets([]);
+        });
+    look();
     return () => {
       alive = false;
+      clearTimeout(retry);
     };
   }, [key, run]);
+  if (!sets && waiting) return <div className="job-progress muted">Looking for duplicates once your game is closed (it reads every clip, so it waits).</div>;
   if (!sets) {
     const pct = progress && progress[1] > 0 ? Math.round((progress[0] / progress[1]) * 100) : null;
     return (

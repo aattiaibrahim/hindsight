@@ -923,7 +923,7 @@ fn sha256_uncached(p: &Path) -> Result<[u8; 32], String> {
 
 /// Copy `src` to `tmp`, fingerprinting it on the way, then read `tmp` back
 /// and check it's identical. Keeps the clip's date.
-fn copy_verified(src: &Path, tmp: &Path, progress: &mut dyn FnMut(u64, bool)) -> Result<(), String> {
+pub(crate) fn copy_verified(src: &Path, tmp: &Path, progress: &mut dyn FnMut(u64, bool)) -> Result<(), String> {
     let mut r = fs::File::open(src).map_err(|e| e.to_string())?;
     let modified = r.metadata().and_then(|m| m.modified()).ok();
     let mut w = fs::File::create(tmp).map_err(|e| e.to_string())?;
@@ -951,6 +951,29 @@ fn copy_verified(src: &Path, tmp: &Path, progress: &mut dyn FnMut(u64, bool)) ->
         return Err("the copy on the NAS didn't match the original, so it was thrown away and will be tried again".into());
     }
     Ok(())
+}
+
+/// Remove half-finished copies (`.name.rewind-partial`) left by a crash or a pulled
+/// cable, once they're a day old (a copy in progress is never that old), up to three
+/// folders deep. The original was never touched, so they're only wasted space.
+pub fn sweep_partials(root: &Path) -> usize {
+    fn walk(dir: &Path, depth: u32, n: &mut usize) {
+        let Ok(r) = fs::read_dir(dir) else { return };
+        for e in r.flatten() {
+            let p = e.path();
+            let name = e.file_name().to_string_lossy().into_owned();
+            if p.is_dir() {
+                if depth < 3 && !name.starts_with(".hindsight") {
+                    walk(&p, depth + 1, n);
+                }
+            } else if name.ends_with(PARTIAL) && settled(&p, Duration::from_secs(24 * 3600)) && fs::remove_file(&p).is_ok() {
+                *n += 1;
+            }
+        }
+    }
+    let mut n = 0;
+    walk(root, 0, &mut n);
+    n
 }
 
 /// Are the clip here and its NAS copy identical? (For clips copied before
@@ -1224,6 +1247,18 @@ fn publish(app: &AppHandle, f: impl FnOnce(&mut NasState)) {
 /// Background worker: a pass every 30 s, or right after `wake()`.
 pub fn start(app: AppHandle) {
     let _ = APP.set(app.clone());
+    {
+        let s = app.state::<crate::AppState>().settings.lock().unwrap().clone();
+        std::thread::spawn(move || {
+            let mut n = sweep_partials(Path::new(&s.clips_dir));
+            if !s.nas_dir.is_empty() {
+                n += sweep_partials(Path::new(&s.nas_dir));
+            }
+            if n > 0 {
+                crate::log!("removed {n} half-finished copies left by an interrupted copy");
+            }
+        });
+    }
     std::thread::spawn(move || {
         let mut synced: HashSet<String> = HashSet::new();
         let mut verified: HashSet<String> = HashSet::new();
@@ -1289,7 +1324,9 @@ pub fn start(app: AppHandle) {
                 });
                 continue;
             }
-            if crate::games::game_running() || app_busy {
+            // A game waits the copying until you're done, unless you chose to sync anyway.
+            let gaming = !s.nas_sync_while_gaming && crate::games::game_running();
+            if gaming || app_busy {
                 publish(&app, |st| {
                     st.enabled = true;
                     st.paused = true;
@@ -1424,7 +1461,7 @@ pub fn start(app: AppHandle) {
                     st.rate = rate;
                     st.eta_secs = (rate > 0.0 && left > 0).then(|| (left as f64 / rate) as u64);
                 });
-            }, &|| crate::games::game_running() || stopped());
+            }, &|| (!s.nas_sync_while_gaming && crate::games::game_running()) || stopped());
             if let Some(p) = &manifest {
                 save_synced(p, &s.nas_dir, &synced);
             }

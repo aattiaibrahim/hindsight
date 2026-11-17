@@ -21,14 +21,14 @@ const CHUNK: f64 = 10.0;
 const DAMAGED_OVER: usize = 20;
 /// Bumped when the check changes; older "damaged" results are checked again.
 /// 2: timestamp warnings from ffmpeg's output side no longer count as damage.
-const VERSION: u32 = 2;
+const VERSION: u32 = 3; // 3: sound-only files are "novideo", not damaged
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Health {
     pub size: u64,
     pub modified: i64,
-    /// "ok" | "damaged" | "unreadable"
+    /// "ok" | "damaged" | "unreadable" | "novideo" (sound only: nothing to repair)
     pub state: String,
     /// Damaged stretches, in seconds
     pub damaged: Vec<(f64, f64)>,
@@ -95,12 +95,22 @@ pub fn summarize(chunk_errors: &[(f64, f64, usize)], baseline: usize, duration: 
     (damaged, best.filter(|(a, b)| b - a >= 1.0))
 }
 
+/// Damaged or unreadable (a sound-only file is neither).
+pub fn is_bad(state: &str) -> bool {
+    state == "damaged" || state == "unreadable"
+}
+
 /// Check one clip. `keep_going` is asked between chunks (false = a game started: stop).
 pub fn check(path: &str, keep_going: &dyn Fn() -> bool) -> Option<Health> {
     let (size, modified) = stamp(Path::new(path))?;
     let unreadable = |duration| Health { size, modified, state: "unreadable".into(), damaged: vec![], best: None, duration, version: VERSION };
     let p = match crate::library::probe(path) {
         Ok(p) if p.duration > 0.0 && !p.codec.is_empty() => p,
+        // Sound but no picture (Medal sometimes saves a clip as audio only): it plays
+        // fine, there's just no video to repair. Not counted as damaged.
+        Ok(p) if p.duration > 0.0 && p.audio_tracks > 0 => {
+            return Some(Health { size, modified, state: "novideo".into(), damaged: vec![], best: None, duration: p.duration, version: VERSION });
+        }
         _ => return Some(unreadable(0.0)),
     };
     let mut gpu = true;
@@ -345,7 +355,7 @@ pub fn start(
             }
             let all = clips();
             let done = results(&cache_file, &all);
-            let damaged = done.values().filter(|h| h.state != "ok").count();
+            let damaged = done.values().filter(|h| is_bad(&h.state)).count();
             let todo: Vec<&String> = all.iter().filter(|p| !done.contains_key(*p) && !p.starts_with(r"\\")).collect();
             let paused = busy();
             *PROGRESS.lock().unwrap() = Some(Progress { checked: all.len() - todo.len(), total: all.len(), damaged, paused, running: !todo.is_empty() });
@@ -367,7 +377,7 @@ pub fn start(
                 continue;
             }
             if let Some(h) = check(&next, &|| !busy()) {
-                let bad = h.state != "ok";
+                let bad = is_bad(&h.state);
                 with_cache(&cache_file, |m| m.insert(next.clone(), h));
                 save_cache(&cache_file);
                 if bad {

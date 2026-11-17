@@ -1457,6 +1457,10 @@ struct DupeSet {
 #[tauri::command]
 async fn find_duplicates(app: AppHandle) -> Result<Vec<DupeSet>, String> {
     let s = settings_of(&app);
+    // It reads and probes every clip: never while you play (Cleanup says so and tries later).
+    if games::game_running() {
+        return Err("game".into());
+    }
     blocking(move || {
         let linked = linked_roots(&s);
         // Byte-for-byte copies: only files on this PC. A clip and its NAS copy are the

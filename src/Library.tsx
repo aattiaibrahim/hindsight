@@ -117,7 +117,8 @@ function ClipRow({
         <div className="card-title">{clip.name}</div>
         <div className="card-meta">
           {clip.folder} · {time}
-          {damage && damage.state !== "ok" && <span className="src-tag bad with-icon"><Icon name="warn" size={12} />Damaged</span>}
+          {damage && (damage.state === "damaged" || damage.state === "unreadable") && <span className="src-tag bad with-icon"><Icon name="warn" size={12} />Damaged</span>}
+          {damage?.state === "novideo" && <span className="src-tag" title="This file has sound but no picture">No video</span>}
           {clip.location === "linked" && <span className="src-tag">{clip.source}</span>}
           <NasBadge status={badgeIn(view, nasStatus(clip, nasOn, copying))} />
         </div>
@@ -301,7 +302,12 @@ function ClipCard({
         </div>
         {/* Status that matters at a glance stays visible; the rest shows on hover, like Immich. */}
         <div className="card-tags">
-          {damage && damage.state !== "ok" && (
+          {damage?.state === "novideo" && (
+            <span className="src-tag" title="This file has sound but no picture (some recorders save a clip as audio only). Nothing to repair.">
+              No video
+            </span>
+          )}
+          {damage && (damage.state === "damaged" || damage.state === "unreadable") && (
             <span className="src-tag bad with-icon" title={damagedText(damage)}>
               <Icon name="warn" size={12} />
               Damaged

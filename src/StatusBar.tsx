@@ -17,6 +17,7 @@ export function StatusBar({
   version,
   customArea = false,
   onFitScreen,
+  onSyncWhilePlaying,
 }: {
   status: Status | null;
   hotkey: string;
@@ -25,6 +26,8 @@ export function StatusBar({
   /** Only part of the screen is being recorded (Settings → Recording area) */
   customArea?: boolean;
   onFitScreen?: () => void;
+  /** Turn on Sync while you play (offered while the NAS copy waits for a game) */
+  onSyncWhilePlaying?: () => void;
 }) {
   const nas = useNasState();
   const [open, setOpen] = useState(false);
@@ -104,7 +107,7 @@ export function StatusBar({
           Fit to screen
         </button>
       )}
-      <SyncStatus nas={nas} />
+      <SyncStatus nas={nas} onSyncWhilePlaying={onSyncWhilePlaying} />
       <MoveStatusItem />
       <span style={{ flex: 1 }} />
       {err && <span className="sb-item bad">{err}</span>}

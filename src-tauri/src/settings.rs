@@ -64,6 +64,8 @@ pub struct Settings {
     pub nas_server: String,
     /// Delete the copy on this PC once a clip is safely on the NAS
     pub nas_remove_local: bool,
+    /// Keep copying to the NAS while a game runs (off: it waits until you're done)
+    pub nas_sync_while_gaming: bool,
     /// Other recorders' folders (Medal, OBS, NVIDIA, any folder) shown in the library in place
     pub linked_folders: Vec<String>,
     /// The folder spelling picked when merging a game's folders (game key → name); new clips use it
@@ -172,6 +174,7 @@ impl Default for Settings {
             nas_library_id: String::new(),
             nas_server: String::new(),
             nas_remove_local: false,
+            nas_sync_while_gaming: false,
             linked_folders: Vec::new(),
             folder_names: std::collections::BTreeMap::new(),
             similar_dismissed: Vec::new(),

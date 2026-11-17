@@ -203,7 +203,7 @@ export default function App() {
   // only shows in Benchmark mode (Settings → Advanced).
   // Damaged clips (found by the background health check), for their own section.
   const damagedClips = useMemo(
-    () => (clips ? clips.filter((c) => health[c.path] && health[c.path].state !== "ok") : null),
+    () => (clips ? clips.filter((c) => health[c.path] && (health[c.path].state === "damaged" || health[c.path].state === "unreadable")) : null),
     [clips, health],
   );
 
@@ -523,6 +523,7 @@ export default function App() {
         recordHotkey={settings?.recordHotkey ?? "Alt+F9"}
         version={upd?.current}
         customArea={!!settings?.captureArea}
+        onSyncWhilePlaying={() => update({ nasSyncWhileGaming: true }).then(() => toast("Syncing to the NAS while you play (turn it off in Settings → Library)")).catch((e) => toast(errText(e), true))}
         onFitScreen={() => update({ captureArea: null }).then(() => toast("Recording the whole screen again")).catch((e) => toast(errText(e), true))}
       />
       {shareReq && settings && (
