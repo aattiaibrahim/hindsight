@@ -70,6 +70,7 @@ export type Settings = {
   /** Find the game in unsorted clips from the picture (downloads a model) */
   gameDetect: boolean;
   detectDismissed: string[];
+  detectFolders?: string[];
   /** Clips taken off "To trim" */
   keepWhole: string[];
   /** Game logos from Steam (only the game's name is sent) */
@@ -608,6 +609,8 @@ export const api = {
   repairClip: (path: string) => invoke<string>("repair_clip", { path }),
   secretsSet: () => invoke<{ discordWebhook: boolean; streamablePassword: boolean }>("secrets_set"),
   syncNasNow: () => invoke<void>("sync_nas_now"),
+  /** Let the game finder look through one of your own folders */
+  findGameInFolder: (folder: string) => invoke<void>("find_game_in_folder", { folder }),
   /** A move into Hindsight running in the background (or the last one's result). */
   moveStatus: () => invoke<MoveStatus | null>("move_status"),
   stopMove: () => invoke<void>("stop_move"),

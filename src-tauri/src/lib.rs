@@ -730,6 +730,20 @@ async fn import_folder(app: AppHandle, path: String, copy: bool) -> Result<conso
 
 // ---------- Game folders under different spellings ----------
 
+/// "Find the game" on one of your own folders: the game finder looks through its clips
+/// too, and its suggestions come up in Notifications like the rest.
+#[tauri::command]
+fn find_game_in_folder(app: AppHandle, folder: String) -> Result<(), String> {
+    change_settings(&app, |s| {
+        if !s.detect_folders.iter().any(|f| f.eq_ignore_ascii_case(&folder)) {
+            s.detect_folders.push(folder.clone());
+        }
+        s.game_detect = true;
+    })?;
+    let _ = app.emit("detect-changed", ());
+    Ok(())
+}
+
 /// Change saved settings from the backend (same path as the Settings page).
 fn change_settings(app: &AppHandle, f: impl FnOnce(&mut Settings)) -> Result<(), String> {
     let st = app.state::<AppState>();
@@ -1434,7 +1448,7 @@ async fn game_suggestions(app: AppHandle) -> Result<Vec<game_detect::Suggestion>
         // moved: point at its NAS copy, or leave it out. A suggestion for a file that
         // isn't there showed no picture, and Show in folder and Move did nothing.
         let clips_dir = PathBuf::from(&s.clips_dir);
-        Ok(game_detect::suggestions(&all, &s.detect_dismissed)
+        Ok(game_detect::suggestions(&all, &s.detect_dismissed, &s.detect_folders)
             .into_iter()
             .filter_map(|mut g| {
                 if Path::new(&g.path).is_file() {
@@ -1720,26 +1734,51 @@ fn reveal_file(path: String) -> Result<(), String> {
 #[tauri::command]
 async fn delete_clips(app: AppHandle, paths: Vec<String>) -> Result<library::DeleteResult, String> {
     let s = settings_of(&app);
+    let a = app.clone();
     let res = blocking(move || {
         // A clip in the NAS folder (only on the NAS) is deleted there; the rest go
         // to the Recycle Bin, and their NAS copies (same game folder and name) go too.
+        // In batches of 20, with "delete-progress" (done, total) after each.
+        let total = paths.len();
+        let mut done = 0;
+        let progress = |done: usize| {
+            let _ = a.emit("delete-progress", (done, total));
+        };
+        progress(0);
         let (on_nas, here): (Vec<String>, Vec<String>) = paths.into_iter().partition(|p| nas::rel_on_nas(&s.nas_dir, p).is_some());
         let clips_dir = PathBuf::from(&s.clips_dir);
-        let mut res = library::delete_clips(&here, &clips_dir, &s.external_files, &s.linked_folders, &s.nas_dir);
-        let mut extra_failed = Vec::new();
-        for p in &res.deleted {
-            if let Some(rel) = library::rel_in(&clips_dir, p)
-                && let Err(e) = nas::delete_on_nas(&s.nas_dir, &s.nas_server, &rel)
-            {
-                extra_failed.push((p.clone(), format!("Deleted from this PC, but {e}")));
+        let mut res = library::DeleteResult::default();
+        for batch in here.chunks(20) {
+            let part = library::delete_clips(batch, &clips_dir, &s.external_files, &s.linked_folders, &s.nas_dir);
+            for p in &part.deleted {
+                if let Some(rel) = library::rel_in(&clips_dir, p)
+                    && let Err(e) = nas::delete_on_nas(&s.nas_dir, &s.nas_server, &rel)
+                {
+                    res.failed.push((p.clone(), format!("Deleted from this PC, but {e}")));
+                }
             }
+            res.deleted.extend(part.deleted);
+            res.failed.extend(part.failed);
+            done += batch.len();
+            progress(done);
         }
-        res.failed.extend(extra_failed);
         for p in on_nas {
             let rel = nas::rel_on_nas(&s.nas_dir, &p).unwrap_or_default();
             match nas::delete_on_nas(&s.nas_dir, &s.nas_server, &rel) {
                 Ok(_) => res.deleted.push(p),
                 Err(e) => res.failed.push((p, e)),
+            }
+            done += 1;
+            progress(done);
+        }
+        // A game folder in the clips folder left with nothing in it goes too (the
+        // dialog said so when every clip in it was picked).
+        let mut dirs: Vec<PathBuf> = res.deleted.iter().filter_map(|p| Path::new(p).parent().map(Path::to_path_buf)).collect();
+        dirs.sort();
+        dirs.dedup();
+        for d in dirs {
+            if d.starts_with(&clips_dir) && !library::same_path(&d, &clips_dir) {
+                let _ = std::fs::remove_dir(&d); // only succeeds when empty
             }
         }
         Ok(res)
@@ -2147,7 +2186,8 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
-            move_anyway,
+            find_game_in_folder,
+move_anyway,
 move_status,
 stop_move,
 smooth_copy,

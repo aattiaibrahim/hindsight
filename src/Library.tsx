@@ -891,6 +891,7 @@ clips === null ? null : clips.length === 0 && trimMode ? (
             {viewMode === "folders" && folder !== "All" ? folder : TITLES[mode] ?? "Clips"}
           </span>
           {folder !== "All" && <LogoButton game={folder} onToast={onToast} />}
+          {folder !== "All" && !UNSORTED_FOLDERS.has(folder.toLowerCase().replace(/[^a-z0-9]/g, "")) && <FindGameButton folder={folder} onToast={onToast} />}
         </h1>
         <label className="search">
           <span className="muted" style={{ fontSize: 12 }}>
@@ -1183,6 +1184,33 @@ function RepairAll({ clips, onToast }: { clips: ClipFile[]; onToast: (t: string,
 }
 
 /** Pick a picture as this game's logo (for games with no logo, or the wrong one). */
+// Folders the game finder already looks through (game_detect::UNSORTED).
+const UNSORTED_FOLDERS = new Set(["desktop", "obs", "other", "imports", "imported", "recordings", "screenrecording", "captures", "xboxgamebar", "ascent", "clips", "videos", "temp", "untitled"]);
+
+/** One of your own folders (not a game's): let the game finder look through it, and
+ *  suggest a game for each clip in Notifications. */
+function FindGameButton({ folder, onToast }: { folder: string; onToast: (t: string, err?: boolean) => void }) {
+  const [asked, setAsked] = useState(false);
+  return (
+    <button
+      className="btn small"
+      disabled={asked}
+      title={`Not a game's folder? Hindsight looks at a few frames of each clip in “${folder}” and suggests which game it's from, in Notifications. Nothing moves until you say so.`}
+      onClick={() =>
+        api
+          .findGameInFolder(folder)
+          .then(() => {
+            setAsked(true);
+            onToast(`Looking for the game in “${folder}”. Suggestions show up in Notifications.`);
+          })
+          .catch((e) => onToast(errText(e), true))
+      }
+    >
+      {asked ? "Looking for the game…" : "Find the game"}
+    </button>
+  );
+}
+
 function LogoButton({ game, onToast }: { game: string; onToast: (t: string, err?: boolean) => void }) {
   const [menu, setMenu] = useState(false);
   const pick = async () => {

@@ -5,7 +5,7 @@ import { useHealth } from "./Health";
 import type { UploadProgress } from "./api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
-import { api, errText, hostRefuses } from "./api";
+import { api, ClipFile, errText, hostRefuses } from "./api";
 import { StatusBar } from "./StatusBar";
 import { Icon, IconName } from "./icons";
 import { Cleanup } from "./Cleanup";
@@ -39,6 +39,14 @@ const EDIT_FOLDERS = new Set(["edits", "exports", "montages"]);
 type ToastAction = { label: string; run: () => void };
 type Toast = { id: number; text: string; sub?: string; err?: boolean; action?: ToastAction };
 type PendingDelete = { paths: string[]; resolve: (deleted: boolean) => void };
+
+/** Hindsight's own game folders (not other recorders', not the NAS) every clip of which is in `paths`. */
+function wholeFoldersOf(paths: string[], clips: ClipFile[]): string[] {
+  const picked = new Set(paths);
+  const by = new Map<string, ClipFile[]>();
+  for (const c of clips) if (c.location === "local" && !c.external) (by.get(c.folder) ?? by.set(c.folder, []).get(c.folder)!).push(c);
+  return [...by.entries()].filter(([, list]) => list.length > 0 && list.every((c) => picked.has(c.path))).map(([f]) => f);
+}
 
 export default function App() {
   const [view, setView] = useState<View>("clips");
@@ -597,6 +605,7 @@ export default function App() {
           onConfirm={confirmDelete}
           onCancel={cancelDelete}
           nas={pendingDelete.paths.some((p) => clips?.find((c) => c.path === p && (c.onNas || c.location === "nas")))}
+          wholeFolders={wholeFoldersOf(pendingDelete.paths, clips ?? [])}
         />
       )}
       <div className="toasts" aria-live="polite">

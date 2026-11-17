@@ -97,6 +97,9 @@ pub struct Settings {
     pub game_detect: bool,
     /// Clips whose game suggestion was turned down
     pub detect_dismissed: Vec<String>,
+    /// Your own folders (not a game's) the game finder looks through too, picked with
+    /// "Find the game" on the folder
+    pub detect_folders: Vec<String>,
     /// Clips taken off "To trim" ("Keep whole")
     pub keep_whole: Vec<String>,
     /// Game logos from Steam (only the game's name is sent), else the game's program icon
@@ -191,6 +194,7 @@ impl Default for Settings {
             prepare_thumbnails: true,
             game_detect: false,
             detect_dismissed: Vec::new(),
+            detect_folders: Vec::new(),
             keep_whole: Vec::new(),
             online_game_logos: true,
         }

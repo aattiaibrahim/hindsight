@@ -384,7 +384,10 @@ pub struct Suggestion {
 }
 
 /// Confident guesses for clips in unsorted folders (already looked at).
-pub fn suggestions(clips: &[crate::library::ClipFile], dismissed: &[String]) -> Vec<Suggestion> {
+/// `also`: your own folders to look through too ("Find the game" on a folder).
+pub fn suggestions(clips: &[crate::library::ClipFile], dismissed: &[String], also: &[String]) -> Vec<Suggestion> {
+    let picked = |folder: &str| also.iter().any(|f| crate::consolidate::game_key(f) == crate::consolidate::game_key(folder));
+    let is_unsorted = |folder: &str, source: &str| is_unsorted(folder, source) || picked(folder);
     let mut examples: Vec<(String, Vec<f32>)> = Vec::new();
     for c in clips {
         let unsorted = is_unsorted(&c.folder, &c.source);
@@ -572,7 +575,7 @@ mod live_pipeline {
         let looked = all.iter().filter(|c| print_of(&c.path).is_some()).count();
         println!("{looked}/{} clips looked at in {:?}", all.len(), t.elapsed());
         flush();
-        for s in suggestions(&all, &[]) {
+        for s in suggestions(&all, &[], &[]) {
             println!("  {} [{}] -> {} ({:.2}, likeness {:.3})", s.name, s.folder, s.game, s.confidence, s.likeness);
         }
     }
