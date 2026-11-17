@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { api, codecLabel, errText, fmtDuration, Status } from "./api";
 import { audioLine, folderLine, RecordButton } from "./BufferCard";
-import { nasActivity, NasBadge, NasProgress, useNasState } from "./NasProgress";
+import { NasProgress, useNasState } from "./NasProgress";
+import { SyncStatus } from "./SyncStatus";
 
 /**
  * One thin line along the bottom of the window: the buffer, what it records,
@@ -64,8 +65,6 @@ export function StatusBar({
       : status.enabled === false
         ? "Buffer paused"
         : "Buffer starting…";
-  const activity = nasActivity(nas);
-  const nasText = activity?.text ?? null;
 
   return (
     <footer className="statusbar">
@@ -104,27 +103,7 @@ export function StatusBar({
           Fit to screen
         </button>
       )}
-      {nasText && (
-        <span className={`sb-item quiet sb-nas ${nas && !nas.reachable && !nas.connecting ? "bad" : ""}`} title={nas?.copying ? `${nas.copying}${nas.lastError ? `\n${nas.lastError}` : ""}` : (nas?.lastError ?? undefined)}>
-          {nas?.connecting ? <span className="sb-spin" aria-hidden="true" /> : <NasBadge status={nas?.copying ? "copying" : nas?.pending ? "not-synced" : "synced"} />}
-          {nasText}
-          {activity?.pct != null && (
-            <span className="sb-meter" aria-hidden="true">
-              <i style={{ width: `${activity.pct}%` }} />
-            </span>
-          )}
-        </span>
-      )}
-      {/* Stop copying or freeing up (e.g. changed your mind), and pick it up again later. */}
-      {nas?.enabled && nas.reachable && (activity?.busy || nas.stopped) && (
-        <button
-          className="btn small sb-stop"
-          onClick={() => api.stopNasSync(!nas.stopped).catch(() => {})}
-          title={nas.stopped ? "Carry on copying to the NAS (and freeing up space if that's on)" : "Stop after the current clip. Nothing is lost: it picks up where it left off when you resume."}
-        >
-          {nas.stopped ? "Resume" : "Stop"}
-        </button>
-      )}
+      <SyncStatus nas={nas} />
       <span style={{ flex: 1 }} />
       {err && <span className="sb-item bad">{err}</span>}
       {version && <span className="sb-item quiet">v{version} beta</span>}

@@ -76,9 +76,14 @@ export function LibrarySettings({
   const deleteButton = (p: string) => {
     const f = emptyOf(p);
     return f ? (
-      <button className="btn small" onClick={() => setEmptyAsk(f)} title="No clips are left in this folder. Sends it to the Recycle Bin.">
-        Delete folder…
-      </button>
+      <>
+        <button className="btn small" onClick={() => api.reveal(f.path).catch(() => {})} title="See what's left in it before deleting">
+          Open folder
+        </button>
+        <button className="btn small" onClick={() => setEmptyAsk(f)} title="No clips are left in this folder. Sends it to the Recycle Bin.">
+          Delete folder…
+        </button>
+      </>
     ) : null;
   };
   // A folder picked for the NAS, being checked before anything syncs.

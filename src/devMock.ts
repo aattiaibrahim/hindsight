@@ -141,7 +141,15 @@ export function installDevMock() {
           ? { enabled: true, reachable: false, connecting: true, pending: 0, copying: null, copied: 0, lastError: null, lastSync: null, paused: false, totalFiles: 0, doneFiles: 0, totalBytes: 0, doneBytes: 0, pendingBytes: 0, checking: false, rate: 0, etaSecs: null, freeDone: 0, freeTotal: 0, freeing: false, stopped: false }
           : new URLSearchParams(location.search).has("freeing")
           ? { enabled: true, reachable: true, pending: 0, copying: "OBS/OBS 2026-07-19 04-09-26.mp4", copied: 0, lastError: null, lastSync: Date.now() - 20_000, paused: false, totalFiles: 0, doneFiles: 0, totalBytes: 0, doneBytes: 0, pendingBytes: 0, checking: true, rate: 0, etaSecs: null, freeDone: 119, freeTotal: 298, freeing: true, stopped: false }
-          : { enabled: true, reachable: true, pending: 1, copying: null, copied: 3, lastError: null, lastSync: Date.now() - 20_000, paused: false, totalFiles: 0, doneFiles: 0, totalBytes: 0, doneBytes: 0, pendingBytes: 0, checking: false, rate: 0, etaSecs: null, freeDone: 0, freeTotal: 0, freeing: false, stopped: false }
+          : { enabled: true, reachable: true, pending: 1, copying: null, copied: 3, lastError: null, lastSync: Date.now() - 20_000, paused: false, totalFiles: 0, doneFiles: 0, totalBytes: 0, doneBytes: 0, pendingBytes: 0, checking: false, rate: 0, etaSecs: null, freeDone: 0, freeTotal: 0, freeing: false, stopped: false,
+              recent: [
+                { at: Date.now() - 20_000, kind: "ok", text: "Copied 3 clips to the NAS" },
+                { at: Date.now() - 9 * 60_000, kind: "info", text: "Game closed: syncing again" },
+                { at: Date.now() - 52 * 60_000, kind: "info", text: "Paused while you play" },
+                { at: Date.now() - 70 * 60_000, kind: "ok", text: "Sent your edit of VALORANT 2026-11-09 00-40-07.mkv to the NAS" },
+                { at: Date.now() - 3 * 3600_000, kind: "bad", text: "Lost the connection to the NAS" },
+                { at: Date.now() - 3.1 * 3600_000, kind: "ok", text: "Connected to the NAS" },
+              ] }
         : { enabled: false, reachable: false, pending: 0, copying: null, copied: 0, lastError: null, lastSync: null, paused: false, totalFiles: 0, doneFiles: 0, totalBytes: 0, doneBytes: 0, pendingBytes: 0, checking: false, rate: 0, etaSecs: null, freeDone: 0, freeTotal: 0, freeing: false, stopped: false },
     sync_nas_now: () => null,
     add_mix_tracks: () => ({ addedHere: 2, failedHere: [], nasStarted: true, nasError: null }),

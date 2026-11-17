@@ -75,6 +75,96 @@ pub struct NasState {
     pub stopped: bool,
     /** Just started: looking for the NAS (the status bar says "Connecting to the NAS…"). */
     pub connecting: bool,
+    /// What happened lately, newest first (the status bar's sync panel).
+    pub recent: Vec<NasEvent>,
+}
+
+/// One line of the sync panel's history.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct NasEvent {
+    /// ms since 1970
+    pub at: i64,
+    /// "ok" (something done), "info", or "bad" (a problem)
+    pub kind: &'static str,
+    pub text: String,
+}
+
+const RECENT_KEEP: usize = 30;
+
+/// Add a line to the history. The same line again (a lost connection noticed on
+/// every pass) only moves its time, so the list doesn't fill with repeats.
+fn push_event(st: &mut NasState, kind: &'static str, text: String) {
+    let at = now_ms();
+    if let Some(first) = st.recent.first_mut()
+        && first.text == text
+    {
+        first.at = at;
+        return;
+    }
+    st.recent.insert(0, NasEvent { at, kind, text });
+    st.recent.truncate(RECENT_KEEP);
+}
+
+/// The history lines a state change is worth: connected, lost, paused, stopped, errors.
+fn note_changes(before: &NasState, after: &mut NasState) {
+    if !after.enabled {
+        return;
+    }
+    let mut lines: Vec<(&'static str, String)> = Vec::new();
+    if before.connecting && !after.connecting {
+        lines.push(if after.reachable { ("ok", "Connected to the NAS".into()) } else { ("bad", "Couldn't reach the NAS".into()) });
+    } else if !after.connecting && before.reachable != after.reachable {
+        lines.push(if after.reachable { ("ok", "Connected to the NAS again".into()) } else { ("bad", "Lost the connection to the NAS".into()) });
+    }
+    if !before.paused && after.paused {
+        lines.push(("info", "Paused while you play".into()));
+    }
+    if before.paused && !after.paused && !after.stopped {
+        lines.push(("info", "Game closed: syncing again".into()));
+    }
+    if !before.stopped && after.stopped {
+        lines.push(("info", "Sync stopped".into()));
+    }
+    if before.stopped && !after.stopped {
+        lines.push(("info", "Sync resumed".into()));
+    }
+    if let Some(e) = &after.last_error
+        && before.last_error.as_ref() != Some(e)
+    {
+        lines.push(("bad", e.clone()));
+    }
+    for (kind, text) in lines {
+        push_event(after, kind, text);
+    }
+}
+
+/// Note something done with the NAS outside a sync pass (a delete, a replace).
+pub fn note(kind: &'static str, text: String) {
+    let snapshot = {
+        let mut s = STATE.lock().unwrap();
+        let st = s.get_or_insert_with(NasState::default);
+        push_event(st, kind, text);
+        st.clone()
+    };
+    if let Some(app) = APP.get() {
+        let _ = app.emit("nas-state", snapshot);
+    }
+}
+
+static APP: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
+
+/// "OBS 2026-07-30 16-04-15.mp4" out of a NAS-relative path.
+fn file_name(rel: &str) -> &str {
+    rel.rsplit(['/', '\\']).next().unwrap_or(rel)
+}
+
+/// "OBS 2026-07-30 16-04-15.mp4", or "3 clips".
+fn clips_text(list: &[String]) -> String {
+    match list {
+        [one] => file_name(one).to_string(),
+        _ => format!("{} clips", list.len()),
+    }
 }
 
 /// Where a sync pass is up to, for the progress display.
@@ -426,10 +516,12 @@ pub fn delete_on_nas(nas_dir: &str, server: &str, rel: &str) -> Result<bool, Str
         && v["trashed"].as_bool() == Some(true)
     {
         forget(nas_dir, rel);
+        note("info", format!("Moved {} to the NAS app's Trash", file_name(rel)));
         return Ok(true);
     }
     set_aside_in(nas, rel, DELETED).map_err(|e| e.replace("the old NAS version", "the NAS copy"))?;
     forget(nas_dir, rel);
+    note("info", format!("Set {} aside on the NAS (deleted)", file_name(rel)));
     Ok(true)
 }
 
@@ -1105,7 +1197,13 @@ fn publish(app: &AppHandle, f: impl FnOnce(&mut NasState)) {
     let snapshot = {
         let mut s = STATE.lock().unwrap();
         let st = s.get_or_insert_with(NasState::default);
+        let before = st.clone();
         f(st);
+        // A reset (the NAS turned off) starts the history again.
+        if st.enabled && st.recent.is_empty() && !before.recent.is_empty() && before.enabled {
+            st.recent = before.recent.clone();
+        }
+        note_changes(&before, st);
         st.clone()
     };
     let _ = app.emit("nas-state", snapshot);
@@ -1113,6 +1211,7 @@ fn publish(app: &AppHandle, f: impl FnOnce(&mut NasState)) {
 
 /// Background worker: a pass every 30 s, or right after `wake()`.
 pub fn start(app: AppHandle) {
+    let _ = APP.set(app.clone());
     std::thread::spawn(move || {
         let mut synced: HashSet<String> = HashSet::new();
         let mut verified: HashSet<String> = HashSet::new();
@@ -1273,6 +1372,10 @@ pub fn start(app: AppHandle) {
                     crate::remember_edited(&app, &new.to_string_lossy());
                 }
                 pulled_any = !pulled.is_empty();
+                if pulled_any {
+                    let n = pulled.len();
+                    publish(&app, |st| push_event(st, "ok", format!("Got {} edited on another PC", if n == 1 { "a clip".to_string() } else { format!("{n} clips") })));
+                }
                 if let Some(e) = err {
                     publish(&app, |st| st.last_error = Some(e));
                 }
@@ -1330,6 +1433,15 @@ pub fn start(app: AppHandle) {
                         st.copied += pass.copied.len();
                         st.last_error = pass.errors.first().cloned();
                         st.last_sync = Some(now_ms());
+                        if !pass.copied.is_empty() {
+                            push_event(st, "ok", format!("Copied {} to the NAS", clips_text(&pass.copied)));
+                        }
+                        if !pass.updated.is_empty() {
+                            push_event(st, "ok", format!("Sent your edit of {} to the NAS", clips_text(&pass.updated)));
+                        }
+                        if !pass.removed.is_empty() {
+                            push_event(st, "ok", format!("Freed up space: {} now only on the NAS", clips_text(&pass.removed)));
+                        }
                     });
                 }
                 Err(e) => publish(&app, |st| {
@@ -1353,6 +1465,39 @@ pub fn start(app: AppHandle) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod event_tests {
+    use super::*;
+
+    #[test]
+    fn the_sync_history_says_what_changed_without_repeats() {
+        let before = NasState { enabled: true, connecting: true, ..Default::default() };
+        let mut after = NasState { enabled: true, reachable: true, ..Default::default() };
+        note_changes(&before, &mut after);
+        assert_eq!(after.recent[0].text, "Connected to the NAS");
+        let b = after.clone();
+        after.reachable = false;
+        note_changes(&b, &mut after);
+        assert_eq!(after.recent[0].text, "Lost the connection to the NAS");
+        assert_eq!(after.recent[0].kind, "bad");
+        // The same problem on the next pass only updates its time.
+        let b = after.clone();
+        after.last_error = Some("Network path not found".into());
+        note_changes(&b, &mut after);
+        let n = after.recent.len();
+        let b = after.clone();
+        note_changes(&b, &mut after);
+        push_event(&mut after, "bad", "Network path not found".into());
+        assert_eq!(after.recent.len(), n);
+        assert_eq!(clips_text(&["OBS/OBS 2026-07-30 16-04-15.mp4".into()]), "OBS 2026-07-30 16-04-15.mp4");
+        assert_eq!(clips_text(&["a".into(), "b".into()]), "2 clips");
+        for i in 0..40 {
+            push_event(&mut after, "ok", format!("line {i}"));
+        }
+        assert_eq!(after.recent.len(), RECENT_KEEP);
+    }
 }
 
 #[cfg(test)]

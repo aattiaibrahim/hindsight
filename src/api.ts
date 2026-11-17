@@ -216,9 +216,12 @@ export type ClipFile = {
   source: string;
 };
 
+export type NasEvent = { at: number; kind: "ok" | "info" | "bad"; text: string };
 export type NasState = {
   /** Just started: still looking for the NAS. */
   connecting?: boolean;
+  /** What happened lately, newest first (nas::NasEvent). */
+  recent?: NasEvent[];
   enabled: boolean;
   reachable: boolean;
   pending: number;

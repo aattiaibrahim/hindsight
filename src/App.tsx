@@ -275,7 +275,11 @@ export default function App() {
       kind: "folders",
       title: `Your ${f.label} folder has no clips left in it`,
       detail: `${f.moved ? `All ${f.moved} of its clips moved into Hindsight. ` : ""}${f.files ? `Only ${f.files} other file${f.files === 1 ? "" : "s"} (${fmtSize(f.bytes)}) ${f.files === 1 ? "is" : "are"} left in it.` : "It's empty."}`,
-      actions: [{ label: "Delete folder…", run: () => setOldAsk(f), primary: true }],
+      // Look inside first: what's left may be worth keeping.
+      actions: [
+        { label: "Open folder", run: () => api.reveal(f.path).catch((e) => toast(errText(e), true)) },
+        { label: "Delete folder…", run: () => setOldAsk(f), primary: true },
+      ],
     });
   if (nasNow?.enabled && !nasNow.reachable)
     notices.push({
