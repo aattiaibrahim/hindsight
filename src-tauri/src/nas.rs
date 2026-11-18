@@ -1319,7 +1319,9 @@ pub fn start(app: AppHandle) {
             // instead of after a whole pass (or after the game).
             {
                 let root = PathBuf::from(&s.nas_dir);
-                let here = root.is_dir();
+                // Not there: sign in again with the login saved in Credential Manager
+                // (after a restart, or the NAS rebooting). Once a minute at most.
+                let here = root.is_dir() || crate::nas_connect::reconnect(&s.nas_dir);
                 publish(&app, |st| {
                     st.enabled = true;
                     st.reachable = here;

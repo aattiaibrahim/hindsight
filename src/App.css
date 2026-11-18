@@ -1351,6 +1351,12 @@ p.small { font-size: 12px; margin: 0; }
 .nas-sure { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; cursor: pointer; }
 .nas-sure input { margin-top: 2px; }
 .ok-text { color: var(--ok, #3ccf7a); font-size: 13px; }
+.nas-form { display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+.nas-form > label, label.nas-form { display: flex; flex-direction: column; gap: 4px; }
+.nas-form .text-input { width: 100%; }
+.nas-shares { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow-y: auto; }
+.nas-share { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 8px; background: var(--bg); cursor: pointer; font-size: 13px; border: 1px solid transparent; }
+.nas-share.on { border-color: var(--accent); }
 
 /* Timeline: labels stay put; a bubble by the pointer names the day and its clips. */
 .tl-bubble {

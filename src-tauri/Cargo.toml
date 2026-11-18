@@ -74,6 +74,9 @@ features = [
   "Win32_System_Memory",
   "Win32_UI_Shell_PropertiesSystem",
   "Win32_Devices_FunctionDiscovery",
+  "Win32_NetworkManagement_NetManagement",
+  "Win32_NetworkManagement_WNet",
+  "Win32_Security_Credentials",
 ]
 
 [profile.release]

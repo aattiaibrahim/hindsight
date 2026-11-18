@@ -24,6 +24,7 @@ mod library;
 mod monitors;
 mod media_server;
 mod nas;
+mod nas_connect;
 mod old_folders;
 mod native;
 mod secrets;
@@ -290,6 +291,33 @@ async fn nas_check(app: AppHandle, dir: String) -> nas::FolderCheck {
 #[tauri::command]
 async fn nas_confirm(dir: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || nas::confirm_folder(std::path::Path::new(&dir))).await.map_err(|e| e.to_string())?
+}
+
+/// Sign in to the NAS (Settings → Library & NAS → Connect) and list its shared folders.
+#[tauri::command]
+async fn nas_sign_in(host: String, user: String, password: String, remember: bool) -> Result<Vec<nas_connect::NasShare>, String> {
+    tauri::async_runtime::spawn_blocking(move || nas_connect::connect(&host, &user, &password, remember))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Open the share picked after signing in (making the folder in it if asked) and return its path.
+#[tauri::command]
+async fn nas_open_share(path: String, user: String, password: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || nas_connect::open_share(&path, &user, &password))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// The user name saved in Credential Manager for this NAS (never the password).
+#[tauri::command]
+fn nas_saved_login(host: String) -> Option<nas_connect::SavedLogin> {
+    nas_connect::saved_login(&host)
+}
+
+#[tauri::command]
+fn nas_forget_login(host: String) {
+    nas_connect::forget(&host)
 }
 
 #[tauri::command]
@@ -2197,6 +2225,10 @@ get_settings,
             nas_check,
             nas_confirm,
             nas_pair,
+            nas_sign_in,
+            nas_open_share,
+            nas_saved_login,
+            nas_forget_login,
             get_status,
             restart_capture,
             list_monitors,

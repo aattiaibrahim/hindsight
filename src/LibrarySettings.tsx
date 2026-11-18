@@ -7,6 +7,7 @@ import { NasProgress, useNasState } from "./NasProgress";
 import { useDetectStatus } from "./GameSort";
 import { HealthSetting } from "./Health";
 import { NasSetup } from "./NasSetup";
+import { NasConnect } from "./NasConnect";
 import { OldFolderDialog } from "./OldFolder";
 import { MixTracksSetting } from "./MixTracksSetting";
 
@@ -88,6 +89,8 @@ export function LibrarySettings({
   };
   // A folder picked for the NAS, being checked before anything syncs.
   const [checking, setChecking] = useState<string | null>(null);
+  // Signing in to the NAS and picking a share, before that check.
+  const [connecting, setConnecting] = useState(false);
   useEffect(() => {
     api.recorderClipFolders().then(setFound).catch(() => {});
   }, []);
@@ -224,8 +227,8 @@ export function LibrarySettings({
               Turn off
             </button>
           )}
-          <button className="btn small" onClick={pickNas}>
-            {s.nasDir ? "Change…" : "Choose…"}
+          <button className="btn small" onClick={() => setConnecting(true)}>
+            {s.nasDir ? "Change…" : "Connect…"}
           </button>
         </div>
       </div>
@@ -237,6 +240,20 @@ export function LibrarySettings({
             setEmptyAsk(null);
             refreshEmpties();
           }}
+        />
+      )}
+      {connecting && (
+        <NasConnect
+          current={s.nasDir}
+          onPicked={(dir) => {
+            setConnecting(false);
+            setChecking(dir);
+          }}
+          onBrowse={() => {
+            setConnecting(false);
+            pickNas();
+          }}
+          onClose={() => setConnecting(false)}
         />
       )}
       {checking && (

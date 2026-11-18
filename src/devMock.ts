@@ -177,6 +177,17 @@ export function installDevMock() {
       toCopy: 38, toCopyBytes: 21.4e9, knownLibrary: true, serverGuess: "http://nas:8420", onThisPc: false, warnings: [],
     }),
     nas_confirm: () => "mock",
+    nas_sign_in: (a) => {
+      if (!a.password && a.user !== "hindsight") throw "Wrong user name or password. On TrueNAS, the user needs \"SMB User\" ticked.";
+      return [
+        { name: "clips", comment: "Game clips", path: `\\\\${a.host}\\clips` },
+        { name: "music", comment: "", path: `\\\\${a.host}\\music` },
+        { name: "personal", comment: "", path: `\\\\${a.host}\\personal` },
+      ];
+    },
+    nas_open_share: (a) => a.path,
+    nas_saved_login: (a) => (a.host === "192.168.0.113" ? { host: a.host, user: "hindsight" } : null),
+    nas_forget_login: () => null,
     nas_pair: (a) => {
       if (String(a.code).replace(/\s/g, "") !== "123456") throw "That code isn't right.";
       return "Paired with the NAS app (412 clips there).";

@@ -317,6 +317,20 @@ export type LastMove = { label: string; count: number; when: number };
 export type CropRect = { x: number; y: number; w: number; h: number };
 
 /** What's in a folder picked as the NAS folder (before anything syncs). */
+/** A shared folder on the NAS, from signing in. */
+export type NasShare = {
+  name: string;
+  comment: string;
+  /** `\\host\name` */
+  path: string;
+};
+
+/** The login Windows has saved for a NAS (the user name only). */
+export type NasSavedLogin = {
+  host: string;
+  user: string;
+};
+
 export type NasFolderCheck = {
   dir: string;
   reachable: boolean;
@@ -506,6 +520,13 @@ export const api = {
   /** Marks the folder as the library; returns its id. */
   nasConfirm: (dir: string) => invoke<string>("nas_confirm", { dir }),
   nasPair: (dir: string, server: string, code: string) => invoke<string>("nas_pair", { dir, server, code }),
+  /** Sign in to the NAS (saving the password in Credential Manager with `remember`) and list its shared folders. Empty password: use the saved one. */
+  nasSignIn: (host: string, user: string, password: string, remember: boolean) =>
+    invoke<NasShare[]>("nas_sign_in", { host, user, password, remember }),
+  /** Open a share (or a folder in it, made if needed); returns the folder's path. */
+  nasOpenShare: (path: string, user: string, password: string) => invoke<string>("nas_open_share", { path, user, password }),
+  nasSavedLogin: (host: string) => invoke<NasSavedLogin | null>("nas_saved_login", { host }),
+  nasForgetLogin: (host: string) => invoke<void>("nas_forget_login", { host }),
   /** A small PNG of the screen being recorded (refused while a game runs). */
   screenPreview: () => invoke<ArrayBuffer>("screen_preview"),
   saveClip: (seconds?: number) => invoke<string>("save_clip", { seconds: seconds ?? null }),
