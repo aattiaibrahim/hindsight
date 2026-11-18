@@ -7,7 +7,7 @@ import { NasProgress, useNasState } from "./NasProgress";
 import { useDetectStatus } from "./GameSort";
 import { HealthSetting } from "./Health";
 import { NasSetup } from "./NasSetup";
-import { NasConnect } from "./NasConnect";
+import { NasConnect, takeNasSignInRequest } from "./NasConnect";
 import { OldFolderDialog } from "./OldFolder";
 import { MixTracksSetting } from "./MixTracksSetting";
 
@@ -38,6 +38,8 @@ function ago(ms: number) {
 function nasLine(s: Settings, n: NasState | null) {
   if (!s.nasDir) return "Off. Clips stay on this PC only.";
   if (!n || !n.enabled) return "Starting…";
+  if (!n.reachable && n.loginRejected)
+    return "The NAS turned down the saved password (it was probably changed on the NAS). Sign in again to keep syncing; clips keep saving here meanwhile.";
   if (!n.reachable) return `Can't reach it right now. Clips keep saving here and copy over once it's back. (${n.lastError ?? ""})`;
   if (n.paused)
     return `Paused while you play${n.pausedFor ? ` ${n.pausedFor}` : ""}${n.pending ? ` (${n.pending} clip${n.pending === 1 ? "" : "s"} waiting)` : ""}. Copying starts again once the game is closed.`;
@@ -91,6 +93,13 @@ export function LibrarySettings({
   const [checking, setChecking] = useState<string | null>(null);
   // Signing in to the NAS and picking a share, before that check.
   const [connecting, setConnecting] = useState(false);
+  // "Sign in again" from the notice when the NAS turns the saved password down.
+  useEffect(() => {
+    const open = () => takeNasSignInRequest() && setConnecting(true);
+    open(); // asked for before Settings was open
+    window.addEventListener("hindsight:nas-sign-in", open);
+    return () => window.removeEventListener("hindsight:nas-sign-in", open);
+  }, []);
   useEffect(() => {
     api.recorderClipFolders().then(setFound).catch(() => {});
   }, []);
@@ -227,8 +236,8 @@ export function LibrarySettings({
               Turn off
             </button>
           )}
-          <button className="btn small" onClick={() => setConnecting(true)}>
-            {s.nasDir ? "Change…" : "Connect…"}
+          <button className={`btn small${nas?.loginRejected ? " primary" : ""}`} onClick={() => setConnecting(true)}>
+            {nas?.loginRejected ? "Sign in again…" : s.nasDir ? "Change…" : "Connect…"}
           </button>
         </div>
       </div>
@@ -245,6 +254,7 @@ export function LibrarySettings({
       {connecting && (
         <NasConnect
           current={s.nasDir}
+          rejected={!!nas?.loginRejected}
           onPicked={(dir) => {
             setConnecting(false);
             setChecking(dir);

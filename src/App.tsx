@@ -1,4 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
+import { requestNasSignIn } from "./NasConnect";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ShareConfirm, ShareRequest, useUploads } from "./Share";
 import { useHealth } from "./Health";
@@ -290,14 +291,34 @@ export default function App() {
       ],
     });
   if (nasNow?.enabled && !nasNow.reachable)
-    notices.push({
-      id: `nas:${nasNow.lastError ?? ""}`,
-      kind: "nas",
-      title: "Can't reach the NAS",
-      detail: "Clips keep saving on this PC and copy over once it's back.",
-      tone: "warn",
-      actions: [{ label: "NAS settings", run: () => setView("settings") }],
-    });
+    notices.push(
+      nasNow.loginRejected
+        ? {
+            id: "nas:login-rejected",
+            kind: "nas",
+            title: "The NAS turned down the saved password",
+            detail: "It was probably changed on the NAS. Sign in again; clips keep saving on this PC meanwhile.",
+            tone: "warn",
+            actions: [
+              {
+                label: "Sign in again",
+                primary: true,
+                run: () => {
+                  setView("settings");
+                  requestNasSignIn();
+                },
+              },
+            ],
+          }
+        : {
+            id: `nas:${nasNow.lastError ?? ""}`,
+            kind: "nas",
+            title: "Can't reach the NAS",
+            detail: "Clips keep saving on this PC and copy over once it's back.",
+            tone: "warn",
+            actions: [{ label: "NAS settings", run: () => setView("settings") }],
+          },
+    );
   const noticeState = useNoticeState(notices);
 
   // To trim: saved clips nobody has trimmed or edited yet (and not marked "Keep whole").

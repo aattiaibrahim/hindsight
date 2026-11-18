@@ -2,6 +2,22 @@ import { useEffect, useState } from "react";
 import { api, errText, NasShare } from "./api";
 
 /**
+ * "Sign in again" from anywhere (the notice when the NAS turns the saved password
+ * down): opens this dialog in Settings, even if Settings wasn't open yet.
+ */
+export function requestNasSignIn() {
+  signInPending = true;
+  window.dispatchEvent(new Event("hindsight:nas-sign-in"));
+}
+let signInPending = false;
+/** Settings → Library calls this when it opens and on the event: was a sign-in asked for? */
+export function takeNasSignInRequest() {
+  const was = signInPending;
+  signInPending = false;
+  return was;
+}
+
+/**
  * Connect to the NAS like any NAS app does: its address, the user made on the
  * NAS and its password, then pick a shared folder from the list. Windows does
  * the signing in (the same connection File Explorer makes), and "Remember"
@@ -10,12 +26,15 @@ import { api, errText, NasShare } from "./api";
  */
 export function NasConnect({
   current,
+  rejected,
   onPicked,
   onBrowse,
   onClose,
 }: {
   /** The NAS folder set now, if any (to fill in the address). */
   current: string;
+  /** The NAS turned down the saved password: ask for the new one. */
+  rejected?: boolean;
   onPicked: (dir: string) => void;
   /** Pick a folder the old way instead (a mapped drive, a folder on this PC). */
   onBrowse: () => void;
@@ -26,6 +45,7 @@ export function NasConnect({
   const [user, setUser] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
+  const [show, setShow] = useState(false);
   const [saved, setSaved] = useState<string | null>(null);
   const [shares, setShares] = useState<NasShare[] | null>(null);
   const [share, setShare] = useState("");
@@ -85,7 +105,9 @@ export function NasConnect({
     setPassword("");
   };
 
-  const canConnect = !!host.trim() && (!!password || !!saved) && (!!user.trim() || !!saved) && !busy;
+  // A saved password the NAS turned down can't be used again: a new one is needed.
+  const savedUsable = !!saved && !rejected;
+  const canConnect = !!host.trim() && (!!password || savedUsable) && (!!user.trim() || savedUsable) && !busy;
 
   return (
     <div className="modal-backdrop" onClick={() => !busy && onClose()}>
@@ -93,6 +115,12 @@ export function NasConnect({
         <h2 id="nas-connect-title">Connect to your NAS</h2>
         {!shares ? (
           <>
+            {rejected && (
+              <p className="err-text">
+                The NAS turned down the saved password, so it was probably changed on the NAS. Type the new one. (Forgot it? Whoever
+                runs the NAS can set a new one: on TrueNAS, Credentials → Users → this user → Edit.)
+              </p>
+            )}
             <p className="muted">
               Use a user made on the NAS (on TrueNAS: Credentials → Users, with <b>SMB User</b> ticked). Windows signs in with it,
               the same way File Explorer does.
@@ -114,15 +142,26 @@ export function NasConnect({
               </label>
               <label>
                 Password
-                <input
-                  className="text-input"
-                  type="password"
-                  autoComplete="current-password"
-                  autoFocus={!!host}
-                  placeholder={saved ? "Saved in Windows (leave empty)" : ""}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
+                <span className="row nas-pass">
+                  <input
+                    className="text-input"
+                    type={show ? "text" : "password"}
+                    autoComplete="current-password"
+                    autoFocus={!!host}
+                    placeholder={savedUsable ? "Saved in Windows (leave empty)" : ""}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="btn small"
+                    aria-pressed={show}
+                    title={show ? "Hide the password" : "Show the password"}
+                    onClick={() => setShow((v) => !v)}
+                  >
+                    {show ? "Hide" : "Show"}
+                  </button>
+                </span>
               </label>
               <label className="nas-sure">
                 <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />

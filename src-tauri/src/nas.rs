@@ -79,6 +79,9 @@ pub struct NasState {
     pub recent: Vec<NasEvent>,
     /// The game it's waiting for while paused (None: a clip being saved or recorded)
     pub paused_for: Option<String>,
+    /// Can't reach it because the NAS turned down the saved password (changed on
+    /// the NAS): "sign in again" rather than "can't reach".
+    pub login_rejected: bool,
 }
 
 /// One line of the sync panel's history.
@@ -121,6 +124,9 @@ fn note_changes(before: &NasState, after: &mut NasState) {
         lines.push(if after.reachable { ("ok", "Connected to the NAS".into()) } else { ("bad", "Couldn't reach the NAS".into()) });
     } else if !after.connecting && before.reachable != after.reachable {
         lines.push(if after.reachable { ("ok", "Connected to the NAS again".into()) } else { ("bad", "Lost the connection to the NAS".into()) });
+    }
+    if !before.login_rejected && after.login_rejected {
+        lines.push(("bad", "The NAS turned down the saved password. Sign in again in Settings".into()));
     }
     let paused_now = !before.paused && after.paused;
     if paused_now {
@@ -1322,10 +1328,12 @@ pub fn start(app: AppHandle) {
                 // Not there: sign in again with the login saved in Credential Manager
                 // (after a restart, or the NAS rebooting). Once a minute at most.
                 let here = root.is_dir() || crate::nas_connect::reconnect(&s.nas_dir);
+                let rejected = !here && crate::nas_connect::login_rejected();
                 publish(&app, |st| {
                     st.enabled = true;
                     st.reachable = here;
                     st.connecting = false;
+                    st.login_rejected = rejected;
                 });
                 let ours = here && (s.nas_library_id.is_empty() || read_marker(&root).as_deref() == Some(s.nas_library_id.as_str()));
                 let listed = LISTING.lock().unwrap().as_ref().is_some_and(|l| l.root == s.nas_dir);
@@ -1376,6 +1384,9 @@ pub fn start(app: AppHandle) {
             publish(&app, |st| {
                 st.enabled = true;
                 st.reachable = here;
+                if here {
+                    st.login_rejected = false;
+                }
             });
             if here {
                 match read_marker(&nas_root) {

@@ -31,7 +31,7 @@ export function fmtEta(secs: number) {
 export function nasActivity(n: NasState | null): { text: string; pct: number | null; busy: boolean } | null {
   if (!n?.enabled) return null;
   if (n.connecting) return { text: "Connecting to the NAS…", pct: null, busy: true };
-  if (!n.reachable) return { text: "Can't reach the NAS", pct: null, busy: false };
+  if (!n.reachable) return { text: n.loginRejected ? "NAS password changed: sign in again" : "Can't reach the NAS", pct: null, busy: false };
   if (n.stopped) return { text: "NAS sync stopped", pct: null, busy: false };
   if (n.copying && n.freeing && n.freeTotal > 0) {
     const pct = Math.min(100, Math.round((n.freeDone / n.freeTotal) * 100));
@@ -134,7 +134,9 @@ export function StudioNas({ clip }: { clip?: ClipFile }) {
         : status === "copying"
           ? `Copying to the NAS…${pct != null ? ` ${pct}%` : ""}`
           : !nas.reachable
-            ? "Not on the NAS yet (can't reach it)"
+            ? nas.loginRejected
+              ? "Not on the NAS yet (sign in to the NAS again)"
+              : "Not on the NAS yet (can't reach it)"
             : nas.paused
               ? "Not on the NAS yet: copies after your game"
               : "Not on the NAS yet";

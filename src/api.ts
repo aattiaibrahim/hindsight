@@ -230,6 +230,8 @@ export type NasState = {
   recent?: NasEvent[];
   /** The game the copying is waiting for */
   pausedFor?: string | null;
+  /** Can't reach it because the NAS turned down the saved password (changed on the NAS) */
+  loginRejected?: boolean;
   enabled: boolean;
   reachable: boolean;
   pending: number;

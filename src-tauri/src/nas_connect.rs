@@ -14,6 +14,7 @@
 
 use serde::Serialize;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{FILETIME, WIN32_ERROR};
@@ -104,6 +105,20 @@ fn explain(code: u32, host: &str) -> String {
     }
 }
 
+/// The NAS turned down the saved login the last time Hindsight tried it (its
+/// password was changed on the NAS, or the user removed). Cleared by any
+/// successful sign-in.
+static REJECTED: AtomicBool = AtomicBool::new(false);
+
+pub fn login_rejected() -> bool {
+    REJECTED.load(Ordering::SeqCst)
+}
+
+/// Windows errors that mean "the NAS said this user or password is wrong".
+fn is_bad_login(code: u32) -> bool {
+    matches!(code, 86 | 1326 | 2202 | 1907 | 1330 | 1909)
+}
+
 /// Connect `remote` (`\\host\share` or `\\host\IPC$`). Empty user and password:
 /// whatever Windows already has for that NAS (the saved credential).
 fn add_connection(remote: &str, user: &str, password: &str) -> u32 {
@@ -144,7 +159,10 @@ fn sign_in(host: &str, remote: &str, user: &str, password: &str) -> Result<(), S
         code = add_connection(remote, user, password);
     }
     match code {
-        0 | 85 /* already connected */ => Ok(()),
+        0 | 85 /* already connected */ => {
+            REJECTED.store(false, Ordering::SeqCst);
+            Ok(())
+        }
         c => Err(explain(c, host)),
     }
 }
@@ -278,7 +296,18 @@ pub fn reconnect(dir: &str) -> bool {
     if saved_login(&host).is_none() {
         return false;
     }
-    add_connection(&root, "", "") == 0 && std::path::Path::new(dir).is_dir()
+    match add_connection(&root, "", "") {
+        0 | 85 => {
+            REJECTED.store(false, Ordering::SeqCst);
+            std::path::Path::new(dir).is_dir()
+        }
+        c => {
+            if is_bad_login(c) {
+                REJECTED.store(true, Ordering::SeqCst);
+            }
+            false
+        }
+    }
 }
 
 #[cfg(test)]
@@ -303,6 +332,14 @@ mod tests {
         assert_eq!(share_root("D:\\Clips"), None);
         assert_eq!(host_of("\\\\192.168.0.113\\clips").as_deref(), Some("192.168.0.113"));
         assert_eq!(host_of("D:\\Clips"), None);
+    }
+
+    #[test]
+    fn wrong_password_errors_are_told_apart() {
+        assert!(is_bad_login(1326));
+        assert!(is_bad_login(86));
+        assert!(!is_bad_login(53)); // NAS off: not a password problem
+        assert!(!is_bad_login(1219));
     }
 
     #[test]
