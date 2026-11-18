@@ -1353,6 +1353,7 @@ p.small { font-size: 12px; margin: 0; }
 .ok-text { color: var(--ok, #3ccf7a); font-size: 13px; }
 .nas-form { display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
 .nas-form > label, label.nas-form { display: flex; flex-direction: column; gap: 4px; }
+.nas-form > label.nas-sure { flex-direction: row; gap: 8px; }
 .nas-form .text-input { width: 100%; }
 .nas-pass { gap: 6px; flex-wrap: nowrap; }
 .nas-pass .text-input { flex: 1; }
