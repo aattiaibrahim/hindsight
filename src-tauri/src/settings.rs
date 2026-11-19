@@ -21,6 +21,9 @@ pub struct Settings {
     pub monitor_mode: String,
     /// Device name like \\.\DISPLAY1, used when monitor_mode == "fixed"
     pub fixed_monitor: String,
+    /// That screen's hardware id (see monitors::Monitor::id): finds it again
+    /// when Windows renumbers the displays. "" = only the name is known.
+    pub fixed_monitor_id: String,
     pub draw_cursor: bool,
     /// Part of the screen to record, as fractions of the monitor; None = all of it.
     pub capture_area: Option<Area>,
@@ -155,6 +158,7 @@ impl Default for Settings {
             capture_engine: "native".into(),
             monitor_mode: "primary".into(),
             fixed_monitor: String::new(),
+            fixed_monitor_id: String::new(),
             draw_cursor: true,
             capture_area: None,
             hotkey: "Alt+F10".into(),

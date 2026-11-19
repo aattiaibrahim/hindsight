@@ -217,7 +217,9 @@ fn same_game(folder_key: &str, steam_name: &str) -> bool {
     // "Overwatch" for "Overwatch 2", but not "Minecraft Dungeons" for "Minecraft".
     let edition = |tail: &str| {
         tail.chars().all(|c| c.is_ascii_digit())
-            || ["x", "remake", "remastered", "hd", "goty", "definitiveedition", "enhancededition", "gameoftheyearedition", "classic", "reloaded"].contains(&tail)
+            // "Sea of Thieves: 2026 Edition"
+            || tail.strip_suffix("edition").is_some_and(|y| y.len() == 4 && y.chars().all(|c| c.is_ascii_digit()))
+            ||["x", "remake", "remastered", "hd", "goty", "definitiveedition", "enhancededition", "gameoftheyearedition", "classic", "reloaded"].contains(&tail)
     };
     k == folder_key
         || (folder_key.len() >= 6 && k.strip_prefix(folder_key).is_some_and(edition))
@@ -225,7 +227,9 @@ fn same_game(folder_key: &str, steam_name: &str) -> bool {
 }
 
 /// Games whose Steam name changed, or that the store search no longer lists.
-const STEAM_ALIASES: [(&str, u64); 9] = [
+const STEAM_ALIASES: [(&str, u64); 11] = [
+    ("tarkov", 3932890),
+    ("eft", 3932890),
     ("hitman3", 1659040),
     ("hitman", 1659040),
     ("rocketleague", 252950),
@@ -377,8 +381,8 @@ pub fn icon(game: &str, online: bool) -> Option<PathBuf> {
             return Some(steam);
         }
         // Never while a game is running; a miss is asked again after a week.
-        // "steam3": asked again after the search learned to skip punctuation words.
-        let miss = dir.join(format!("{key}.steam3-none"));
+        // "steam4": asked again after names like "Sea of Thieves: 2026 Edition" started to match.
+        let miss = dir.join(format!("{key}.steam4-none"));
         if !crate::games::game_running() && !tried_recently(&miss, 7 * 86_400) {
             // "SpeciesUnknown-Win64-Shipping" is looked up as "Species Unknown".
             let title = crate::games::tidy_program_name(game).unwrap_or_else(|| game.to_string());
@@ -428,6 +432,8 @@ mod tests {
         assert!(!same_game("render", "Render Voice VR"));
         assert!(same_game("residentevil3remake", "Resident Evil 3"));
         assert!(same_game("counterstrike2", "Counter-Strike 2"));
+        assert!(same_game("seaofthieves", "Sea of Thieves: 2026 Edition"));
+        assert!(!same_game("seaofthieves", "Sea of Thieves: 2026 Premium Bundle"));
         assert!(!same_game("edit", "Edith Finch"));
         assert!(!same_game("funnynotcool", "Funny"));
         assert!(!same_game("residentevilrequiem", "Resident Evil"));
@@ -456,7 +462,7 @@ mod tests {
     fn live_game_icons() {
         let dir = std::env::temp_dir().join("rewind-live-icons");
         init(dir.clone());
-        for g in ["Payday The Heist", "Battlefield 6", "Minecraft", "Render", "Hitman 3", "Rocket League", "Apex Legends", "SpeciesUnknown-Win64-Shipping", "Species Unknown", "Escape From Tarkov", "Resident Evil 3 Remake", "Edits", "funny not cool", "VALORANT", "League of Legends", "Counter-strike 2", "Marvel Rivals", "Overwatch 2", "Tom Clancys Rainbow Six Siege", "Hunt Showdown", "Payday The Heist", "Resident Evil Requiem", "The Outlast Trials", "Empyrion - Galactic Survival", "Desktop"] {
+        for g in ["Sea of Thieves", "Tarkov", "Payday The Heist", "Battlefield 6", "Minecraft", "Render", "Hitman 3", "Rocket League", "Apex Legends", "SpeciesUnknown-Win64-Shipping", "Species Unknown", "Escape From Tarkov", "Resident Evil 3 Remake", "Edits", "funny not cool", "VALORANT", "League of Legends", "Counter-strike 2", "Marvel Rivals", "Overwatch 2", "Tom Clancys Rainbow Six Siege", "Hunt Showdown", "Payday The Heist", "Resident Evil Requiem", "The Outlast Trials", "Empyrion - Galactic Survival", "Desktop"] {
             println!("{g}: {:?} -> {:?}", find_program(g), icon(g, true));
         }
     }

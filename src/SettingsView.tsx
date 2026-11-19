@@ -183,10 +183,11 @@ export function SettingsView({
 
   const set = (p: Partial<Settings>) => update(p).catch((e) => onError(String(e)));
   const s = settings;
-  const screen =
-    (s.monitorMode === "fixed" && monitors.find((m) => m.name === s.fixedMonitor)) ||
-    monitors.find((m) => m.primary) ||
-    monitors[0];
+  // The chosen screen: by hardware id (survives Windows renumbering DISPLAY1/2), else by number.
+  const fixedScreen =
+    (s.fixedMonitorId && monitors.find((m) => m.id && m.id.toLowerCase() === s.fixedMonitorId.toLowerCase())) ||
+    (!s.fixedMonitorId || monitors.every((m) => !m.id) ? monitors.find((m) => m.name === s.fixedMonitor) : undefined);
+  const screen = (s.monitorMode === "fixed" && fixedScreen) || monitors.find((m) => m.primary) || monitors[0];
   const screenH = screen?.height ?? 0;
   const resolutionHint =
     s.outputHeight === 0 || s.outputHeight === screenH
@@ -660,8 +661,19 @@ export function SettingsView({
           {s.monitorMode === "fixed" && (
             <label className="setting">
               <span>Monitor</span>
-              <Select className="select" value={s.fixedMonitor} onChange={(e) => set({ fixedMonitor: e.target.value })}>
-                <option value="">Choose…</option>
+              <Select
+                className="select"
+                value={fixedScreen ? fixedScreen.name : s.fixedMonitor}
+                onChange={(e) => {
+                  const m = monitors.find((x) => x.name === e.target.value);
+                  set({ fixedMonitor: e.target.value, fixedMonitorId: m?.id ?? "" });
+                }}
+              >
+                {!s.fixedMonitor && <option value="">Choose…</option>}
+                {/* Chosen, but not plugged in right now: say so instead of "Choose…". */}
+                {s.fixedMonitor && !fixedScreen && monitors.length > 0 && (
+                  <option value={s.fixedMonitor}>{s.fixedMonitor.replace("\\\\.\\", "")} (not connected, using main)</option>
+                )}
                 {monitors.map((m) => (
                   <option key={m.name} value={m.name}>
                     {m.name.replace("\\\\.\\", "")} · {m.width}×{m.height}

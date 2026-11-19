@@ -3,7 +3,9 @@ import { convertFileSrc, invoke as tauriInvoke } from "@tauri-apps/api/core";
 /** Every command, with failures written to the detailed log (Settings → Detailed log). */
 function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   return tauriInvoke<T>(cmd, args).catch((e) => {
-    if (cmd !== "log_ui") logUi(`${cmd} failed: ${errText(e)}`);
+    // "game…": work that waits while a game runs (expected, and asked every few seconds).
+    const text = errText(e);
+    if (cmd !== "log_ui" && !/^game\b/.test(text)) logUi(`${cmd} failed: ${text}`);
     throw e;
   });
 }
@@ -51,6 +53,7 @@ export type Settings = {
   captureEngine: "native" | "ffmpeg";
   monitorMode: MonitorMode;
   fixedMonitor: string;
+  fixedMonitorId: string;
   drawCursor: boolean;
   /** Part of the screen to record (fractions); null = all of it. */
   captureArea: CropRect | null;
@@ -382,6 +385,8 @@ export type Probe = {
 export type Monitor = {
   index: number;
   name: string;
+  /** The screen's hardware id: stays the same when Windows renumbers the displays. */
+  id: string;
   x: number;
   y: number;
   width: number;

@@ -41,9 +41,22 @@ export function useDetectStatus() {
   return s;
 }
 
+const NEW = "\u0000new";
+
 function Row({ s, on, game, games, onToggle, onGame }: { s: GameSuggestion; on: boolean; game: string; games: string[]; onToggle: () => void; onGame: (g: string) => void }) {
   const thumb = useThumb(s.path);
   const [err, setErr] = useState<string | null>(null);
+  const [naming, setNaming] = useState(false);
+  const [draft, setDraft] = useState("");
+  // A game with no folder yet: its folder is made when the clip moves.
+  const addGame = () => {
+    const name = draft.replace(/[<>:"/\\|?*]/g, " ").replace(/\s+/g, " ").trim();
+    if (!name) return;
+    // Same game, other spelling: use the folder that's there.
+    const same = games.find((g) => g.toLowerCase().replace(/[^a-z0-9]/g, "") === name.toLowerCase().replace(/[^a-z0-9]/g, ""));
+    onGame(same ?? name);
+    setNaming(false);
+  };
   return (
     <label className={`sort-row ${on ? "" : "off"}`}>
       <input type="checkbox" checked={on} onChange={onToggle} aria-label={`Move ${s.name}`} />
@@ -69,14 +82,61 @@ function Row({ s, on, game, games, onToggle, onGame }: { s: GameSuggestion; on: 
         Show in folder
       </button>
       <span className="sort-game">
-        <GameIcon name={game} size={18} />
-        <Select className="select" value={game} onChange={(e) => onGame(e.target.value)} aria-label="Game">
-          {games.map((g) => (
-            <option key={g} value={g}>
-              {g}
-            </option>
-          ))}
-        </Select>
+        <GameIcon name={naming ? draft : game} size={18} />
+        {naming ? (
+          <>
+            <input
+              className="text-input sort-new"
+              autoFocus
+              placeholder="Game's name"
+              value={draft}
+              maxLength={60}
+              aria-label="New game's name"
+              onChange={(e) => setDraft(e.target.value)}
+              onClick={(e) => e.preventDefault()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  addGame();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setNaming(false);
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="btn small primary"
+              disabled={!draft.trim()}
+              onClick={(e) => {
+                e.preventDefault();
+                addGame();
+              }}
+            >
+              Use
+            </button>
+          </>
+        ) : (
+          <Select
+            className="select"
+            value={game}
+            onChange={(e) => {
+              if (e.target.value === NEW) {
+                setDraft("");
+                setNaming(true);
+              } else onGame(e.target.value);
+            }}
+            aria-label="Game"
+          >
+            {games.map((g) => (
+              <option key={g} value={g}>
+                {g}
+              </option>
+            ))}
+            <option value={NEW}>+ New game…</option>
+          </Select>
+        )}
       </span>
     </label>
   );
@@ -102,7 +162,10 @@ export function GameSortDialog({
   const [games, setGames] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const known = [...new Set(clips.map((c) => c.folder).filter((f) => !["Desktop", "OBS", "Other", "Imports", "Imported"].includes(f)))].sort();
+  const known = [...new Set(clips.map((c) => c.folder).filter((f) => !["Desktop", "OBS", "Other", "Imports", "Imported"].includes(f)))];
+  // Games named with "New game…": offered in every row's list.
+  const added = Object.values(games);
+  const options = (game: string) => [...new Set([game, ...added, ...known])].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   const chosen = list.filter((s) => !off.has(s.path));
   const moved = useCountProgress("move-progress", busy);
   const move = async () => {
@@ -134,7 +197,7 @@ export function GameSortDialog({
               s={s}
               on={!off.has(s.path)}
               game={games[s.path] ?? s.game}
-              games={[...new Set([s.game, ...known])]}
+              games={options(s.game)}
               onToggle={() =>
                 setOff((o) => {
                   const n = new Set(o);

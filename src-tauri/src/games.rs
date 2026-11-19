@@ -84,6 +84,12 @@ pub fn classify(exe_path: &str, window_title: &str, fullscreen: bool) -> Option<
     if NOT_GAMES.contains(&stem.as_str()) {
         return None;
     }
+    // Windows' own programs (the Snipping Tool's full-screen overlay, the lock
+    // screen, Game Bar…) are never a game, however much of the screen they cover.
+    let windir = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into()).to_lowercase();
+    if exe_path.to_lowercase().starts_with(&format!("{}\\", windir.trim_end_matches('\\'))) {
+        return None;
+    }
     if let Some((_, title)) = KNOWN.iter().find(|(exe, _)| *exe == stem) {
         return Some(title.to_string());
     }
@@ -407,6 +413,7 @@ mod tests {
     fn browsers_and_apps_are_desktop() {
         assert_eq!(classify(r"C:\Program Files\Google\Chrome\Application\chrome.exe", "YouTube", true), None);
         assert_eq!(classify(r"C:\Windows\explorer.exe", "", true), None);
+        assert_eq!(classify(r"C:\Windows\SystemApps\MicrosoftWindows.Client.Core_cw5n1h2txyewy\ScreenClippingHost.exe", "Screen Snipping", true), None);
         assert_eq!(classify(r"C:\Users\x\AppData\Local\Discord\app-1.0\Discord.exe", "Discord", false), None);
         assert_eq!(classify(r"C:\Program Files (x86)\Steam\steam.exe", "Steam", true), None);
     }

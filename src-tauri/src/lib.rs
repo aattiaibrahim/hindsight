@@ -222,13 +222,46 @@ fn get_settings(app: AppHandle) -> Settings {
     settings_of(&app)
 }
 
+/// "Always one monitor": keep the chosen screen's hardware id next to its
+/// DISPLAY number, so it's found again when Windows renumbers the displays
+/// (after a driver update, a cable swap, waking up…). A screen picked by
+/// number alone (an older version, the Stream Deck) gets its id here, and
+/// one that was renumbered gets its new number.
+fn pin_monitor(s: &mut Settings, old: Option<&Settings>) {
+    if s.monitor_mode != "fixed" {
+        return;
+    }
+    let mons = monitors::list();
+    // "Always one monitor" with none chosen yet (picked in the tray, say): the
+    // one being recorded now, so it's set and stays put.
+    if s.fixed_monitor.is_empty() {
+        if let Some(m) = mons.iter().find(|m| m.primary).or(mons.first()) {
+            s.fixed_monitor = m.name.clone();
+            s.fixed_monitor_id = m.id.clone();
+        }
+        return;
+    }
+    // Picked by number only (the id wasn't sent with it): look the id up again.
+    if old.is_some_and(|o| o.fixed_monitor != s.fixed_monitor && o.fixed_monitor_id == s.fixed_monitor_id) {
+        s.fixed_monitor_id.clear();
+    }
+    if let Some(m) = monitors::find_fixed(&s.fixed_monitor, &s.fixed_monitor_id, &mons) {
+        if m.name != s.fixed_monitor {
+            crate::log!("monitor: the chosen screen is now {} (was {})", m.name, s.fixed_monitor);
+        }
+        s.fixed_monitor = m.name.clone();
+        s.fixed_monitor_id = m.id.clone();
+    }
+}
+
 #[tauri::command]
 fn set_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
-    let settings = settings.sanitized();
+    let mut settings = settings.sanitized();
     apply_log(&app, &settings);
     audio::set_mic_gain_db(settings.mic_gain_db);
     let st = app.state::<AppState>();
     let old = st.settings.lock().unwrap().clone();
+    pin_monitor(&mut settings, Some(&old));
     if old.hotkey != settings.hotkey || old.record_hotkey != settings.record_hotkey {
         if let Err(e) = apply_hotkeys(&app, &settings.hotkey, &settings.record_hotkey) {
             let _ = apply_hotkeys(&app, &old.hotkey, &old.record_hotkey);
@@ -344,7 +377,7 @@ async fn screen_preview(app: AppHandle) -> Result<tauri::ipc::Response, String> 
             return Err(format!("game:{g}"));
         }
         let mons = monitors::list();
-        let m = monitors::pick(&s.monitor_mode, &s.fixed_monitor, &mons).ok_or("No screen found")?;
+        let m = monitors::pick(&s.monitor_mode, &s.fixed_monitor, &s.fixed_monitor_id, &mons).ok_or("No screen found")?;
         monitors::preview_png(&m, 960).map(tauri::ipc::Response::new)
     })
     .await
@@ -2051,6 +2084,7 @@ pub fn run() {
             let settings_path = cfg_dir.join("settings.json");
             let mut s = settings::load(&settings_path);
             apply_log(&handle, &s);
+            pin_monitor(&mut s, None);
             audio::set_mic_gain_db(s.mic_gain_db);
             if s.clips_dir.is_empty() {
                 let videos = app.path().video_dir().unwrap_or_else(|_| cfg_dir.clone());

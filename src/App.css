@@ -1174,7 +1174,7 @@ p.small { font-size: 12px; margin: 0; }
 }
 .more-list { display: flex; flex-direction: column; gap: 1px; max-height: 340px; overflow: auto; }
 .more-item { display: flex; align-items: center; gap: 10px; padding: 7px 8px; border: 0; border-radius: 8px; background: none; color: var(--text-2); text-align: left; cursor: pointer; font-size: 13px; }
-.more-item span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.more-item > span:not(.game-icon) { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .more-item:hover { background: color-mix(in srgb, var(--text) 7%, transparent); color: var(--text); }
 .more-item.on { color: var(--text); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 
@@ -1204,6 +1204,7 @@ p.small { font-size: 12px; margin: 0; }
 .sort-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; }
 .sort-game { display: flex; align-items: center; gap: 8px; }
 .sort-game .select { flex: 1; min-width: 0; }
+.sort-game .sort-new { flex: 1; min-width: 0; width: 150px; }
 
 /* The NAS badge sits in the corner and stays there on hover. */
 .card-nas { position: absolute; right: 7px; bottom: 7px; display: flex; z-index: 2; pointer-events: auto; }
@@ -1341,7 +1342,8 @@ p.small { font-size: 12px; margin: 0; }
 .rec-area-view img, .rec-area-blank { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; display: block; }
 .rec-area-paused {
   position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 4;
-  padding: 6px 12px; border-radius: 8px; background: rgba(0,0,0,.78); color: #fff; font-size: 13px; white-space: nowrap;
+  padding: 6px 12px; border-radius: 8px; background: rgba(0,0,0,.78); color: #fff; font-size: 13px;
+  width: max-content; max-width: calc(100% - 24px); text-align: center; line-height: 1.4;
 }
 .rec-area-tools { max-width: 720px; flex-wrap: wrap; gap: 8px; }
 

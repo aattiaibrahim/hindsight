@@ -873,7 +873,7 @@ fn supervise(
         // A recording keeps capture running even if the replay buffer is paused.
         let want = s.buffer_enabled || recording;
         let mons = monitors::list();
-        let picked = monitors::pick(&s.monitor_mode, &s.fixed_monitor, &mons);
+        let picked = monitors::pick(&s.monitor_mode, &s.fixed_monitor, &s.fixed_monitor_id, &mons);
         let devices = if s.desktop_audio || s.mic_enabled { audio::default_devices() } else { (None, None) };
         // Anything in here changing means "restart capture" (incl. a new default headset).
         let sig = format!(
@@ -1294,7 +1294,7 @@ mod tests {
 
     #[test]
     fn output_size_keeps_aspect_and_even_numbers() {
-        let mon = |w, h| monitors::Monitor { index: 0, name: "d".into(), x: 0, y: 0, width: w, height: h, primary: true };
+        let mon = |w, h| monitors::Monitor { index: 0, name: "d".into(), id: String::new(), x: 0, y: 0, width: w, height: h, primary: true };
         assert_eq!(output_size(&mon(1920, 1080), 0), (1920, 1080));
         assert_eq!(output_size(&mon(1920, 1080), 1080), (1920, 1080));
         assert_eq!(output_size(&mon(1920, 1080), 720), (1280, 720));

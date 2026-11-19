@@ -12,6 +12,9 @@ pub struct Monitor {
     /// DXGI output index on the first GPU (what ddagrab's output_idx expects)
     pub index: u32,
     pub name: String,
+    /// The screen's own hardware path (maker, model and the port it's plugged
+    /// into). It stays the same when Windows renumbers DISPLAY1, DISPLAY2…
+    pub id: String,
     pub x: i32,
     pub y: i32,
     pub width: i32,
@@ -92,9 +95,11 @@ pub fn list() -> Vec<Monitor> {
                 let name = String::from_utf16_lossy(&d.DeviceName)
                     .trim_end_matches('\0')
                     .to_string();
+                let id = hardware_id(&name);
                 out.push(Monitor {
                     index: i,
                     name,
+                    id,
                     x: r.left,
                     y: r.top,
                     width: r.right - r.left,
@@ -108,14 +113,39 @@ pub fn list() -> Vec<Monitor> {
     out
 }
 
+/// The monitor's device path for a display like \\.\DISPLAY1, e.g.
+/// `\\?\DISPLAY#DELA0C0#5&2f3c&0&UID4353#{…}`; "" if Windows doesn't say.
+fn hardware_id(display: &str) -> String {
+    use windows::Win32::Graphics::Gdi::{DISPLAY_DEVICEW, EnumDisplayDevicesW};
+    use windows::core::HSTRING;
+    const EDD_GET_DEVICE_INTERFACE_NAME: u32 = 1;
+    let mut dd = DISPLAY_DEVICEW { cb: size_of::<DISPLAY_DEVICEW>() as u32, ..Default::default() };
+    let ok = unsafe { EnumDisplayDevicesW(&HSTRING::from(display), 0, &mut dd, EDD_GET_DEVICE_INTERFACE_NAME) };
+    if !ok.as_bool() {
+        return String::new();
+    }
+    String::from_utf16_lossy(&dd.DeviceID).trim_end_matches('\0').to_string()
+}
+
 fn cursor() -> Option<(i32, i32)> {
     let mut p = POINT::default();
     unsafe { GetCursorPos(&mut p).ok()? };
     Some((p.x, p.y))
 }
 
+/// The chosen screen: by its hardware id first (survives Windows renumbering
+/// the displays), then by its DISPLAY number.
+pub fn find_fixed<'a>(fixed: &str, fixed_id: &str, mons: &'a [Monitor]) -> Option<&'a Monitor> {
+    (!fixed_id.is_empty())
+        .then(|| mons.iter().find(|m| m.id.eq_ignore_ascii_case(fixed_id)))
+        .flatten()
+        .or_else(|| (fixed_id.is_empty() || mons.iter().all(|m| m.id.is_empty())).then(|| mons.iter().find(|m| m.name == fixed)).flatten())
+}
+
+static MISSING: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
 /// Which monitor to capture right now. Falls back to the primary, then to any.
-pub fn pick(mode: &str, fixed: &str, mons: &[Monitor]) -> Option<Monitor> {
+pub fn pick(mode: &str, fixed: &str, fixed_id: &str, mons: &[Monitor]) -> Option<Monitor> {
     let primary = || mons.iter().find(|m| m.primary).or(mons.first()).cloned();
     match mode {
         "cursor" => cursor()
@@ -125,8 +155,53 @@ pub fn pick(mode: &str, fixed: &str, mons: &[Monitor]) -> Option<Monitor> {
                     .cloned()
             })
             .or_else(primary),
-        "fixed" => mons.iter().find(|m| m.name == fixed).cloned().or_else(primary),
+        "fixed" => {
+            let found = find_fixed(fixed, fixed_id, mons).cloned();
+            // Say so once (not every tick) when the chosen screen isn't there.
+            let note = if found.is_none() && !mons.is_empty() { format!("{fixed} {fixed_id}") } else { String::new() };
+            let mut last = MISSING.lock().unwrap_or_else(|e| e.into_inner());
+            if *last != note {
+                if !note.is_empty() {
+                    crate::log!("monitor: the chosen screen ({fixed}) isn't connected; recording the main display until it's back");
+                }
+                *last = note;
+            }
+            found.or_else(primary)
+        }
         _ => primary(),
+    }
+}
+
+#[cfg(test)]
+mod pick_tests {
+    use super::*;
+    fn m(i: u32, name: &str, id: &str, primary: bool) -> Monitor {
+        Monitor { index: i, name: name.into(), id: id.into(), x: i as i32 * 1920, y: 0, width: 1920, height: 1080, primary }
+    }
+
+    /// This PC's screens and their ids: cargo test --lib live_monitor_ids -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_monitor_ids() {
+        let mons = list();
+        for m in &mons {
+            println!("{} {}x{} primary={} id={}", m.name, m.width, m.height, m.primary, m.id);
+        }
+        assert!(mons.iter().all(|m| !m.id.is_empty()));
+    }
+
+    #[test]
+    fn fixed_screen_survives_renumbering() {
+        // Chosen as DISPLAY2 (the Dell); Windows now calls the Dell DISPLAY3.
+        let mons = [m(0, r"\\.\DISPLAY1", "lg", true), m(1, r"\\.\DISPLAY3", "dell", false)];
+        assert_eq!(pick("fixed", r"\\.\DISPLAY2", "dell", &mons).unwrap().id, "dell");
+        // The renumbered name now belongs to another screen: the id still wins.
+        let mons = [m(0, r"\\.\DISPLAY2", "lg", true), m(1, r"\\.\DISPLAY1", "dell", false)];
+        assert_eq!(pick("fixed", r"\\.\DISPLAY2", "dell", &mons).unwrap().id, "dell");
+        // Saved before ids existed: the name.
+        assert_eq!(pick("fixed", r"\\.\DISPLAY1", "", &mons).unwrap().id, "dell");
+        // Unplugged: the main display.
+        assert_eq!(pick("fixed", r"\\.\DISPLAY1", "benq", &mons).unwrap().id, "lg");
     }
 }
 
