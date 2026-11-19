@@ -27,8 +27,11 @@ if ($exists) { throw "Release $tag already exists. Bump the version first." }
 
 Write-Host "Building Hindsight $version (signed)..."
 $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content $KeyPath -Raw
-$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
-pnpm tauri build
+# The key has no password. Windows PowerShell can't hold an empty variable
+# ($env:X = "" deletes it), so the signer used to stop and ask; with --ci it signs
+# with an empty password instead. Set TAURI_SIGNING_PRIVATE_KEY_PASSWORD for a key that has one.
+$ci = if ($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) { @() } else { @("--ci") }
+pnpm tauri build @ci
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 Remove-Item Env:\TAURI_SIGNING_PRIVATE_KEY, Env:\TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinue
 
