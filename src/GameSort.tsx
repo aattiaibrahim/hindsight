@@ -124,7 +124,8 @@ export function GameSortDialog({
         <h2>Found the game for {list.length} clip{list.length === 1 ? "" : "s"}</h2>
         <p className="muted" style={{ margin: 0 }}>
           From what's on screen, compared with your sorted clips. Untick any that look wrong or change the game; ticked clips move
-          into that game's folder. Undo in Settings → Library puts them back. Unticked ones won't be suggested again.
+          into that game's folder, on this PC and the NAS. Undo in Settings → Library puts them back. Unticked ones won't be
+          suggested again.
         </p>
         <div className="sort-list">
           {list.map((s) => (

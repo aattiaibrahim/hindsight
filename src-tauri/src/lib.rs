@@ -668,7 +668,13 @@ fn last_move(app: AppHandle) -> Option<UndoInfo> {
 #[tauri::command]
 async fn undo_last_move(app: AppHandle) -> Result<consolidate::Outcome, String> {
     let log = latest_move_log(&app).ok_or("Nothing to undo.")?;
-    let out = blocking(move || Ok(consolidate::undo(&log))).await?;
+    let nas_dir = settings_of(&app).nas_dir;
+    let out = blocking(move || {
+        let out = consolidate::undo(&log);
+        nas::refresh_listing(&nas_dir);
+        Ok(out)
+    })
+    .await?;
     let _ = app.emit("clips-changed", ());
     Ok(out)
 }
@@ -1466,12 +1472,18 @@ async fn detect_install(app: AppHandle) -> Result<(), String> {
     out
 }
 
+/// The library the game finder works on: this PC, linked folders and, when it can be
+/// reached, the NAS (a missing NAS would otherwise cost a network timeout per clip).
+fn detect_library(s: &Settings) -> Vec<library::ClipFile> {
+    let nas = if !s.nas_dir.is_empty() && Path::new(&s.nas_dir).is_dir() { nas::listing(&s.nas_dir) } else { Vec::new() };
+    library::scan_all(PathBuf::from(&s.clips_dir).as_path(), &s.external_files, &nas, &linked_roots(s), &s.nas_dir)
+}
+
 #[tauri::command]
 async fn game_suggestions(app: AppHandle) -> Result<Vec<game_detect::Suggestion>, String> {
     let s = settings_of(&app);
     blocking(move || {
-        let linked = linked_roots(&s);
-        let all = library::scan_all(PathBuf::from(&s.clips_dir).as_path(), &s.external_files, &[], &linked, &s.nas_dir);
+        let all = detect_library(&s);
         // A clip looked at here may since have been freed up (only on the NAS now) or
         // moved: point at its NAS copy, or leave it out. A suggestion for a file that
         // isn't there showed no picture, and Show in folder and Move did nothing.
@@ -1494,24 +1506,50 @@ async fn game_suggestions(app: AppHandle) -> Result<Vec<game_detect::Suggestion>
     .await
 }
 
-/// Move the chosen clips into their game's folder (logged, so Undo works like other moves).
+/// Move the chosen clips into their game's folder, on this PC and the NAS together
+/// (logged, so Undo works like other moves).
 #[tauri::command]
 async fn apply_game_sort(app: AppHandle, picks: Vec<(String, String)>) -> Result<consolidate::Outcome, String> {
     let s = settings_of(&app);
+    if move_running() {
+        return Err("Another move is still running. Try again when it's done.".into());
+    }
+    if !s.nas_dir.is_empty() {
+        if nas::state().copying.is_some() {
+            return Err("A clip is copying to the NAS right now. Try again once it's done.".into());
+        }
+        let root = PathBuf::from(&s.nas_dir);
+        if !blocking(move || Ok(root.is_dir())).await? {
+            return Err("Can't reach the NAS right now. Try again once it's back, so both copies move together.".into());
+        }
+    }
     let dir = moves_dir(&app)?;
     let a = app.clone();
+    nas::hold(true);
     let out = blocking(move || {
-        let plan = game_detect::plan(std::path::Path::new(&s.clips_dir), std::path::Path::new(&s.nas_dir), &picks);
+        let sorted = game_detect::plan(Path::new(&s.clips_dir), Path::new(&s.nas_dir), &picks);
         let _ = std::fs::create_dir_all(&dir);
         let log = dir.join(format!("{}-Sorted_by_game.jsonl", chrono::Local::now().format("%Y%m%d-%H%M%S")));
-        Ok(consolidate::run(&plan, &log, |done, total| {
+        let mut out = consolidate::run(&sorted.plan, &log, |done, total| {
             let _ = a.emit("move-progress", (done, total));
-        }))
+        });
+        // Count clips, not files: a clip on both sides is one clip.
+        out.moved = 0;
+        for clip in &sorted.clips {
+            if clip.from.iter().all(|p| !out.failed.iter().any(|(f, _)| *f == p.to_string_lossy())) {
+                out.moved += 1;
+                if let Some(old) = &clip.old_rel {
+                    nas::clip_renamed(old, &clip.new_rel);
+                }
+            }
+        }
+        nas::refresh_listing(&s.nas_dir);
+        Ok(out)
     })
-    .await?;
+    .await;
+    nas::hold(false);
     let _ = app.emit("clips-changed", ());
-    nas::wake();
-    Ok(out)
+    out
 }
 
 /// Don't suggest a game for these clips again.
@@ -2022,8 +2060,7 @@ pub fn run() {
                 game_detect::start(
                     move || {
                         let s = settings_of(&d1);
-                        let linked = linked_roots(&s);
-                        library::scan_all(PathBuf::from(&s.clips_dir).as_path(), &s.external_files, &[], &linked, &s.nas_dir)
+                        (detect_library(&s), s.detect_folders.clone())
                     },
                     move || settings_of(&d2).game_detect,
                     move || {

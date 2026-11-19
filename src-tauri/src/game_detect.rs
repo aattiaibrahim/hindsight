@@ -92,13 +92,12 @@ pub fn frames(path: &str, duration: f64, count: usize) -> Vec<Vec<u8>> {
 
 /// A clip's fingerprint: the average of its frames', length 1.
 pub fn clip_print(model: &mut Model, path: &str, duration: f64) -> Option<Vec<f32>> {
-    let f = frames(path, duration, 3);
-    let prints = model.embed(&f).ok()?;
-    if prints.is_empty() {
-        return None;
-    }
-    let mut avg = vec![0f32; prints[0].len()];
-    for p in &prints {
+    average(&model.embed(&frames(path, duration, 3)).ok()?)
+}
+
+fn average(prints: &[Vec<f32>]) -> Option<Vec<f32>> {
+    let mut avg = vec![0f32; prints.first()?.len()];
+    for p in prints {
         for (a, x) in avg.iter_mut().zip(p) {
             *a += x;
         }
@@ -121,7 +120,11 @@ pub struct Guess {
 
 /// The game of the `k` most alike sorted clips, weighted by how alike they are.
 pub fn guess(print: &[f32], examples: &[(String, Vec<f32>)], k: usize) -> Option<Guess> {
-    let mut near: Vec<(f32, &str)> = examples.iter().map(|(g, e)| (cosine(print, e), g.as_str())).collect();
+    guess_among(print, examples.iter(), k)
+}
+
+fn guess_among<'a>(print: &[f32], examples: impl Iterator<Item = &'a (String, Vec<f32>)>, k: usize) -> Option<Guess> {
+    let mut near: Vec<(f32, &str)> = examples.map(|(g, e)| (cosine(print, e), g.as_str())).collect();
     near.sort_by(|a, b| b.0.total_cmp(&a.0));
     near.truncate(k);
     let best = near.first()?.0;
@@ -156,10 +159,45 @@ pub(crate) const UNSORTED: [&str; 14] = [
 ];
 /// Desktop clips are examples too: of "not a game".
 pub const NOT_A_GAME: &str = "Desktop";
+/// Sorted clips that are only on the NAS, newest first, looked at per game. Enough
+/// examples to recognise it, without reading a whole library over the network.
+const NAS_EXAMPLES_PER_GAME: usize = 30;
 
 pub fn is_unsorted(folder: &str, source: &str) -> bool {
     let k = crate::consolidate::game_key(folder);
     k.is_empty() || UNSORTED.contains(&k.as_str()) || (!source.is_empty() && crate::consolidate::game_key(source) == k)
+}
+
+/// Unsorted, or a folder you asked the finder to look through.
+fn needs_game(c: &crate::library::ClipFile, also: &[String]) -> bool {
+    let key = crate::consolidate::game_key(&c.folder);
+    is_unsorted(&c.folder, &c.source) || also.iter().any(|f| crate::consolidate::game_key(f) == key)
+}
+
+/// The clips worth fingerprinting, examples first so suggestions can start early.
+/// `clips` is newest first.
+fn to_look_at<'a>(clips: &'a [crate::library::ClipFile], also: &[String]) -> Vec<&'a crate::library::ClipFile> {
+    let mut per_game: HashMap<String, usize> = HashMap::new();
+    let (mut examples, mut unsorted) = (Vec::new(), Vec::new());
+    for c in clips {
+        if c.location != "nas" && c.path.starts_with(r"\\") {
+            continue;
+        }
+        if needs_game(c, also) {
+            unsorted.push(c);
+            continue;
+        }
+        if c.location == "nas" {
+            let seen = per_game.entry(crate::consolidate::game_key(&c.folder)).or_default();
+            *seen += 1;
+            if *seen > NAS_EXAMPLES_PER_GAME {
+                continue;
+            }
+        }
+        examples.push(c);
+    }
+    examples.extend(unsorted);
+    examples
 }
 
 struct State {
@@ -283,31 +321,21 @@ pub fn install(mut progress: impl FnMut(Step)) -> Result<(), String> {
     Ok(())
 }
 
-fn stamp(p: &str) -> Option<(u64, i64)> {
-    let m = std::fs::metadata(p).ok()?;
-    let t = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as i64;
-    Some((m.len(), t))
-}
-
-/// The fingerprint of a clip, from the cache or by looking at it now.
-fn print_of(path: &str) -> Option<Vec<f32>> {
-    let st = stamp(path)?;
-    {
-        let g = STATE.lock().unwrap();
-        if let Some((s, m, p)) = g.as_ref()?.prints.get(path)
-            && (*s, *m) == st
-        {
-            return Some(p.clone());
-        }
+/// The fingerprint of a clip, from the cache or by looking at it now. Frames are read
+/// before taking the lock: on the NAS that can be slow, and suggestions need the cache.
+fn print_of(c: &crate::library::ClipFile) -> Option<Vec<f32>> {
+    if let Some(p) = cached(c) {
+        return Some(p);
     }
-    let duration = crate::prepare::probe(path).ok()?.duration;
+    let duration = crate::prepare::probe(&c.path).ok()?.duration;
+    let shots = frames(&c.path, duration, 3);
     let mut g = STATE.lock().unwrap();
     let state = g.as_mut()?;
     if state.model.is_none() {
         state.model = Some(Model::load(&state.dir.join(PACK[0].0), &state.dir.join(PACK[1].0)).ok()?);
     }
-    let p = clip_print(state.model.as_mut()?, path, duration)?;
-    state.prints.insert(path.to_string(), (st.0, st.1, p.clone()));
+    let p = average(&state.model.as_mut()?.embed(&shots).ok()?)?;
+    state.prints.insert(c.path.clone(), (c.size, c.modified, p.clone()));
     state.dirty = true;
     Some(p)
 }
@@ -323,27 +351,36 @@ fn flush() {
     }
 }
 
-fn cached(path: &str) -> Option<Vec<f32>> {
-    let st = stamp(path)?;
+/// By the size and date the library scan just read, so a big NAS library isn't asked again.
+fn cached(c: &crate::library::ClipFile) -> Option<Vec<f32>> {
     let g = STATE.lock().unwrap();
-    g.as_ref()?.prints.get(path).filter(|(s, m, _)| (*s, *m) == st).map(|(_, _, p)| p.clone())
+    g.as_ref()?.prints.get(&c.path).filter(|(s, m, _)| (*s, *m) == (c.size, c.modified)).map(|(_, _, p)| p.clone())
 }
 
-/// Background job: fingerprint every clip (sorted ones are the examples,
-/// unsorted ones get suggestions), one at a time, only while no game runs.
-pub fn start(clips: impl Fn() -> Vec<crate::library::ClipFile> + Send + 'static, enabled: impl Fn() -> bool + Send + 'static, busy: impl Fn() -> bool + Send + 'static, changed: impl Fn() + Send + 'static) {
+/// Background job: fingerprint clips on this PC and the NAS (sorted ones are the
+/// examples, unsorted ones get suggestions), one at a time, only while no game runs.
+/// `clips` gives the library and the extra folders to look through.
+pub fn start(
+    clips: impl Fn() -> (Vec<crate::library::ClipFile>, Vec<String>) + Send + 'static,
+    enabled: impl Fn() -> bool + Send + 'static,
+    busy: impl Fn() -> bool + Send + 'static,
+    changed: impl Fn() + Send + 'static,
+) {
     std::thread::Builder::new()
         .name("rewind-detect".into())
         .spawn(move || {
             std::thread::sleep(Duration::from_secs(30));
+            // Files that are there but can't be read: not tried again every round.
+            let mut unreadable = std::collections::HashSet::new();
             loop {
                 if !enabled() || !installed() || busy() {
                     flush();
                     std::thread::sleep(Duration::from_secs(20));
                     continue;
                 }
-                let all: Vec<_> = clips().into_iter().filter(|c| c.location != "nas" && !c.path.starts_with(r"\\")).collect();
-                let todo: Vec<_> = all.iter().filter(|c| cached(&c.path).is_none()).collect();
+                let (library, also) = clips();
+                let all = to_look_at(&library, &also);
+                let todo: Vec<_> = all.iter().copied().filter(|c| !unreadable.contains(&c.path) && cached(c).is_none()).collect();
                 let looked = all.len() - todo.len();
                 *STATUS.lock().unwrap() = Some(Status { looked_at: looked, to_look_at: all.len(), ..Default::default() });
                 if todo.is_empty() {
@@ -352,13 +389,21 @@ pub fn start(clips: impl Fn() -> Vec<crate::library::ClipFile> + Send + 'static,
                     continue;
                 }
                 let mut n = 0;
+                let mut nas_gone = false;
                 for c in todo {
                     if !enabled() || busy() {
                         break;
                     }
-                    let _ = print_of(&c.path);
+                    if print_of(c).is_none() {
+                        if Path::new(&c.path).is_file() {
+                            unreadable.insert(c.path.clone());
+                        } else if c.location == "nas" {
+                            nas_gone = true;
+                            break;
+                        }
+                    }
                     n += 1;
-                    if n % 20 == 0 {
+                    if n % 50 == 0 {
                         flush();
                         changed();
                     }
@@ -366,6 +411,9 @@ pub fn start(clips: impl Fn() -> Vec<crate::library::ClipFile> + Send + 'static,
                 }
                 flush();
                 changed();
+                if nas_gone {
+                    std::thread::sleep(Duration::from_secs(60));
+                }
             }
         })
         .expect("detect thread");
@@ -386,16 +434,18 @@ pub struct Suggestion {
 /// Confident guesses for clips in unsorted folders (already looked at).
 /// `also`: your own folders to look through too ("Find the game" on a folder).
 pub fn suggestions(clips: &[crate::library::ClipFile], dismissed: &[String], also: &[String]) -> Vec<Suggestion> {
-    let picked = |folder: &str| also.iter().any(|f| crate::consolidate::game_key(f) == crate::consolidate::game_key(folder));
-    let is_unsorted = |folder: &str, source: &str| is_unsorted(folder, source) || picked(folder);
+    suggest_from(clips, dismissed, also, cached)
+}
+
+fn suggest_from(clips: &[crate::library::ClipFile], dismissed: &[String], also: &[String], print: impl Fn(&crate::library::ClipFile) -> Option<Vec<f32>>) -> Vec<Suggestion> {
     let mut examples: Vec<(String, Vec<f32>)> = Vec::new();
     for c in clips {
-        let unsorted = is_unsorted(&c.folder, &c.source);
+        let unsorted = needs_game(c, also);
         let desktop = crate::consolidate::game_key(&c.folder) == "desktop";
-        if (unsorted && !desktop) || c.location == "nas" {
+        if unsorted && !desktop {
             continue;
         }
-        if let Some(p) = cached(&c.path) {
+        if let Some(p) = print(c) {
             examples.push((if desktop { NOT_A_GAME.to_string() } else { c.folder.clone() }, p));
         }
     }
@@ -413,12 +463,11 @@ pub fn suggestions(clips: &[crate::library::ClipFile], dismissed: &[String], als
     }
     let mut out = Vec::new();
     for c in clips {
-        if !is_unsorted(&c.folder, &c.source) || c.location == "nas" || dismissed.contains(&c.path) {
+        if !needs_game(c, also) || dismissed.contains(&c.path) {
             continue;
         }
-        let Some(p) = cached(&c.path) else { continue };
-        let pool: Vec<(String, Vec<f32>)> = examples.iter().filter(|(_, e)| e != &p).cloned().collect();
-        if let Some(g) = guess(&p, &pool, 5)
+        let Some(p) = print(c) else { continue };
+        if let Some(g) = guess_among(&p, examples.iter().filter(|(_, e)| e != &p), 5)
             && g.game != NOT_A_GAME
             && g.confidence >= 0.7
             && g.likeness >= 0.9 // a game with no sorted clips yet stays below this
@@ -431,31 +480,75 @@ pub fn suggestions(clips: &[crate::library::ClipFile], dismissed: &[String], als
     out
 }
 
-/// The moves that put each chosen clip in `<clips>/<Game>/`, never overwriting.
-/// A clip that's only on the NAS moves into the game's folder there (a rename on the
-/// NAS, not a copy back to this PC).
-pub fn plan(clips_dir: &Path, nas_dir: &Path, picks: &[(String, String)]) -> crate::consolidate::Plan {
+/// One clip being sorted: its file on this PC, on the NAS, or both.
+pub struct SortedClip {
+    pub from: Vec<PathBuf>,
+    /// `Game/clip.mp4` before and after, for the NAS sync's records
+    pub old_rel: Option<String>,
+    pub new_rel: String,
+}
+
+pub struct SortPlan {
+    pub plan: crate::consolidate::Plan,
+    pub clips: Vec<SortedClip>,
+}
+
+/// The moves that put each chosen clip in its game's folder, never overwriting. A clip
+/// on this PC and the NAS moves on both, under one new name, so sync still sees one
+/// clip. A clip only on the NAS is renamed there, not copied back to this PC. A file
+/// with the same place but another size is a different clip and stays put.
+pub fn plan(clips_dir: &Path, nas_dir: &Path, picks: &[(String, String)]) -> SortPlan {
+    use crate::library::same_path;
     let mut plan = crate::consolidate::Plan { label: "Sorted by game".into(), ..Default::default() };
+    let mut clips = Vec::new();
     let mut taken = std::collections::HashSet::new();
+    let mut roots = vec![clips_dir];
+    if !nas_dir.as_os_str().is_empty() {
+        roots.push(nas_dir);
+    }
     for (path, game) in picks {
         let from = PathBuf::from(path);
-        let Some(name) = from.file_name() else { continue };
-        let on_nas = !nas_dir.as_os_str().is_empty() && crate::library::tidy_path(path).to_lowercase().starts_with(&crate::library::tidy_path(&nas_dir.to_string_lossy()).to_lowercase());
-        let dir = if on_nas { nas_dir } else { clips_dir }.join(crate::consolidate::safe_name(game));
-        let mut to = dir.join(name);
+        let Some(name) = from.file_name().map(|n| n.to_string_lossy().into_owned()) else { continue };
+        let folder = crate::consolidate::safe_name(game);
+        let size = std::fs::metadata(&from).map(|m| m.len()).unwrap_or(0);
+        let old_rel = roots.iter().find_map(|r| crate::nas::rel_on_nas(&r.to_string_lossy(), path));
+        let mut files: Vec<(PathBuf, &Path)> = Vec::new();
+        match &old_rel {
+            Some(rel) => {
+                for root in &roots {
+                    let p = root.join(rel.replace('/', "\\"));
+                    if same_path(&p, &from) || std::fs::metadata(&p).is_ok_and(|m| m.is_file() && m.len() == size) {
+                        files.push((p, root));
+                    }
+                }
+            }
+            None => files.push((from.clone(), clips_dir)),
+        }
+        if files.iter().any(|(p, root)| p.parent().is_some_and(|d| same_path(d, &root.join(&folder)))) {
+            continue; // already in that game's folder
+        }
         let stem = from.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let ext = from.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut file = name;
         let mut n = 2;
-        while to.exists() || !taken.insert(to.to_string_lossy().to_lowercase()) {
-            to = dir.join(format!("{stem} ({n}).{ext}"));
+        while roots.iter().any(|r| {
+            let to = r.join(&folder).join(&file);
+            to.exists() || taken.contains(&to.to_string_lossy().to_lowercase())
+        }) {
+            file = format!("{stem} ({n}).{ext}");
             n += 1;
         }
-        let size = std::fs::metadata(&from).map(|m| m.len()).unwrap_or(0);
-        plan.count += 1;
-        plan.bytes += size;
-        plan.moves.push(crate::consolidate::Move { from, to, size, copied: false });
+        for r in &roots {
+            taken.insert(r.join(&folder).join(&file).to_string_lossy().to_lowercase());
+        }
+        for (src, root) in &files {
+            plan.count += 1;
+            plan.bytes += size;
+            plan.moves.push(crate::consolidate::Move { from: src.clone(), to: root.join(&folder).join(&file), size, copied: false });
+        }
+        clips.push(SortedClip { from: files.into_iter().map(|(p, _)| p).collect(), old_rel, new_rel: format!("{folder}/{file}") });
     }
-    plan
+    SortPlan { plan, clips }
 }
 
 #[cfg(test)]
@@ -464,6 +557,80 @@ mod tests {
 
     fn v(x: f32, y: f32) -> Vec<f32> {
         normalized(&[x, y])
+    }
+
+    fn clip(path: &str, folder: &str, location: &'static str) -> crate::library::ClipFile {
+        crate::library::ClipFile {
+            path: path.into(),
+            name: path.into(),
+            folder: folder.into(),
+            size: 1,
+            modified: 1,
+            external: false,
+            location,
+            on_nas: false,
+            source: if location == "nas" { "NAS".into() } else { String::new() },
+        }
+    }
+
+    fn temp(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("hindsight-sort-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn put(p: &Path, bytes: &str) {
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, bytes).unwrap();
+    }
+
+    #[test]
+    fn clips_only_on_the_nas_are_examples_and_get_suggestions() {
+        let mut all: Vec<_> = (0..5).map(|i| clip(&format!(r"\\nas\c\Apex\{i}.mkv"), "Apex Legends", "nas")).collect();
+        all.push(clip(r"\\nas\c\OBS\new.mkv", "OBS", "nas"));
+        let got = suggest_from(&all, &[], &[], |c| Some(if c.folder == "OBS" { v(1.0, 0.02) } else { v(1.0, 0.01 + c.path.len() as f32 / 1000.0) }));
+        assert_eq!(got.len(), 1);
+        assert_eq!((got[0].path.as_str(), got[0].game.as_str()), (r"\\nas\c\OBS\new.mkv", "Apex Legends"));
+    }
+
+    #[test]
+    fn the_nas_is_sampled_for_examples_but_every_unsorted_clip_is_read() {
+        let mut all: Vec<_> = (0..NAS_EXAMPLES_PER_GAME + 5).map(|i| clip(&format!(r"\\nas\c\Apex\{i}.mkv"), "Apex", "nas")).collect();
+        all.extend((0..40).map(|i| clip(&format!(r"\\nas\c\OBS\{i}.mkv"), "OBS", "nas")));
+        let list = to_look_at(&all, &[]);
+        assert_eq!(list.iter().filter(|c| c.folder == "Apex").count(), NAS_EXAMPLES_PER_GAME);
+        assert_eq!(list.iter().filter(|c| c.folder == "OBS").count(), 40);
+        assert_eq!(list[0].folder, "Apex", "examples come first");
+    }
+
+    #[test]
+    fn sorting_moves_both_copies_under_one_free_name() {
+        let d = temp("both");
+        let (pc, nas) = (d.join("pc"), d.join("nas"));
+        put(&pc.join(r"OBS\a.mkv"), "same");
+        put(&nas.join(r"OBS\a.mkv"), "same");
+        put(&nas.join(r"Apex\a.mkv"), "someone else's clip");
+        let p = plan(&pc, &nas, &[(pc.join(r"OBS\a.mkv").to_string_lossy().into_owned(), "Apex".into())]);
+        let to: Vec<_> = p.plan.moves.iter().map(|m| m.to.clone()).collect();
+        assert_eq!(to, vec![pc.join(r"Apex\a (2).mkv"), nas.join(r"Apex\a (2).mkv")]);
+        assert_eq!(p.clips[0].old_rel.as_deref(), Some("OBS/a.mkv"));
+        assert_eq!(p.clips[0].new_rel, "Apex/a (2).mkv");
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn a_nas_only_clip_stays_on_the_nas_and_a_different_file_is_left_alone() {
+        let d = temp("nas");
+        let (pc, nas) = (d.join("pc"), d.join("nas"));
+        put(&nas.join(r"OBS\only.mkv"), "clip");
+        put(&pc.join(r"OBS\other.mkv"), "short");
+        put(&nas.join(r"OBS\other.mkv"), "a different length");
+        let picks = [(nas.join(r"OBS\only.mkv").to_string_lossy().into_owned(), "Apex".to_string()), (pc.join(r"OBS\other.mkv").to_string_lossy().into_owned(), "Apex".to_string())];
+        let p = plan(&pc, &nas, &picks);
+        let moves: Vec<_> = p.plan.moves.iter().map(|m| (m.from.clone(), m.to.clone())).collect();
+        assert_eq!(moves, vec![(nas.join(r"OBS\only.mkv"), nas.join(r"Apex\only.mkv")), (pc.join(r"OBS\other.mkv"), pc.join(r"Apex\other.mkv"))]);
+        let _ = std::fs::remove_dir_all(d);
     }
 
     #[test]
@@ -572,7 +739,7 @@ mod live_pipeline {
             *n <= 10
         });
         let t = std::time::Instant::now();
-        let looked = all.iter().filter(|c| print_of(&c.path).is_some()).count();
+        let looked = all.iter().filter(|c| print_of(c).is_some()).count();
         println!("{looked}/{} clips looked at in {:?}", all.len(), t.elapsed());
         flush();
         for s in suggestions(&all, &[], &[]) {

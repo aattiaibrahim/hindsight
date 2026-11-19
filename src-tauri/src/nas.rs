@@ -448,6 +448,27 @@ pub fn folder_renamed(from: &str, to: &str) {
     RENAMED.lock().unwrap().push((format!("{}/", from.to_lowercase()), format!("{}/", to.to_lowercase())));
 }
 
+/// One clip moved to another folder (`Game/clip.mp4`): keep the copied-clips record right.
+pub fn clip_renamed(from: &str, to: &str) {
+    RENAMED.lock().unwrap().push((rel_key(from), rel_key(to)));
+}
+
+/// Look at the NAS again now, so a move shows in the library without waiting for
+/// the next sync pass. Leaves the list alone if the NAS isn't there.
+pub fn refresh_listing(nas_dir: &str) {
+    let root = Path::new(nas_dir);
+    let listed = |l: &Option<Listing>| l.as_ref().is_some_and(|l| l.root == nas_dir);
+    if nas_dir.is_empty() || !listed(&LISTING.lock().unwrap()) || !root.is_dir() {
+        return;
+    }
+    let files = scan_nas(root);
+    let rels: HashSet<String> = files.iter().map(|f| rel_key(&f.rel)).collect();
+    let mut l = LISTING.lock().unwrap();
+    if listed(&l) {
+        *l = Some(Listing { root: nas_dir.to_string(), files, rels });
+    }
+}
+
 fn apply_renames(synced: &mut HashSet<String>, renames: &[(String, String)]) {
     for (from, to) in renames {
         let moved: Vec<String> = synced.iter().filter(|k| k.starts_with(from.as_str())).cloned().collect();
