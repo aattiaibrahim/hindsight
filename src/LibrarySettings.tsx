@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, ClipFolder, errText, FoundFolder, fmtSize, LastMove, MovePlan, NasState, OldFolder, Settings } from "./api";
 import { ConfirmDialog } from "./ConfirmUpdate";
 import { NasProgress, useNasState } from "./NasProgress";
-import { useDetectStatus } from "./GameSort";
+import { NotGameFolders, useDetectStatus } from "./GameSort";
 import { HealthSetting } from "./Health";
 import { NasSetup } from "./NasSetup";
 import { NasConnect, takeNasSignInRequest } from "./NasConnect";
@@ -317,6 +317,7 @@ export function LibrarySettings({
       )}
 
       <DetectSetting s={s} set={set} Toggle={Toggle} />
+      {s.gameDetect && <NotGameSetting count={s.notGameFolders?.length ?? 0} />}
 
       <label className="setting">
         <span>
@@ -521,6 +522,26 @@ export function LibrarySettings({
 }
 
 /** Settings → Library: finding the game in unsorted clips from the picture. */
+/** Your own folders the game finder should never take for a game. */
+function NotGameSetting({ count }: { count: number }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="setting">
+      <span>
+        Folders that aren't games
+        <small>
+          {count ? `${count} folder${count === 1 ? "" : "s"} marked. ` : ""}Your own folders, like aim practice or a video you're making: the
+          game finder won't learn from them or offer them as a clip's game.
+        </small>
+      </span>
+      <button className="btn small" onClick={() => setOpen(true)}>
+        Choose…
+      </button>
+      {open && <NotGameFolders onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
 function DetectSetting({
   s,
   set,

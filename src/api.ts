@@ -26,7 +26,8 @@ export type OldFolder = { path: string; label: string; moved: number; files: num
 /** The picture check's state. */
 export type DetectStatus = { installed: boolean; downloading: number | null; lookedAt: number; toLookAt: number; error: string | null };
 /** A clip in an unsorted folder and the game it looks like. */
-export type GameSuggestion = { path: string; name: string; folder: string; game: string; confidence: number; likeness: number };
+/** `sure`: ticked in the review. Otherwise a close call, with its likeliest games in `choices` (best first). */
+export type GameSuggestion = { path: string; name: string; folder: string; game: string; confidence: number; likeness: number; sure: boolean; choices: [string, number][] };
 /** A montage to render: clip pieces in order, an optional song. */
 export type MontagePlan = {
   pieces: { path: string; start: number; end: number; volumeDb?: number }[];
@@ -92,6 +93,8 @@ export type Settings = {
   gameDetect: boolean;
   detectDismissed: string[];
   detectFolders?: string[];
+  /** Folders that aren't games (your own): never learned from or offered by the game finder */
+  notGameFolders?: string[];
   /** Clips taken off "To trim" */
   keepWhole: string[];
   /** Game logos from Steam (only the game's name is sent) */
@@ -559,6 +562,8 @@ export const api = {
   toggleRecording: () => invoke<string | null>("toggle_recording"),
   listClips: () => invoke<ClipFile[]>("list_clips"),
   /** `tracked`: the caller registers with `want` (cards); anyone else always gets an answer. */
+  /** Lengths already known for these clips (0 = not yet), in one call that reads no files. */
+  knownLengths: (clips: ClipFile[]) => invoke<number[]>("known_lengths", { clips: clips.map((c) => [c.path, c.size, c.modified]) }),
   probe: (path: string, key = "", now = false, tracked = false) => {
     const k = path + key;
     // Before, this deleted the cards' count for the clip, so cards still on screen

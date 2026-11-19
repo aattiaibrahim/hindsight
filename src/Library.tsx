@@ -1064,8 +1064,18 @@ function TrimStatus({ clips }: { clips: ClipFile[] }) {
     const todo = clips.filter((c) => !trimLens.has(lenKey(c)));
     if (!todo.length) return;
     const t = setTimeout(async () => {
+      // Most lengths are already known (the details are kept on this PC): all of
+      // them in one call, so the estimate is there at once and no file is read.
+      try {
+        const known = await api.knownLengths(todo);
+        todo.forEach((c, i) => known[i] > 0 && trimLens.set(lenKey(c), known[i]));
+      } catch {
+        /* probed one by one below */
+      }
+      if (!alive) return;
+      setTick((n) => n + 1);
       let since = 0;
-      for (const c of todo) {
+      for (const c of todo.filter((c) => !trimLens.has(lenKey(c)))) {
         if (!alive) return;
         try {
           const p = await api.probe(c.path, String(c.modified));
@@ -1080,7 +1090,7 @@ function TrimStatus({ clips }: { clips: ClipFile[] }) {
         }
       }
       if (alive) setTick((n) => n + 1);
-    }, 600);
+    }, 0);
     return () => {
       alive = false;
       clearTimeout(t);

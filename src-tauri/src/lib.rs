@@ -298,6 +298,10 @@ fn set_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
     if old.linked_folders != settings.linked_folders || old.nas_dir != settings.nas_dir {
         let _ = app.emit("clips-changed", ());
     }
+    // The game finder's suggestions depend on these: show the new ones.
+    if old.not_game_folders != settings.not_game_folders || old.detect_dismissed != settings.detect_dismissed || old.detect_folders != settings.detect_folders {
+        let _ = app.emit("detect-changed", ());
+    }
     let _ = app.emit("settings-changed", &settings);
     Ok(())
 }
@@ -1172,6 +1176,13 @@ async fn recorder_clip_folders() -> Result<Vec<bench::recorders::ClipFolder>, St
     blocking(|| Ok(bench::recorders::clip_folders())).await
 }
 
+/// Lengths already known for these clips ((path, size, modified) each), 0 where not:
+/// one quick call, nothing read from the files.
+#[tauri::command]
+fn known_lengths(clips: Vec<(String, u64, i64)>) -> Vec<f64> {
+    prepare::known_lengths(&clips)
+}
+
 #[tauri::command]
 async fn probe_file(path: String) -> Result<library::Probe, String> {
     blocking(move || prepare::probe(&path)).await
@@ -1560,7 +1571,7 @@ async fn game_suggestions(app: AppHandle) -> Result<Vec<game_detect::Suggestion>
         // moved: point at its NAS copy, or leave it out. A suggestion for a file that
         // isn't there showed no picture, and Show in folder and Move did nothing.
         let clips_dir = PathBuf::from(&s.clips_dir);
-        Ok(game_detect::suggestions(&all, &s.detect_dismissed, &s.detect_folders)
+        Ok(game_detect::suggestions(&all, &s.detect_dismissed, &s.detect_folders, &s.not_game_folders)
             .into_iter()
             .filter_map(|mut g| {
                 if Path::new(&g.path).is_file() {
@@ -2134,7 +2145,7 @@ pub fn run() {
                 game_detect::start(
                     move || {
                         let s = settings_of(&d1);
-                        (detect_library(&s), s.detect_folders.clone())
+                        (detect_library(&s), s.detect_folders.clone(), s.not_game_folders.clone())
                     },
                     move || settings_of(&d2).game_detect,
                     move || {
@@ -2348,6 +2359,7 @@ get_settings,
             toggle_recording,
             list_clips,
             probe_file,
+            known_lengths,
             thumbnail,
             preview_audio,
             remux_mp4,

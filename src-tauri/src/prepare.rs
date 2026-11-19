@@ -84,6 +84,21 @@ pub fn probe(path: &str) -> Result<Probe, String> {
     Ok(p)
 }
 
+/// Remembered lengths for many clips at once, without touching the files: each
+/// clip as (path, size, modified in ms) from the library list. 0 = not known yet.
+/// For To trim's "how much would trimming free", which needs every clip's length.
+pub fn known_lengths(clips: &[(String, u64, i64)]) -> Vec<f64> {
+    let g = CACHE.lock().unwrap();
+    let Some(c) = g.as_ref() else { return vec![0.0; clips.len()] };
+    clips
+        .iter()
+        .map(|(path, size, modified)| {
+            let hit = |k: &str| c.map.get(k).filter(|e| e.size == *size && e.modified == *modified).map(|e| e.probe.duration);
+            hit(path).or_else(|| library::local_twin(path).and_then(|t| hit(&t))).unwrap_or(0.0)
+        })
+        .collect()
+}
+
 pub fn flush() {
     if let Some(c) = CACHE.lock().unwrap().as_mut()
         && c.dirty

@@ -124,6 +124,14 @@ pub fn guess(print: &[f32], examples: &[(String, Vec<f32>)], k: usize) -> Option
 }
 
 fn guess_among<'a>(print: &[f32], examples: impl Iterator<Item = &'a (String, Vec<f32>)>, k: usize) -> Option<Guess> {
+    let (ranked, likeness) = rank_among(print, examples, k)?;
+    let (game, confidence) = ranked.into_iter().next()?;
+    Some(Guess { game, confidence, likeness })
+}
+
+/// The games of the `k` most alike sorted clips, each with its share of the votes
+/// (best first, weighted by how alike they are), and how alike the closest one is.
+fn rank_among<'a>(print: &[f32], examples: impl Iterator<Item = &'a (String, Vec<f32>)>, k: usize) -> Option<(Vec<(String, f32)>, f32)> {
     let mut near: Vec<(f32, &str)> = examples.map(|(g, e)| (cosine(print, e), g.as_str())).collect();
     near.sort_by(|a, b| b.0.total_cmp(&a.0));
     near.truncate(k);
@@ -133,9 +141,10 @@ fn guess_among<'a>(print: &[f32], examples: impl Iterator<Item = &'a (String, Ve
         // Sharpen: the closest ones count much more than the k-th.
         *votes.entry(g).or_default() += ((sim - best + 0.08).max(0.0) * 25.0).exp();
     }
-    let total: f32 = votes.values().sum();
-    let (game, v) = votes.into_iter().max_by(|a, b| a.1.total_cmp(&b.1))?;
-    Some(Guess { game: game.to_string(), confidence: v / total.max(1e-6), likeness: best })
+    let total: f32 = votes.values().sum::<f32>().max(1e-6);
+    let mut ranked: Vec<(String, f32)> = votes.into_iter().map(|(g, v)| (g.to_string(), v / total)).collect();
+    ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    Some((ranked, best))
 }
 
 // ---------- in the app: the download, the background job, suggestions ----------
@@ -172,11 +181,18 @@ pub fn is_unsorted(folder: &str, source: &str) -> bool {
 /// They hold clips of many games, so they'd teach the finder nothing and would be
 /// suggested as a game's folder.
 fn is_workshop(folder: &str) -> bool {
-    const WORDS: [&str; 5] = ["edit", "render", "export", "youtube", "montage"];
+    const WORDS: [&str; 8] = ["edit", "render", "export", "youtube", "montage", "funny", "meme", "highlight"];
     folder
         .to_lowercase()
         .split(|c: char| !c.is_ascii_alphanumeric())
         .any(|w| WORDS.iter().any(|p| w.starts_with(p)))
+}
+
+/// Not a game: your own work ("Edits"), or a folder you marked as not a game
+/// (`skip`). Never learned from, never offered as the answer.
+pub fn not_a_game_folder(folder: &str, skip: &[String]) -> bool {
+    let key = crate::consolidate::game_key(folder);
+    is_workshop(folder) || skip.iter().any(|s| crate::consolidate::game_key(s) == key)
 }
 
 /// Unsorted, or a folder you asked the finder to look through.
@@ -187,7 +203,7 @@ fn needs_game(c: &crate::library::ClipFile, also: &[String]) -> bool {
 
 /// The clips worth fingerprinting, examples first so suggestions can start early.
 /// `clips` is newest first.
-fn to_look_at<'a>(clips: &'a [crate::library::ClipFile], also: &[String]) -> Vec<&'a crate::library::ClipFile> {
+fn to_look_at<'a>(clips: &'a [crate::library::ClipFile], also: &[String], skip: &[String]) -> Vec<&'a crate::library::ClipFile> {
     let mut per_game: HashMap<String, usize> = HashMap::new();
     let (mut examples, mut unsorted) = (Vec::new(), Vec::new());
     for c in clips {
@@ -198,7 +214,7 @@ fn to_look_at<'a>(clips: &'a [crate::library::ClipFile], also: &[String]) -> Vec
             unsorted.push(c);
             continue;
         }
-        if is_workshop(&c.folder) {
+        if not_a_game_folder(&c.folder, skip) {
             continue;
         }
         if c.location == "nas" {
@@ -373,9 +389,10 @@ fn cached(c: &crate::library::ClipFile) -> Option<Vec<f32>> {
 
 /// Background job: fingerprint clips on this PC and the NAS (sorted ones are the
 /// examples, unsorted ones get suggestions), one at a time, only while no game runs.
-/// `clips` gives the library and the extra folders to look through.
+/// `clips` gives the library, the extra folders to look through, and the folders
+/// that aren't games.
 pub fn start(
-    clips: impl Fn() -> (Vec<crate::library::ClipFile>, Vec<String>) + Send + 'static,
+    clips: impl Fn() -> (Vec<crate::library::ClipFile>, Vec<String>, Vec<String>) + Send + 'static,
     enabled: impl Fn() -> bool + Send + 'static,
     busy: impl Fn() -> bool + Send + 'static,
     changed: impl Fn() + Send + 'static,
@@ -392,8 +409,8 @@ pub fn start(
                     std::thread::sleep(Duration::from_secs(20));
                     continue;
                 }
-                let (library, also) = clips();
-                let all = to_look_at(&library, &also);
+                let (library, also, skip) = clips();
+                let all = to_look_at(&library, &also, &skip);
                 let todo: Vec<_> = all.iter().copied().filter(|c| !unreadable.contains(&c.path) && cached(c).is_none()).collect();
                 let looked = all.len() - todo.len();
                 *STATUS.lock().unwrap() = Some(Status { looked_at: looked, to_look_at: all.len(), ..Default::default() });
@@ -443,20 +460,39 @@ pub struct Suggestion {
     pub confidence: f32,
     /// How alike the closest sorted clip is (0..1)
     pub likeness: f32,
+    /// Sure enough to move (ticked in the review). Otherwise a close call: shown
+    /// unticked, with `choices` to pick from.
+    pub sure: bool,
+    /// The likeliest games, best first (`game` is the first), each with its share of the votes.
+    pub choices: Vec<(String, f32)>,
 }
 
-/// Confident guesses for clips in unsorted folders (already looked at).
+/// Sure enough to tick: most of the votes, and very like a sorted clip.
+const SURE_SHARE: f32 = 0.7;
+const SURE_LIKENESS: f32 = 0.9;
+/// A close call worth showing: a real lead, and like a sorted clip.
+const CLOSE_SHARE: f32 = 0.3;
+const CLOSE_LIKENESS: f32 = 0.88;
+
+/// Guesses for clips in unsorted folders (already looked at): sure ones and close calls.
 /// `also`: your own folders to look through too ("Find the game" on a folder).
-pub fn suggestions(clips: &[crate::library::ClipFile], dismissed: &[String], also: &[String]) -> Vec<Suggestion> {
-    suggest_from(clips, dismissed, also, cached)
+/// `skip`: folders that aren't games (never learned from, never an answer).
+pub fn suggestions(clips: &[crate::library::ClipFile], dismissed: &[String], also: &[String], skip: &[String]) -> Vec<Suggestion> {
+    suggest_from(clips, dismissed, also, skip, cached)
 }
 
-fn suggest_from(clips: &[crate::library::ClipFile], dismissed: &[String], also: &[String], print: impl Fn(&crate::library::ClipFile) -> Option<Vec<f32>>) -> Vec<Suggestion> {
+fn suggest_from(
+    clips: &[crate::library::ClipFile],
+    dismissed: &[String],
+    also: &[String],
+    skip: &[String],
+    print: impl Fn(&crate::library::ClipFile) -> Option<Vec<f32>>,
+) -> Vec<Suggestion> {
     let mut examples: Vec<(String, Vec<f32>)> = Vec::new();
     for c in clips {
         let unsorted = needs_game(c, also);
         let desktop = crate::consolidate::game_key(&c.folder) == "desktop";
-        if (unsorted && !desktop) || (!unsorted && is_workshop(&c.folder)) {
+        if (unsorted && !desktop) || (!unsorted && not_a_game_folder(&c.folder, skip)) {
             continue;
         }
         if let Some(p) = print(c) {
@@ -481,16 +517,25 @@ fn suggest_from(clips: &[crate::library::ClipFile], dismissed: &[String], also: 
             continue;
         }
         let Some(p) = print(c) else { continue };
-        if let Some(g) = guess_among(&p, examples.iter().filter(|(_, e)| e != &p), 5)
-            && g.game != NOT_A_GAME
-            && g.confidence >= 0.7
-            && g.likeness >= 0.9 // a game with no sorted clips yet stays below this
-            && crate::consolidate::game_key(&g.game) != crate::consolidate::game_key(&c.folder)
-        {
-            out.push(Suggestion { path: c.path.clone(), name: c.name.clone(), folder: c.folder.clone(), game: g.game, confidence: g.confidence, likeness: g.likeness });
+        let Some((ranked, likeness)) = rank_among(&p, examples.iter().filter(|(_, e)| e != &p), 5) else { continue };
+        let (game, share) = ranked[0].clone();
+        let here = crate::consolidate::game_key(&c.folder);
+        if game == NOT_A_GAME || crate::consolidate::game_key(&game) == here {
+            continue;
         }
+        // A game with no sorted clips yet stays below the likeness bar.
+        let sure = share >= SURE_SHARE && likeness >= SURE_LIKENESS;
+        if !sure && (share < CLOSE_SHARE || likeness < CLOSE_LIKENESS) {
+            continue;
+        }
+        let choices: Vec<(String, f32)> = ranked
+            .into_iter()
+            .filter(|(g, s)| g != NOT_A_GAME && *s >= 0.15 && crate::consolidate::game_key(g) != here)
+            .take(3)
+            .collect();
+        out.push(Suggestion { path: c.path.clone(), name: c.name.clone(), folder: c.folder.clone(), game, confidence: share, likeness, sure, choices });
     }
-    out.sort_by(|a, b| a.game.cmp(&b.game).then(a.name.cmp(&b.name)));
+    out.sort_by(|a, b| b.sure.cmp(&a.sure).then(a.game.cmp(&b.game)).then(a.name.cmp(&b.name)));
     out
 }
 
@@ -603,7 +648,7 @@ mod tests {
     fn clips_only_on_the_nas_are_examples_and_get_suggestions() {
         let mut all: Vec<_> = (0..5).map(|i| clip(&format!(r"\\nas\c\Apex\{i}.mkv"), "Apex Legends", "nas")).collect();
         all.push(clip(r"\\nas\c\OBS\new.mkv", "OBS", "nas"));
-        let got = suggest_from(&all, &[], &[], |c| Some(if c.folder == "OBS" { v(1.0, 0.02) } else { v(1.0, 0.01 + c.path.len() as f32 / 1000.0) }));
+        let got = suggest_from(&all, &[], &[], &[], |c| Some(if c.folder == "OBS" { v(1.0, 0.02) } else { v(1.0, 0.01 + c.path.len() as f32 / 1000.0) }));
         assert_eq!(got.len(), 1);
         assert_eq!((got[0].path.as_str(), got[0].game.as_str()), (r"\\nas\c\OBS\new.mkv", "Apex Legends"));
     }
@@ -618,15 +663,44 @@ mod tests {
         }
         let mut all: Vec<_> = (0..5).map(|i| clip(&format!(r"\\nas\c\Edits\{i}.mkv"), "Edits", "nas")).collect();
         all.push(clip(r"\\nas\c\OBS\new.mkv", "OBS", "nas"));
-        assert!(suggest_from(&all, &[], &[], |c| Some(v(1.0, 0.01 + c.path.len() as f32 / 1000.0))).is_empty());
-        assert_eq!(to_look_at(&all, &[]).len(), 1, "only the OBS clip is read");
+        assert!(suggest_from(&all, &[], &[], &[], |c| Some(v(1.0, 0.01 + c.path.len() as f32 / 1000.0))).is_empty());
+        assert_eq!(to_look_at(&all, &[], &[]).len(), 1, "only the OBS clip is read");
+        assert!(is_workshop("funnysiegevideo") && is_workshop("funny not cool"));
+    }
+
+    #[test]
+    fn folders_marked_not_a_game_are_never_learned_from_or_suggested() {
+        let mut all: Vec<_> = (0..5).map(|i| clip(&format!(r"\\nas\c\aim\{i}.mkv"), "aim", "nas")).collect();
+        all.extend((0..5).map(|i| clip(&format!(r"\\nas\c\Apex\{i}.mkv"), "Apex Legends", "nas")));
+        all.push(clip(r"\\nas\c\OBS\new.mkv", "OBS", "nas"));
+        // The OBS clip is closest to the "aim" clips.
+        let print = |c: &crate::library::ClipFile| Some(match c.folder.as_str() { "OBS" => v(1.0, 0.02), "aim" => v(1.0, 0.021), _ => v(1.0, 0.3) });
+        let got = suggest_from(&all, &[], &[], &[], print);
+        assert_eq!(got[0].game, "aim", "unmarked, it's taken for a game");
+        let got = suggest_from(&all, &[], &[], &["AIM".into()], print);
+        assert!(got.iter().all(|s| s.game != "aim" && s.choices.iter().all(|(g, _)| g != "aim")), "{got:?}");
+        assert_eq!(to_look_at(&all, &[], &["aim".into()]).iter().filter(|c| c.folder == "aim").count(), 0, "not read either");
+    }
+
+    #[test]
+    fn close_calls_come_unticked_with_their_likely_games() {
+        // Three Apex clips and two Valorant clips, all about as close to the new one.
+        let mut all: Vec<_> = (0..3).map(|i| clip(&format!(r"\\nas\c\Apex\{i}.mkv"), "Apex Legends", "nas")).collect();
+        all.extend((0..2).map(|i| clip(&format!(r"\\nas\c\Valorant\{i}.mkv"), "Valorant", "nas")));
+        all.push(clip(r"\\nas\c\OBS\new.mkv", "OBS", "nas"));
+        let got = suggest_from(&all, &[], &[], &[], |c| Some(match c.folder.as_str() { "OBS" => v(1.0, 0.0), "Apex Legends" => v(1.0, 0.01 + c.path.len() as f32 / 10000.0), _ => v(1.0, 0.012 + c.path.len() as f32 / 10000.0) }));
+        assert_eq!(got.len(), 1, "{got:?}");
+        let s = &got[0];
+        assert!(!s.sure, "{s:?}");
+        assert_eq!(s.choices.iter().map(|(g, _)| g.as_str()).collect::<Vec<_>>(), ["Apex Legends", "Valorant"]);
+        assert_eq!(s.game, "Apex Legends");
     }
 
     #[test]
     fn the_nas_is_sampled_for_examples_but_every_unsorted_clip_is_read() {
         let mut all: Vec<_> = (0..NAS_EXAMPLES_PER_GAME + 5).map(|i| clip(&format!(r"\\nas\c\Apex\{i}.mkv"), "Apex", "nas")).collect();
         all.extend((0..40).map(|i| clip(&format!(r"\\nas\c\OBS\{i}.mkv"), "OBS", "nas")));
-        let list = to_look_at(&all, &[]);
+        let list = to_look_at(&all, &[], &[]);
         assert_eq!(list.iter().filter(|c| c.folder == "Apex").count(), NAS_EXAMPLES_PER_GAME);
         assert_eq!(list.iter().filter(|c| c.folder == "OBS").count(), 40);
         assert_eq!(list[0].folder, "Apex", "examples come first");
@@ -770,7 +844,7 @@ mod live_pipeline {
         let looked = all.iter().filter(|c| print_of(c).is_some()).count();
         println!("{looked}/{} clips looked at in {:?}", all.len(), t.elapsed());
         flush();
-        for s in suggestions(&all, &[], &[]) {
+        for s in suggestions(&all, &[], &[], &[]) {
             println!("  {} [{}] -> {} ({:.2}, likeness {:.3})", s.name, s.folder, s.game, s.confidence, s.likeness);
         }
     }

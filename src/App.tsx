@@ -218,11 +218,14 @@ export default function App() {
 
   // Duplicates on this PC (worked out ahead of time, so this is quick).
   const [dupes, setDupes] = useState(0);
+  // Only when the clips really changed: the list is re-read every time the window
+  // gets focus, and a search each time read the whole library again for nothing.
+  const dupesKey = useMemo(() => (clips ? clips.map((c) => `${c.path}|${c.size}`).join("\n") : null), [clips]);
   useEffect(() => {
-    if (!clips) return;
+    if (dupesKey === null) return;
     const t = setTimeout(() => api.findDuplicates().then((s) => setDupes(s.length)).catch(() => {}), 4000);
     return () => clearTimeout(t);
-  }, [clips]);
+  }, [dupesKey]);
   const nasNow = useNasState();
   const [sortList] = useGameSuggestions(!!settings?.gameDetect);
   const [sortOpen, setSortOpen] = useState(false);
@@ -270,11 +273,15 @@ export default function App() {
       detail: "Checked byte for byte. Copies on the NAS never count.",
       actions: [{ label: "Open Cleanup", run: () => setView("cleanup"), primary: true }],
     });
+  const sureSorts = sortList.filter((s) => s.sure).length;
+  const closeSorts = sortList.length - sureSorts;
   if (sortList.length)
     notices.push({
-      id: `sort:${sortList.length}`,
+      id: `sort:${sureSorts}:${closeSorts}`,
       kind: "sort",
-      title: `Found the game for ${sortList.length} unsorted clip${sortList.length === 1 ? "" : "s"}`,
+      title: sureSorts
+        ? `Found the game for ${sureSorts} unsorted clip${sureSorts === 1 ? "" : "s"}${closeSorts ? ` (and ${closeSorts} to check)` : ""}`
+        : `${closeSorts} unsorted clip${closeSorts === 1 ? "" : "s"} might be a game you play`,
       detail: [...new Set(sortList.map((s) => s.game))].slice(0, 3).join(", ") + " and more, from what's on screen. Check them before they move.",
       actions: [{ label: "Review", run: () => setSortOpen(true), primary: true }],
     });

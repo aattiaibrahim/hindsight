@@ -179,7 +179,12 @@ function DupeThumb({ clip }: { clip: ClipFile }) {
  *  copy is kept, and "Review one by one" walks through them side by side. Nothing
  *  is removed until that one button is pressed (and confirmed). */
 function Duplicates({ clips, onDelete, onChanged, run = 0 }: { clips: ClipFile[]; onDelete: (paths: string[]) => Promise<boolean>; onChanged: () => void; run?: number }) {
-  const [sets, setSets] = useState<DupeSet[] | null>(null);
+  // Searched again only when the clips really changed (the list is re-read whenever
+  // the window gets focus) or on Run cleanup check.
+  const key = clips.map((c) => `${c.path}|${c.size}`).join("\n");
+  // The last result shows at once (no "Looking for duplicates…" flash on every visit);
+  // if the clips changed since, it's checked again quietly behind it.
+  const [sets, setSets] = useState<DupeSet[] | null>(() => lastDupes?.sets ?? null);
   const [waiting, setWaiting] = useState(false);
   const progress = useCountProgress("dupes-progress", sets === null && !waiting);
   const [keep, setKeep] = useState<Record<string, string>>({});
@@ -187,9 +192,6 @@ function Duplicates({ clips, onDelete, onChanged, run = 0 }: { clips: ClipFile[]
   const [open, setOpen] = useState<Set<DupeSet["kind"]>>(new Set());
   const [review, setReview] = useState<number | null>(null);
   const byPath = useMemo(() => new Map(clips.map((c) => [c.path, c])), [clips]);
-  // Searched again only when the clips really changed (the list is re-read whenever
-  // the window gets focus) or on Run cleanup check.
-  const key = clips.map((c) => `${c.path}|${c.size}`).join("\n");
   const lastRun = useRef(run);
   useEffect(() => {
     let alive = true;
@@ -199,9 +201,14 @@ function Duplicates({ clips, onDelete, onChanged, run = 0 }: { clips: ClipFile[]
       setSets(lastDupes.sets);
       return;
     }
+    const asked = lastRun.current !== run;
     lastRun.current = run;
-    setSets(null);
-    setReview(null);
+    // Run cleanup check, or nothing to show yet: say it's looking. Otherwise the
+    // last result stays up (clips that are gone drop out of it) while it checks.
+    if (asked || !lastDupes) {
+      setSets(null);
+      setReview(null);
+    }
     const look = () =>
       api
         .findDuplicates()
@@ -217,7 +224,7 @@ function Duplicates({ clips, onDelete, onChanged, run = 0 }: { clips: ClipFile[]
           if (String(e) === "game") {
             setWaiting(true);
             retry = window.setTimeout(look, 15_000);
-          } else setSets([]);
+          } else setSets((cur) => cur ?? []);
         });
     look();
     return () => {

@@ -4,7 +4,7 @@
   "Author": "Hindsight",
   "Description": "Control Hindsight from your Stream Deck: save clips, record, pause the replay buffer and switch clip quality.",
   "URL": "https://github.com/aattiaibrahim/Rewind",
-  "Version": "1.1.0.0",
+  "Version": "1.2.0.0",
   "SDKVersion": 2,
   "CodePath": "plugin.html",
   "Icon": "imgs/plugin",

@@ -77,7 +77,7 @@ export function installDevMock() {
     recordHotkey: "Alt+F9", bufferEnabled: true, launchOnStartup: false, autoUpdate: true, startMinimized: true,
     keepOriginalAfterRemux: true, replaceOriginalOnEdit: true, detailedLog: true, externalFiles: [], desktopAudio: true, discordTrack: true,
     micEnabled: true, micMono: true, micDevice: "", micGainDb: 0, theme: "tinted", accent: "winblue", keepWhole: [], reduceMotion: false,
-    saveSound: true, nasDir: "\\\\nas\\clips", nasLibraryId: "mock", nasServer: "", nasRemoveLocal: false, nasSyncWhileGaming: false, linkedFolders: [] as string[], benchmarkMode: false, uploadHost: "catbox", litterboxTime: "72h", autoUpload: false, postLinkToDiscord: false, streamableEmail: "", discordWebhookName: "", confirmUploads: true, healthCheck: true, prepareThumbnails: true, gameDetect: true, detectDismissed: [] as string[],
+    saveSound: true, nasDir: "\\\\nas\\clips", nasLibraryId: "mock", nasServer: "", nasRemoveLocal: false, nasSyncWhileGaming: false, linkedFolders: [] as string[], benchmarkMode: false, uploadHost: "catbox", litterboxTime: "72h", autoUpload: false, postLinkToDiscord: false, streamableEmail: "", discordWebhookName: "", confirmUploads: true, healthCheck: true, prepareThumbnails: true, gameDetect: true, detectDismissed: [] as string[], notGameFolders: [] as string[],
     folderNames: {} as Record<string, string>, similarDismissed: [] as string[], cleanupKept: {} as Record<string, number>,
   };
   // Same game under two folder names (preview of the merge prompt).
@@ -126,6 +126,8 @@ export function installDevMock() {
     get_settings: () => ({ ...settings }),
     set_settings: (a) => {
       Object.assign(settings, a.settings as object);
+      // Like the real app: every open settings view hears about it.
+      setTimeout(() => (listeners.get("settings-changed") ?? []).forEach((id) => callbacks.get(id)?.({ event: "settings-changed", id: 0, payload: { ...settings } })));
       return null;
     },
     get_status: () => status,
@@ -210,7 +212,12 @@ export function installDevMock() {
     set_game_logo: () => null,
     detect_status: () => ({ installed: true, downloading: null, lookedAt: 51, toLookAt: 53, error: null }),
     game_suggestions: () =>
-      clips.filter((c) => c.folder === "Hunt Showdown").slice(0, 3).map((c, i) => ({ path: c.path, name: c.name, folder: "OBS", game: ["VALORANT", "Counter-Strike 2", "Rainbow Six Siege"][i], confidence: 0.92 - i * 0.07, likeness: 0.94 })),
+      clips.filter((c) => c.folder === "Hunt Showdown").slice(0, 5).map((c, i) => {
+        const game = ["VALORANT", "Counter-Strike 2", "Rainbow Six Siege", "Apex Legends", "VALORANT"][i];
+        const sure = i < 3;
+        const choices: [string, number][] = sure ? [[game, 0.92 - i * 0.07]] : [[game, 0.52], ["Counter-Strike 2", 0.31], ["Overwatch 2", 0.17]];
+        return { path: c.path, name: c.name, folder: i === 4 ? "Desktop" : "OBS", game, confidence: choices[0][1], likeness: 0.94, sure, choices };
+      }),
     apply_game_sort: (a) => ({ moved: (a.picks as unknown[]).length, failed: [] }),
     dismiss_game_suggestions: () => null,
     render_montage: async () => (await new Promise((r) => setTimeout(r, 1200)), "C:\\Users\\you\\Videos\\Hindsight\\Montages\\Montage 2026-11-06 12-00-00.mp4"),
@@ -305,6 +312,7 @@ export function installDevMock() {
     list_monitors: () => [],
     screen_preview: () => fetch("/thumb-cs2a.jpg").then((r) => r.arrayBuffer()),
     list_audio_inputs: () => [],
+    known_lengths: (a) => (a.clips as unknown[]).map(() => 45),
     // ?medal: a Medal clip, "All Audio" (the others mixed) plus Game and Mic.
     probe_file: () => ({ duration: 45, codec: "av1", width: 1920, height: 1080, fps: 60, audioTracks: medal ? 3 : 2, container: "matroska" }),
     // Thumbnails matched to each game (frames picked from real clips for the README screenshots).
