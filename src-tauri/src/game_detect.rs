@@ -168,6 +168,17 @@ pub fn is_unsorted(folder: &str, source: &str) -> bool {
     k.is_empty() || UNSORTED.contains(&k.as_str()) || (!source.is_empty() && crate::consolidate::game_key(source) == k)
 }
 
+/// Your own work, not a game: "Edits", "YT Edit", "YouTube Videos", "render", "exports".
+/// They hold clips of many games, so they'd teach the finder nothing and would be
+/// suggested as a game's folder.
+fn is_workshop(folder: &str) -> bool {
+    const WORDS: [&str; 5] = ["edit", "render", "export", "youtube", "montage"];
+    folder
+        .to_lowercase()
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|w| WORDS.iter().any(|p| w.starts_with(p)))
+}
+
 /// Unsorted, or a folder you asked the finder to look through.
 fn needs_game(c: &crate::library::ClipFile, also: &[String]) -> bool {
     let key = crate::consolidate::game_key(&c.folder);
@@ -185,6 +196,9 @@ fn to_look_at<'a>(clips: &'a [crate::library::ClipFile], also: &[String]) -> Vec
         }
         if needs_game(c, also) {
             unsorted.push(c);
+            continue;
+        }
+        if is_workshop(&c.folder) {
             continue;
         }
         if c.location == "nas" {
@@ -442,7 +456,7 @@ fn suggest_from(clips: &[crate::library::ClipFile], dismissed: &[String], also: 
     for c in clips {
         let unsorted = needs_game(c, also);
         let desktop = crate::consolidate::game_key(&c.folder) == "desktop";
-        if unsorted && !desktop {
+        if (unsorted && !desktop) || (!unsorted && is_workshop(&c.folder)) {
             continue;
         }
         if let Some(p) = print(c) {
@@ -592,6 +606,20 @@ mod tests {
         let got = suggest_from(&all, &[], &[], |c| Some(if c.folder == "OBS" { v(1.0, 0.02) } else { v(1.0, 0.01 + c.path.len() as f32 / 1000.0) }));
         assert_eq!(got.len(), 1);
         assert_eq!((got[0].path.as_str(), got[0].game.as_str()), (r"\\nas\c\OBS\new.mkv", "Apex Legends"));
+    }
+
+    #[test]
+    fn edit_and_export_folders_are_never_a_game() {
+        for f in ["Edits", "YT Edit", "Edit (converted)_AME", "YouTube Videos", "render", "exports"] {
+            assert!(is_workshop(f), "{f}");
+        }
+        for f in ["Valorant", "Surrender", "Credit Card Game", "Apex Legends"] {
+            assert!(!is_workshop(f), "{f}");
+        }
+        let mut all: Vec<_> = (0..5).map(|i| clip(&format!(r"\\nas\c\Edits\{i}.mkv"), "Edits", "nas")).collect();
+        all.push(clip(r"\\nas\c\OBS\new.mkv", "OBS", "nas"));
+        assert!(suggest_from(&all, &[], &[], |c| Some(v(1.0, 0.01 + c.path.len() as f32 / 1000.0))).is_empty());
+        assert_eq!(to_look_at(&all, &[]).len(), 1, "only the OBS clip is read");
     }
 
     #[test]
