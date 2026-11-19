@@ -128,7 +128,7 @@ pub fn prepare(path: &str, host: Host, work: &Path) -> Result<PathBuf, String> {
         // 9 MB target leaves room under Discord's 10 MB.
         crate::library::compress_into(path, 9, out.clone(), &Default::default())?;
     } else {
-        crate::library::export_h264_into(path, out.clone(), &Default::default())?;
+        crate::library::shareable_mp4(path, out.clone())?;
         let made = fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
         if host == Host::Catbox && made > host.limit() {
             let _ = fs::remove_file(&out);
@@ -601,6 +601,8 @@ mod tests {
             assert_eq!(p.audio_tracks, 1, "tracks mixed into one so every player hears both");
             assert!(out.extension().unwrap() == "mp4");
             assert!(size <= host.limit());
+            let original = fs::metadata(&src).unwrap().len();
+            assert!(size <= original + original / 20, "sharing doesn't make the clip bigger ({size} > {original})");
         }
         // Too big for Catbox: refused before any work, with the way out.
         let big = d.join("big.mp4");

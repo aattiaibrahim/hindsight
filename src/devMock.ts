@@ -75,7 +75,7 @@ export function installDevMock() {
     clipsDir: "C:\\Users\\you\\Videos\\Hindsight", encoder: "auto", quality: 24, fps: 60, bufferSeconds: 120,
     bufferInRam: true, captureEngine: "native", monitorMode: "primary", fixedMonitor: "", drawCursor: true, captureArea: new URLSearchParams(location.search).has("area") ? { x: 0, y: 0, w: 1, h: 0.952 } : null, hotkey: "Alt+F10",
     recordHotkey: "Alt+F9", bufferEnabled: true, launchOnStartup: false, autoUpdate: true, startMinimized: true,
-    keepOriginalAfterRemux: true, replaceOriginalOnEdit: false, externalFiles: [], desktopAudio: true, discordTrack: true,
+    keepOriginalAfterRemux: true, replaceOriginalOnEdit: true, detailedLog: true, externalFiles: [], desktopAudio: true, discordTrack: true,
     micEnabled: true, micMono: true, micDevice: "", micGainDb: 0, theme: "tinted", accent: "winblue", keepWhole: [], reduceMotion: false,
     saveSound: true, nasDir: "\\\\nas\\clips", nasLibraryId: "mock", nasServer: "", nasRemoveLocal: false, nasSyncWhileGaming: false, linkedFolders: [] as string[], benchmarkMode: false, uploadHost: "catbox", litterboxTime: "72h", autoUpload: false, postLinkToDiscord: false, streamableEmail: "", discordWebhookName: "", confirmUploads: true, healthCheck: true, prepareThumbnails: true, gameDetect: true, detectDismissed: [] as string[],
     folderNames: {} as Record<string, string>, similarDismissed: [] as string[], cleanupKept: {} as Record<string, number>,

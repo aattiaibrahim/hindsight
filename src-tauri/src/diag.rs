@@ -19,10 +19,50 @@ use std::sync::Mutex;
 static LINES: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
 const KEEP: usize = 400;
 
-/// Keep a line for diagnostics (with the time).
+/// The detailed log file, when Settings → Detailed log is on (None = off).
+static LOG_FILE: Mutex<Option<PathBuf>> = Mutex::new(None);
+/// A log file is started over (the old one kept as hindsight.old.log) past this size.
+const LOG_MAX: u64 = 8 * 1024 * 1024;
+
+/// Turn the detailed log file on (in `dir`) or off.
+pub fn set_log_file(dir: Option<&Path>) {
+    let file = dir.map(|d| d.join("hindsight.log"));
+    let mut cur = LOG_FILE.lock().unwrap_or_else(|e| e.into_inner());
+    if *cur == file {
+        return;
+    }
+    if let Some(f) = &file {
+        let _ = std::fs::create_dir_all(f.parent().unwrap_or(Path::new(".")));
+    }
+    *cur = file;
+    drop(cur);
+    if dir.is_some() {
+        crate::log!("[rewind] detailed log on (Hindsight {})", env!("CARGO_PKG_VERSION"));
+    }
+}
+
+/// Where the detailed log is written, if it's on.
+pub fn log_file() -> Option<PathBuf> {
+    LOG_FILE.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+fn append(line: &str) {
+    use std::io::Write;
+    let Some(f) = log_file() else { return };
+    if std::fs::metadata(&f).map(|m| m.len() > LOG_MAX).unwrap_or(false) {
+        let _ = std::fs::rename(&f, f.with_file_name("hindsight.old.log"));
+    }
+    if let Ok(mut out) = std::fs::OpenOptions::new().create(true).append(true).open(&f) {
+        let _ = writeln!(out, "{}", anonymize(line));
+    }
+}
+
+/// Keep a line for diagnostics (with the time), and in the log file when it's on.
 pub fn record(line: String) {
-    let stamped = format!("{} {line}", chrono::Local::now().format("%H:%M:%S"));
-    let mut l = LINES.lock().unwrap();
+    let now = chrono::Local::now();
+    append(&format!("{} {line}", now.format("%Y-%m-%d %H:%M:%S%.3f")));
+    let stamped = format!("{} {line}", now.format("%H:%M:%S"));
+    let mut l = LINES.lock().unwrap_or_else(|e| e.into_inner());
     l.push_back(stamped);
     while l.len() > KEEP {
         l.pop_front();
@@ -245,8 +285,16 @@ pub fn report(version: &str, extra: &[(&str, String)], clip: Option<&str>) -> St
         clip_report(&mut out, p);
     }
     section(&mut out, "Recent messages");
-    for l in LINES.lock().unwrap().iter() {
+    for l in LINES.lock().unwrap_or_else(|e| e.into_inner()).iter() {
         let _ = writeln!(out, "{l}");
+    }
+    // The detailed log reaches back past restarts.
+    if let Some(text) = log_file().and_then(|f| std::fs::read_to_string(f).ok()) {
+        section(&mut out, "Detailed log (last 1500 lines)");
+        let lines: Vec<&str> = text.lines().collect();
+        for l in &lines[lines.len().saturating_sub(1500)..] {
+            let _ = writeln!(out, "{l}");
+        }
     }
     anonymize(&out)
 }

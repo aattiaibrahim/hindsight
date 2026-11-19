@@ -50,7 +50,7 @@ export function DiagnosticsButton({ clip, label = "Run diagnostics" }: { clip?: 
 }
 
 /** Settings → About. */
-export function About({ version, hidden }: { version: string | null; hidden: boolean }) {
+export function About({ version, hidden, logSetting }: { version: string | null; hidden: boolean; logSetting?: React.ReactNode }) {
   return (
     <section className="group about" hidden={hidden}>
       <div className="about-head">
@@ -78,6 +78,7 @@ export function About({ version, hidden }: { version: string | null; hidden: boo
         </small>
         <DiagnosticsButton />
       </div>
+      {logSetting}
       <div className="setting">
         <span>
           Feedback

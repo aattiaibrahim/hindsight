@@ -104,6 +104,9 @@ pub struct Settings {
     pub keep_whole: Vec<String>,
     /// Game logos from Steam (only the game's name is sent), else the game's program icon
     pub online_game_logos: bool,
+    /// Keep a detailed log file (logs\hindsight.log in the app's data folder): every
+    /// message, error and step, kept across restarts, for finding problems
+    pub detailed_log: bool,
 }
 
 /// A rectangle of the screen, as fractions (0..1) of the monitor.
@@ -161,7 +164,7 @@ impl Default for Settings {
             auto_update: true,
             start_minimized: true,
             keep_original_after_remux: true,
-            replace_original_on_edit: false,
+            replace_original_on_edit: true,
             external_files: Vec::new(),
             desktop_audio: true,
             discord_track: true,
@@ -197,6 +200,7 @@ impl Default for Settings {
             detect_folders: Vec::new(),
             keep_whole: Vec::new(),
             online_game_logos: true,
+            detailed_log: true,
         }
     }
 }

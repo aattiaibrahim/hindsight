@@ -1,4 +1,22 @@
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke as tauriInvoke } from "@tauri-apps/api/core";
+
+/** Every command, with failures written to the detailed log (Settings → Detailed log). */
+function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  return tauriInvoke<T>(cmd, args).catch((e) => {
+    if (cmd !== "log_ui") logUi(`${cmd} failed: ${errText(e)}`);
+    throw e;
+  });
+}
+
+/** A line for the detailed log (it's dropped when the log is off). */
+export function logUi(text: string) {
+  tauriInvoke("log_ui", { text }).catch(() => {});
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("error", (e) => logUi(`crash: ${e.message} at ${e.filename}:${e.lineno}`));
+  window.addEventListener("unhandledrejection", (e) => logUi(`unhandled: ${errText(e.reason)}`));
+}
 
 export type Encoder = "auto" | "av1" | "hevc" | "h264";
 /** A recorder's folder with no clips left in it (they all moved into Hindsight). */
@@ -78,6 +96,7 @@ export type Settings = {
   startMinimized: boolean;
   keepOriginalAfterRemux: boolean;
   replaceOriginalOnEdit: boolean;
+  detailedLog: boolean;
   externalFiles: string[];
   desktopAudio: boolean;
   /** Discord on its own track, left out of desktop audio */
@@ -617,6 +636,7 @@ export const api = {
   checkForUpdates: () => invoke<string | null>("check_for_updates"),
   installUpdate: () => invoke<void>("install_update"),
   getNasState: () => invoke<NasState>("get_nas_state"),
+  openLogFolder: () => invoke<void>("open_log_folder"),
   uploadClip: (path: string, host?: UploadHost) => invoke<Upload>("upload_clip", { path, host: host ?? null }),
   uploadHistory: () => invoke<Record<string, Upload[]>>("upload_history"),
   copyText: (text: string) => invoke<void>("copy_text", { text }),

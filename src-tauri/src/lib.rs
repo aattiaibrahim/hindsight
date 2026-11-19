@@ -225,6 +225,7 @@ fn get_settings(app: AppHandle) -> Settings {
 #[tauri::command]
 fn set_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
     let settings = settings.sanitized();
+    apply_log(&app, &settings);
     audio::set_mic_gain_db(settings.mic_gain_db);
     let st = app.state::<AppState>();
     let old = st.settings.lock().unwrap().clone();
@@ -877,6 +878,28 @@ fn data_file(app: &AppHandle, name: &str) -> Result<PathBuf, String> {
     app.path().app_data_dir().map(|d| d.join(name)).map_err(|e| e.to_string())
 }
 
+/// Settings → Detailed log: everything `log!` prints also goes to logs\hindsight.log.
+fn apply_log(app: &AppHandle, s: &Settings) {
+    let dir = data_file(app, "logs").ok().filter(|_| s.detailed_log);
+    diag::set_log_file(dir.as_deref());
+}
+
+/// A message from the interface (an error it showed, a crash) for the detailed log.
+#[tauri::command]
+fn log_ui(text: String) {
+    let text: String = text.chars().take(2000).collect();
+    crate::log!("[ui] {text}");
+}
+
+/// Open the folder with the detailed log in Explorer.
+#[tauri::command]
+fn open_log_folder(app: AppHandle) -> Result<(), String> {
+    let dir = data_file(&app, "logs")?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::process::Command::new("explorer").arg(&dir).spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Clips being uploaded right now (so one clip isn't sent twice at once).
 static UPLOADING: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -913,7 +936,17 @@ fn upload_now(app: &AppHandle, path: &str, host: Option<&str>) -> Result<upload:
     let result = (|| -> Result<upload::Upload, String> {
         emit("preparing", 0, 0, None, None, None);
         let work = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("uploads");
+        let started = std::time::Instant::now();
         let file = upload::prepare(path, host, &work)?;
+        crate::log!(
+            "[upload] {} to {}: {} MB → {} MB ({}) in {:.1}s",
+            path,
+            host.label(),
+            fs_len(std::path::Path::new(path)) / 1_000_000,
+            fs_len(&file) / 1_000_000,
+            if file == std::path::Path::new(path) { "sent as it is" } else { "made an MP4" },
+            started.elapsed().as_secs_f64()
+        );
         let secrets_file = data_file(app, "secrets.json")?;
         let folder = std::path::Path::new(path).parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let cfg = upload::Config {
@@ -947,8 +980,14 @@ fn upload_now(app: &AppHandle, path: &str, host: Option<&str>) -> Result<upload:
     })();
     UPLOADING.lock().unwrap().retain(|p| p != path);
     match &result {
-        Ok(u) => emit("done", u.bytes, u.bytes, Some(u.url.clone()), None, upload::link_warning(&u.url)),
-        Err(e) => emit("error", 0, 0, None, Some(e.clone()), None),
+        Ok(u) => {
+            crate::log!("[upload] done: {} ({} MB)", u.url, u.bytes / 1_000_000);
+            emit("done", u.bytes, u.bytes, Some(u.url.clone()), None, upload::link_warning(&u.url))
+        }
+        Err(e) => {
+            crate::log!("[upload] {path} failed: {e}");
+            emit("error", 0, 0, None, Some(e.clone()), None)
+        }
     }
     result
 }
@@ -2011,6 +2050,7 @@ pub fn run() {
             std::fs::create_dir_all(&cfg_dir)?;
             let settings_path = cfg_dir.join("settings.json");
             let mut s = settings::load(&settings_path);
+            apply_log(&handle, &s);
             audio::set_mic_gain_db(s.mic_gain_db);
             if s.clips_dir.is_empty() {
                 let videos = app.path().video_dir().unwrap_or_else(|_| cfg_dir.clone());
@@ -2318,6 +2358,8 @@ get_settings,
             stop_nas_sync,
             recorder_clip_folders,
             upload_clip,
+            log_ui,
+            open_log_folder,
             upload_history,
             copy_text,
             set_secret,

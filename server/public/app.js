@@ -774,6 +774,47 @@ function renderSwatches() {
 }
 
 let pairTimer = 0;
+/** When the code was last copied, so "Copied" survives the page checking every 3 s. */
+let pairCopiedAt = 0;
+
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text).catch(() => fallbackCopy(text));
+  fallbackCopy(text);
+  return Promise.resolve();
+}
+
+function fallbackCopy(text) {
+  const t = el("textarea", {});
+  t.value = text;
+  t.style.position = "fixed";
+  t.style.opacity = "0";
+  document.body.append(t);
+  t.select();
+  document.execCommand("copy");
+  t.remove();
+}
+
+/** The pairing code, big and readable; click it (or Copy) to copy it. */
+function pairCodeBox(c) {
+  const copied = Date.now() - pairCopiedAt < 2500;
+  const copyBtn = btn(copied ? "Copied" : "Copy", { cls: "small" });
+  const copy = () =>
+    copyText(c.code).then(() => {
+      pairCopiedAt = Date.now();
+      copyBtn.textContent = "Copied";
+      setTimeout(() => (copyBtn.textContent = "Copy"), 2500);
+    });
+  copyBtn.onclick = copy;
+  const shown = el("span", { class: "code mono", text: `${c.code.slice(0, 3)} ${c.code.slice(3)}`, title: "Click to copy" });
+  shown.onclick = copy;
+  return el(
+    "div",
+    { class: "pair-code" },
+    el("div", { class: "code-row" }, shown, copyBtn),
+    el("small", { text: `Type or paste this in Hindsight on the PC. Works once, until ${new Date(c.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.` }),
+  );
+}
+
 async function renderPairing() {
   clearTimeout(pairTimer);
   const body = $("pair-body");
@@ -797,14 +838,7 @@ async function renderPairing() {
       }),
     ),
   );
-  const code = p.code
-    ? el(
-        "div",
-        { class: "pair-code" },
-        el("b", { class: "mono", text: `${p.code.code.slice(0, 3)} ${p.code.code.slice(3)}` }),
-        el("small", { class: "muted", text: `Type this in Hindsight on the PC. Works once, until ${new Date(p.code.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.` }),
-      )
-    : null;
+  const code = p.code ? pairCodeBox(p.code) : null;
   body.replaceChildren(
     ...(rows.length ? rows : [el("p", { class: "muted small", text: "No PCs paired yet." })]),
     code ??

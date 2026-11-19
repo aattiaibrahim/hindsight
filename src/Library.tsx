@@ -417,7 +417,8 @@ function LibraryView({
   const setViewMode = (v: ViewMode) => {
     remember("viewMode", v);
     setViewModeState(v);
-    if (v === "folders") setFolder("All");
+    // A game opened from Folders belongs to that view: Gallery or List shows every clip again.
+    if (v === "folders" || viewMode === "folders") setFolder("All");
   };
   const setSort = (v: Sort) => {
     remember("sort", v);

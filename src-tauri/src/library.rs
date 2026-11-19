@@ -1369,8 +1369,28 @@ pub fn export_h264(path: &str, audio: &AudioEdit, crop: Option<Crop>) -> Result<
     export_h264_vf(path, unique(Path::new(path), " (H.264)", "mp4"), audio, crop)
 }
 
-pub fn export_h264_into(path: &str, out: PathBuf, audio: &AudioEdit) -> Result<String, String> {
-    export_h264_vf(path, out, audio, None)
+/// An MP4 to share that is no bigger than the clip: H.264 video is copied as it
+/// is (only the sound is mixed into one track), anything else is re-encoded with
+/// its bitrate capped at the clip's own. A plain quality setting turned a 38 MB
+/// AV1 clip into a bigger H.264 file.
+pub fn shareable_mp4(path: &str, out: PathBuf) -> Result<String, String> {
+    let info = probe(path)?;
+    let mut args = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-i"]);
+    args.push(path.into());
+    map_mixed_audio(&mut args, path, info.audio_tracks, &AudioEdit::default());
+    if info.codec == "h264" {
+        args.extend(ffmpeg::args(&["-c:v", "copy"]));
+    } else {
+        let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        // The whole file's bitrate, less the 192k of sound that goes back in.
+        let kbps = if info.duration > 0.5 { (size as f64 * 8.0 / info.duration / 1000.0) as u64 } else { 0 };
+        let video = kbps.saturating_sub(192).max(800);
+        let (max, buf) = (format!("{video}k"), format!("{}k", video * 2));
+        args.extend(ffmpeg::args(&["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21", "-b:v", "0", "-maxrate", &max, "-bufsize", &buf, "-pix_fmt", "yuv420p"]));
+    }
+    args.extend(ffmpeg::args(&["-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"]));
+    args.push(out.clone().into());
+    finish(args, out)
 }
 
 fn export_h264_vf(path: &str, out: PathBuf, audio: &AudioEdit, crop: Option<Crop>) -> Result<String, String> {

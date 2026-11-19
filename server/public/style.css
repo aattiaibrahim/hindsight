@@ -308,7 +308,10 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 .bar { width: min(320px, 80%); height: 4px; border-radius: 2px; background: var(--raised-2); overflow: hidden; }
 .bar > div { height: 100%; width: 0; background: var(--accent); transition: width 0.3s var(--ease); }
 .actions, .share-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.share-out { display: flex; gap: 8px; }
+.share-out { display: flex; gap: 8px; width: 100%; max-width: 100%; min-width: 0; }
+.share-out .btn { flex-shrink: 0; }
+.share-row select { max-width: 100%; min-width: 0; }
+.note { overflow-wrap: anywhere; }
 .share-out input { flex: 1; min-width: 0; font-family: var(--mono); }
 .note { padding: 0 2px; }
 
@@ -448,6 +451,11 @@ input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px;
 
 /* Settings: paired PCs and the pairing code */
 .pair-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line, #2a2a2a); }
-.pair-code { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
-.pair-code b { font-size: 34px; letter-spacing: 0.12em; }
+.pair-code { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.pair-code .code-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.pair-code .code {
+  font-size: 34px; font-weight: 700; letter-spacing: 0.12em; color: var(--text); padding: 6px 16px; border-radius: var(--r-sm);
+  background: var(--raised); border: 1px solid var(--accent); user-select: all; cursor: copy;
+}
+.pair-code small { color: var(--text-2); }
 #pair-body > button { margin-top: 10px; }

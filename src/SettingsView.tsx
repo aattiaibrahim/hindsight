@@ -212,7 +212,27 @@ export function SettingsView({
         ))}
       </div>
       <div className="settings-grid" key={tab}>
-        <About version={upd?.current ?? null} hidden={tab !== "about"} />
+        <About
+          version={upd?.current ?? null}
+          hidden={tab !== "about"}
+          logSetting={
+            <label className="setting">
+              <span>
+                Detailed log
+                <small>
+                  Keeps a log file of everything Hindsight does and every error it shows (uploads, edits, syncing, the game
+                  finder), so a problem can be traced afterwards. It stays on this PC; diagnostics reports include it.
+                </small>
+              </span>
+              <span className="row" style={{ gap: 8, flexWrap: "nowrap", flexShrink: 0 }}>
+                <button className="btn small" onClick={() => api.openLogFolder().catch(() => {})}>
+                  Open folder
+                </button>
+                <Toggle label="Detailed log" checked={s.detailedLog} onChange={(v) => set({ detailedLog: v })} />
+              </span>
+            </label>
+          }
+        />
         <section className="group" hidden={tab !== "advanced"}>
           <h2>Advanced</h2>
           <label className="setting">
