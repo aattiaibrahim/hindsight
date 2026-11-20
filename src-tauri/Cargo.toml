@@ -1,6 +1,6 @@
 [package]
 name = "rewind"
-version = "0.1.71"
+version = "0.1.72"
 description = "Lightweight NVENC replay-buffer clipper"
 authors = ["Rewind"]
 edition = "2024"
