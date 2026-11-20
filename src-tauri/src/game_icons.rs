@@ -398,27 +398,60 @@ fn download_jpeg(url: &str, out: &Path) -> Result<(), String> {
     fs::rename(&tmp, out).map_err(|e| e.to_string())
 }
 
-/// Games that aren't on Steam, and their official website (game key → page).
-const SITES: [(&str, &str); 14] = [
-    ("minecraft", "https://www.minecraft.net/"),
-    ("minecraftjavaedition", "https://www.minecraft.net/"),
-    ("minecraftbedrockedition", "https://www.minecraft.net/"),
-    ("minecraftwindows10edition", "https://www.minecraft.net/"),
-    ("roblox", "https://www.roblox.com/"),
-    ("starcitizen", "https://robertsspaceindustries.com/"),
-    ("escapefromtarkovarena", "https://arena.tarkov.com/"),
-    ("tarkovarena", "https://arena.tarkov.com/"),
-    ("valorant", "https://playvalorant.com/"),
-    ("leagueoflegends", "https://www.leagueoflegends.com/"),
-    ("genshinimpact", "https://genshin.hoyoverse.com/"),
-    ("worldofwarcraft", "https://worldofwarcraft.blizzard.com/"),
-    ("osu", "https://osu.ppy.sh/"),
-    ("teamfighttactics", "https://teamfighttactics.leagueoflegends.com/"),
-];
 const SITE_EXTS: [&str; 4] = ["png", "jpg", "ico", "webp"];
+/// Wikimedia asks automated clients to name themselves and where to find them.
+const WIKI_AGENT: &str = "Hindsight/0.1 (https://github.com/aattiaibrahim/hindsight)";
 
-fn site_for(key: &str) -> Option<&'static str> {
-    SITES.iter().find(|(k, _)| *k == key).map(|(_, s)| *s)
+/// A game's official website, from Wikidata (Wikipedia's free database): the video
+/// games named like the folder, and the "official website" of the one whose name
+/// (or another name it goes by) is the same game. Only the game's name is sent.
+fn wikidata_sites(game: &str) -> Result<Vec<String>, String> {
+    let key = game_key(game);
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(15)).user_agent(WIKI_AGENT).build().map_err(|e| e.to_string())?;
+    let enc = |s: &str| -> String { s.bytes().map(|b| if b.is_ascii_alphanumeric() { (b as char).to_string() } else { format!("%{b:02X}") }).collect() };
+    let get = |url: String| -> Result<serde_json::Value, String> {
+        client.get(url).send().and_then(|r| r.error_for_status()).map_err(|e| e.to_string())?.json().map_err(|e| e.to_string())
+    };
+    // Full-text search among video games only (Q7889): it finds "Escape from Tarkov: Arena"
+    // for "Escape From Tarkov Arena", which a plain name search doesn't.
+    let found = get(format!(
+        "https://www.wikidata.org/w/api.php?action=query&list=search&srsearch={}&srlimit=6&format=json",
+        enc(&format!("haswbstatement:P31=Q7889 {game}"))
+    ))?;
+    let ids: Vec<String> = found["query"]["search"].as_array().into_iter().flatten().filter_map(|h| h["title"].as_str().map(str::to_string)).collect();
+    if ids.is_empty() {
+        return Err("not on Wikidata".into());
+    }
+    let items = get(format!(
+        "https://www.wikidata.org/w/api.php?action=wbgetentities&ids={}&props=claims%7Clabels%7Caliases&languages=en%7Cmul&format=json",
+        ids.join("%7C")
+    ))?;
+    for id in &ids {
+        let item = &items["entities"][id.as_str()];
+        // English names, and the ones for every language ("mul", where Fortnite keeps its name).
+        let names = ["en", "mul"].into_iter().flat_map(|l| {
+            std::iter::once(item["labels"][l]["value"].as_str())
+                .chain(item["aliases"][l].as_array().into_iter().flatten().map(|a| a["value"].as_str()))
+                .flatten()
+                .collect::<Vec<_>>()
+        });
+        if !names.into_iter().any(|n| same_game(&key, n)) {
+            continue;
+        }
+        let sites: Vec<String> = item["claims"]["P856"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c["mainsnak"]["datavalue"]["value"].as_str())
+            .filter(|s| s.starts_with("https://") || s.starts_with("http://"))
+            .map(str::to_string)
+            .collect();
+        if !sites.is_empty() {
+            return Ok(sites);
+        }
+    }
+    Err("no official website on Wikidata".into())
 }
 
 /// The value of `name="…"` (or '…') in an HTML tag, lowercase name.
@@ -486,6 +519,27 @@ fn picture_ext(b: &[u8]) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+/// The icon from the first of these websites that has one: each page as given, then
+/// its home page (a deep link can redirect somewhere that fails).
+fn icon_from_sites(sites: &[String], dir: &Path, key: &str) -> Result<PathBuf, String> {
+    let mut tried: Vec<String> = Vec::new();
+    let mut last = String::from("no website");
+    for site in sites.iter().take(3) {
+        let home = format!("{}/", site.splitn(4, '/').take(3).collect::<Vec<_>>().join("/"));
+        for page in [site.clone(), home] {
+            if tried.contains(&page) {
+                continue;
+            }
+            tried.push(page.clone());
+            match site_icon(&page, dir, key) {
+                Ok(p) => return Ok(p),
+                Err(e) => last = format!("{page}: {e}"),
+            }
+        }
+    }
+    Err(last)
 }
 
 /// The game's icon from its own website, saved as `<key>.site.<ext>`.
@@ -599,41 +653,38 @@ pub fn icon(game: &str, online: bool) -> Option<PathBuf> {
     if png.exists() {
         return Some(png);
     }
+    // The game's own program (installed, or played while Hindsight ran).
+    let miss = dir.join(format!("{key}.none"));
+    // A remembered program (a game just played) is always worth trying again.
+    let remembered = EXES.lock().unwrap().as_ref().is_some_and(|m| m.contains_key(&key));
+    if !tried_recently(&miss, 86_400) || remembered {
+        if let Some(Ok(())) = find_program(game).map(|exe| extract(&exe, &png)) {
+            let _ = fs::remove_file(&miss);
+            return Some(png);
+        }
+        let _ = fs::remove_file(&png);
+        let _ = fs::write(&miss, b"");
+    }
     // Not on Steam and not installed (Minecraft, Roblox, Star Citizen…): the icon from
-    // the game's own website. A miss is asked again after a week, never while you play.
-    if online && let Some(site) = site_for(&key) {
+    // the game's own website, found through Wikidata. A miss is asked again after a
+    // week, never while you play.
+    if online && !not_a_game(&key) {
         if let Some(p) = SITE_EXTS.iter().map(|e| dir.join(format!("{key}.site.{e}"))).find(|p| p.exists()) {
             return Some(p);
         }
-        let miss = dir.join(format!("{key}.site-none"));
+        let miss = dir.join(format!("{key}.site2-none"));
         if !crate::games::game_running() && !tried_recently(&miss, 7 * 86_400) {
-            match site_icon(site, &dir, &key) {
+            let title = crate::games::tidy_program_name(game).unwrap_or_else(|| game.to_string());
+            match wikidata_sites(&title).and_then(|sites| icon_from_sites(&sites, &dir, &key)) {
                 Ok(p) => return Some(p),
                 Err(e) => {
-                    crate::log!("game logo for {game} from {site}: {e}");
+                    crate::log!("game logo for {game} from its website: {e}");
                     let _ = fs::write(&miss, b"");
                 }
             }
         }
     }
-    let miss = dir.join(format!("{key}.none"));
-    let recent_miss = tried_recently(&miss, 86_400);
-    // A remembered program (a game just played) is always worth trying again.
-    let remembered = EXES.lock().unwrap().as_ref().is_some_and(|m| m.contains_key(&key));
-    if recent_miss && !remembered {
-        return None;
-    }
-    match find_program(game).map(|exe| extract(&exe, &png)) {
-        Some(Ok(())) => {
-            let _ = fs::remove_file(&miss);
-            Some(png)
-        }
-        _ => {
-            let _ = fs::remove_file(&png);
-            let _ = fs::write(&miss, b"");
-            None
-        }
-    }
+    None
 }
 
 #[cfg(test)]
@@ -671,7 +722,6 @@ mod tests {
         assert!(!got.iter().any(|u| u.ends_with(".svg") || u.ends_with(".css")));
         assert_eq!(picture_ext(&[0x89, b'P', b'N', b'G', 0]), Some("png"));
         assert_eq!(picture_ext(b"<html>"), None);
-        assert_eq!(site_for("minecraft"), Some("https://www.minecraft.net/"));
     }
 
     #[test]
@@ -696,7 +746,7 @@ mod tests {
     fn live_game_icons() {
         let dir = std::env::temp_dir().join("rewind-live-icons");
         init(dir.clone());
-        for g in ["Minecraft", "Roblox", "Star Citizen", "Escape From Tarkov Arena", "Call of Duty Ghosts Multiplayer", "Counter-strike Global Offensive", "Sea of Thieves", "Tarkov", "Payday The Heist", "Battlefield 6", "Minecraft", "Render", "Hitman 3", "Rocket League", "Apex Legends", "SpeciesUnknown-Win64-Shipping", "Species Unknown", "Escape From Tarkov", "Resident Evil 3 Remake", "Edits", "funny not cool", "VALORANT", "League of Legends", "Counter-strike 2", "Marvel Rivals", "Overwatch 2", "Tom Clancys Rainbow Six Siege", "Hunt Showdown", "Payday The Heist", "Resident Evil Requiem", "The Outlast Trials", "Empyrion - Galactic Survival", "Desktop"] {
+        for g in ["Minecraft", "Roblox", "Star Citizen", "Escape From Tarkov Arena", "aim", "BenQ", "Fortnite", "Call of Duty Ghosts Multiplayer", "Counter-strike Global Offensive", "Sea of Thieves", "Tarkov", "Payday The Heist", "Battlefield 6", "Minecraft", "Render", "Hitman 3", "Rocket League", "Apex Legends", "SpeciesUnknown-Win64-Shipping", "Species Unknown", "Escape From Tarkov", "Resident Evil 3 Remake", "Edits", "funny not cool", "VALORANT", "League of Legends", "Counter-strike 2", "Marvel Rivals", "Overwatch 2", "Tom Clancys Rainbow Six Siege", "Hunt Showdown", "Payday The Heist", "Resident Evil Requiem", "The Outlast Trials", "Empyrion - Galactic Survival", "Desktop"] {
             println!("{g}: {:?} -> {:?}", find_program(g), icon(g, true));
         }
     }

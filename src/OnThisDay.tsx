@@ -60,12 +60,13 @@ function MemoryCard({ m, on, onOpen }: { m: Memory; on: boolean; onOpen: () => v
           <strong>{m.label.startsWith("This week") ? "That week" : "This day"}</strong>
           <small>{new Date(cover.modified).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</small>
         </span>
-        <span className="memory-games" aria-hidden="true">
-          {games.slice(0, 3).map((g) => (
-            <GameIcon key={g} name={g} size={20} />
-          ))}
-          {games.length > 3 && <span className="memory-more">+{games.length - 3}</span>}
-        </span>
+      </span>
+      {/* The games, sticking out of the corner (fanned out when there are several). */}
+      <span className="memory-games" aria-hidden="true">
+        {games.slice(0, 3).map((g) => (
+          <GameIcon key={g} name={g} size={30} />
+        ))}
+        {games.length > 3 && <span className="memory-more">+{games.length - 3}</span>}
       </span>
     </button>
   );

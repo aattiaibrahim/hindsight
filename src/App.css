@@ -1003,7 +1003,7 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
 .memories-title small { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .btn.ghost { background: transparent; color: var(--text-2); }
 .btn.ghost:hover:not(:disabled) { background: var(--raised); color: var(--text); }
-.memories-row { display: flex; gap: 16px; overflow-x: auto; padding: 16px 2px 10px; margin: -10px -2px -10px; scroll-snap-type: x proximity; scrollbar-width: thin; }
+.memories-row { display: flex; gap: 22px; overflow-x: auto; padding: 16px 14px 16px 2px; margin: -10px -14px -16px -2px; scroll-snap-type: x proximity; scrollbar-width: thin; }
 .memory-card {
   position: relative; z-index: 0; flex: none; width: 300px; aspect-ratio: 16 / 10; border: 0; padding: 0; background: none;
   cursor: pointer; scroll-snap-align: start; text-align: left; border-radius: 14px;
@@ -1035,13 +1035,17 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
 }
 .memory-badge { left: 10px; }
 .memory-count { right: 10px; font-weight: 500; }
-.memory-text { position: absolute; left: 14px; right: 80px; bottom: 12px; display: flex; flex-direction: column; gap: 2px; color: #fff; min-width: 0; }
+.memory-text { position: absolute; left: 14px; right: 40px; bottom: 12px; display: flex; flex-direction: column; gap: 2px; color: #fff; min-width: 0; }
 .memory-text strong { font-family: var(--display); font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
 .memory-text small { font-size: 12px; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.memory-games { position: absolute; right: 12px; bottom: 12px; display: flex; align-items: center; }
-.memory-games .game-icon { border-radius: 6px; box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.6); background: #111; }
-.memory-games .game-icon + .game-icon, .memory-games .game-icon + .memory-more { margin-left: -6px; }
-.memory-more { font-size: 11px; font-weight: 600; color: #fff; padding: 0 6px; height: 20px; display: inline-flex; align-items: center; border-radius: 6px; background: rgba(0, 0, 0, 0.6); }
+/* The games pop out of the bottom-right corner, ringed in the page colour; several fan out to the left. */
+.memory-games { position: absolute; right: -10px; bottom: -10px; z-index: 2; display: flex; flex-direction: row-reverse; align-items: center; transition: transform 0.25s var(--ease); }
+.memory-games .game-icon, .memory-more { border-radius: 8px; background: #111; box-shadow: 0 0 0 3px var(--bg), 0 4px 10px rgba(0, 0, 0, 0.35); }
+.memory-games > * + * { margin-right: -6px; }
+.memory-games > :nth-child(1) { z-index: 3; } .memory-games > :nth-child(2) { z-index: 2; } .memory-games > :nth-child(3) { z-index: 1; }
+.memory-games > * { position: relative; }
+.memory-card:hover .memory-games { transform: translate(2px, 2px); }
+.memory-more { font-size: 11px; font-weight: 600; color: #fff; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; }
 .memory-panel {
   display: flex; flex-direction: column; gap: 12px; padding: 14px; border-radius: 14px;
   background: color-mix(in srgb, var(--text) 4%, var(--panel)); border: 1px solid color-mix(in srgb, var(--text) 7%, transparent);
