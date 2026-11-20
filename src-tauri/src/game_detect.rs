@@ -473,6 +473,36 @@ const SURE_LIKENESS: f32 = 0.9;
 const CLOSE_SHARE: f32 = 0.3;
 const CLOSE_LIKENESS: f32 = 0.88;
 
+/// Games that replaced another and look alike on screen: (old, new, the day the new
+/// one came out, in ms). A clip from before that day is the old game, from after it
+/// the new one, whatever the picture says. Game keys, any spelling.
+const SUCCESSORS: [(&[&str], &[&str], i64); 1] = [
+    // Counter-Strike 2 replaced CS:GO on 27 September 2023.
+    (&["counterstrikeglobaloffensive", "csgo"], &["counterstrike2", "cs2"], 1_695_772_800_000),
+];
+
+/// `ranked` without a game the clip can't be from given its date (see SUCCESSORS),
+/// the others' shares scaled back up to 1.
+fn by_date(ranked: Vec<(String, f32)>, modified: i64) -> Vec<(String, f32)> {
+    if modified <= 0 {
+        return ranked;
+    }
+    let impossible = |g: &str| {
+        let k = crate::consolidate::game_key(g);
+        SUCCESSORS.iter().any(|(old, new, day)| {
+            let has = |list: &[&str]| ranked.iter().any(|(r, _)| list.contains(&crate::consolidate::game_key(r).as_str()));
+            // Only when both are in the running: a lone guess is left to the picture.
+            has(old) && has(new) && ((modified >= *day && old.contains(&k.as_str())) || (modified < *day && new.contains(&k.as_str())))
+        })
+    };
+    let kept: Vec<(String, f32)> = ranked.iter().filter(|(g, _)| !impossible(g)).cloned().collect();
+    let total: f32 = kept.iter().map(|(_, s)| s).sum();
+    if kept.is_empty() || total <= 0.0 {
+        return ranked;
+    }
+    kept.into_iter().map(|(g, s)| (g, s / total)).collect()
+}
+
 /// Guesses for clips in unsorted folders (already looked at): sure ones and close calls.
 /// `also`: your own folders to look through too ("Find the game" on a folder).
 /// `skip`: folders that aren't games (never learned from, never an answer).
@@ -518,7 +548,8 @@ fn suggest_from(
         }
         let Some(p) = print(c) else { continue };
         let Some((ranked, likeness)) = rank_among(&p, examples.iter().filter(|(_, e)| e != &p), 5) else { continue };
-        let (game, share) = ranked[0].clone();
+        let ranked = by_date(ranked, c.modified);
+        let Some((game, share)) = ranked.first().cloned() else { continue };
         let here = crate::consolidate::game_key(&c.folder);
         if game == NOT_A_GAME || crate::consolidate::game_key(&game) == here {
             continue;
@@ -682,6 +713,23 @@ mod tests {
         // The clips in "aim" move out into their game's folder too.
         assert_eq!(got.iter().filter(|s| s.folder == "aim" && s.game == "Apex Legends").count(), 5, "{got:?}");
         assert_eq!(to_look_at(&all, &[], &["aim".into()]).iter().filter(|c| c.folder == "aim").count(), 5);
+    }
+
+    #[test]
+    fn cs_go_or_cs2_is_decided_by_the_clips_date() {
+        let ranked = || vec![("Counter-strike 2".to_string(), 0.6), ("Counter-strike Global Offensive".to_string(), 0.3), ("Valorant".to_string(), 0.1)];
+        let before = 1_660_000_000_000; // August 2022
+        let after = 1_760_000_000_000; // October 2025
+        let old = by_date(ranked(), before);
+        assert_eq!(old[0].0, "Counter-strike Global Offensive");
+        assert!(old.iter().all(|(g, _)| g != "Counter-strike 2"));
+        assert!((old.iter().map(|(_, s)| s).sum::<f32>() - 1.0).abs() < 1e-4);
+        let new = by_date(ranked(), after);
+        assert_eq!(new.iter().map(|(g, _)| g.as_str()).collect::<Vec<_>>(), ["Counter-strike 2", "Valorant"]);
+        // A lone guess is left alone, and so is a clip with no date.
+        let lone = vec![("Counter-strike 2".to_string(), 1.0)];
+        assert_eq!(by_date(lone.clone(), before), lone);
+        assert_eq!(by_date(ranked(), 0), ranked());
     }
 
     #[test]

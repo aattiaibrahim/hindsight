@@ -219,7 +219,9 @@ fn same_game(folder_key: &str, steam_name: &str) -> bool {
         tail.chars().all(|c| c.is_ascii_digit())
             // "Sea of Thieves: 2026 Edition"
             || tail.strip_suffix("edition").is_some_and(|y| y.len() == 4 && y.chars().all(|c| c.is_ascii_digit()))
-            ||["x", "remake", "remastered", "hd", "goty", "definitiveedition", "enhancededition", "gameoftheyearedition", "classic", "reloaded"].contains(&tail)
+            || ["x", "remake", "remastered", "hd", "goty", "definitiveedition", "enhancededition", "gameoftheyearedition", "classic", "reloaded"].contains(&tail)
+            // "Call of Duty Ghosts Multiplayer" is "Call of Duty: Ghosts" (the part played, not another game).
+            || ["multiplayer", "singleplayer", "campaign", "zombies"].contains(&tail)
     };
     k == folder_key
         || (folder_key.len() >= 6 && k.strip_prefix(folder_key).is_some_and(edition))
@@ -377,6 +379,139 @@ fn steam_icon(game: &str, out: &Path) -> Result<(), String> {
     fs::rename(&tmp, out).map_err(|e| e.to_string())
 }
 
+/// Games whose Steam page now belongs to their successor: their own icon, still on
+/// Steam's servers (game key → icon). CS:GO's page became Counter-Strike 2's in 2023.
+const FIXED_ICONS: [(&str, &str); 2] = [
+    ("counterstrikeglobaloffensive", "https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/730/69f7ebe2735c366c65c0b33dae00e12dc40edbe4.jpg"),
+    ("csgo", "https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/730/69f7ebe2735c366c65c0b33dae00e12dc40edbe4.jpg"),
+];
+
+fn download_jpeg(url: &str, out: &Path) -> Result<(), String> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let client = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(15)).user_agent("Hindsight").build().map_err(|e| e.to_string())?;
+    let bytes = client.get(url).send().and_then(|r| r.error_for_status()).and_then(|r| r.bytes()).map_err(|e| e.to_string())?;
+    if bytes.len() < 200 || bytes[..2] != [0xff, 0xd8] {
+        return Err("not an image".into());
+    }
+    let tmp = out.with_extension("part");
+    fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, out).map_err(|e| e.to_string())
+}
+
+/// Games that aren't on Steam, and their official website (game key → page).
+const SITES: [(&str, &str); 14] = [
+    ("minecraft", "https://www.minecraft.net/"),
+    ("minecraftjavaedition", "https://www.minecraft.net/"),
+    ("minecraftbedrockedition", "https://www.minecraft.net/"),
+    ("minecraftwindows10edition", "https://www.minecraft.net/"),
+    ("roblox", "https://www.roblox.com/"),
+    ("starcitizen", "https://robertsspaceindustries.com/"),
+    ("escapefromtarkovarena", "https://arena.tarkov.com/"),
+    ("tarkovarena", "https://arena.tarkov.com/"),
+    ("valorant", "https://playvalorant.com/"),
+    ("leagueoflegends", "https://www.leagueoflegends.com/"),
+    ("genshinimpact", "https://genshin.hoyoverse.com/"),
+    ("worldofwarcraft", "https://worldofwarcraft.blizzard.com/"),
+    ("osu", "https://osu.ppy.sh/"),
+    ("teamfighttactics", "https://teamfighttactics.leagueoflegends.com/"),
+];
+const SITE_EXTS: [&str; 4] = ["png", "jpg", "ico", "webp"];
+
+fn site_for(key: &str) -> Option<&'static str> {
+    SITES.iter().find(|(k, _)| *k == key).map(|(_, s)| *s)
+}
+
+/// The value of `name="…"` (or '…') in an HTML tag, lowercase name.
+fn attr(tag: &str, name: &str) -> Option<String> {
+    let lower = tag.to_lowercase();
+    let mut from = 0;
+    while let Some(i) = lower[from..].find(&format!("{name}=")) {
+        let at = from + i;
+        from = at + name.len() + 1;
+        // A whole attribute name, not the end of another ("data-href=").
+        if at > 0 && !lower.as_bytes()[at - 1].is_ascii_whitespace() {
+            continue;
+        }
+        let rest = &tag[from..];
+        let q = rest.chars().next()?;
+        let value = if q == '"' || q == '\'' { rest[1..].split(q).next()? } else { rest.split(|c: char| c.is_whitespace() || c == '>').next()? };
+        return Some(value.replace("&amp;", "&"));
+    }
+    None
+}
+
+/// Icon addresses on a web page, best first: Apple touch icons and big PNGs before
+/// small ones and the favicon.
+fn page_icons(html: &str, page: &str) -> Vec<String> {
+    let origin = page.splitn(4, '/').take(3).collect::<Vec<_>>().join("/");
+    let absolute = |href: &str| {
+        if href.starts_with("http://") || href.starts_with("https://") {
+            href.to_string()
+        } else if let Some(rest) = href.strip_prefix("//") {
+            format!("https://{rest}")
+        } else {
+            format!("{origin}/{}", href.trim_start_matches('/'))
+        }
+    };
+    let mut found: Vec<(u32, String)> = Vec::new();
+    for part in html.split("<link").skip(1).chain(html.split("<LINK").skip(1)) {
+        let tag = part.split('>').next().unwrap_or("");
+        let Some(rel) = attr(tag, "rel").map(|r| r.to_lowercase()) else { continue };
+        let Some(href) = attr(tag, "href") else { continue };
+        if !rel.contains("icon") || rel.contains("mask") || href.to_lowercase().contains(".svg") {
+            continue;
+        }
+        let size = attr(tag, "sizes").and_then(|s| s.split(['x', 'X']).next().and_then(|n| n.trim().parse::<u32>().ok()));
+        let score = if rel.contains("apple-touch") { size.unwrap_or(180).max(150) } else { size.unwrap_or(if href.to_lowercase().contains(".ico") { 32 } else { 64 }) };
+        found.push((score, absolute(&href)));
+    }
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut out: Vec<String> = found.into_iter().map(|(_, u)| u).collect();
+    out.push(format!("{origin}/apple-touch-icon.png"));
+    out.push(format!("{origin}/favicon.ico"));
+    out.dedup();
+    out
+}
+
+/// What kind of picture these bytes are (by their first bytes), if one the app can show.
+fn picture_ext(b: &[u8]) -> Option<&'static str> {
+    if b.starts_with(&[0x89, b'P', b'N', b'G']) {
+        Some("png")
+    } else if b.starts_with(&[0xff, 0xd8]) {
+        Some("jpg")
+    } else if b.starts_with(&[0, 0, 1, 0]) {
+        Some("ico")
+    } else if b.len() > 12 && &b[0..4] == b"RIFF" && &b[8..12] == b"WEBP" {
+        Some("webp")
+    } else {
+        None
+    }
+}
+
+/// The game's icon from its own website, saved as `<key>.site.<ext>`.
+fn site_icon(page: &str, dir: &Path, key: &str) -> Result<PathBuf, String> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) Hindsight")
+        .build()
+        .map_err(|e| e.to_string())?;
+    let html = client.get(page).send().and_then(|r| r.error_for_status()).and_then(|r| r.text()).map_err(|e| e.to_string())?;
+    for url in page_icons(&html, page).into_iter().take(6) {
+        let Ok(bytes) = client.get(&url).send().and_then(|r| r.error_for_status()).and_then(|r| r.bytes()) else { continue };
+        if bytes.len() < 100 || bytes.len() > 2_000_000 {
+            continue;
+        }
+        let Some(ext) = picture_ext(&bytes) else { continue };
+        let out = dir.join(format!("{key}.site.{ext}"));
+        let tmp = out.with_extension("part");
+        fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
+        fs::rename(&tmp, &out).map_err(|e| e.to_string())?;
+        return Ok(out);
+    }
+    Err("no icon on the page".into())
+}
+
 fn tried_recently(marker: &Path, secs: u64) -> bool {
     fs::metadata(marker)
         .and_then(|m| m.modified())
@@ -421,6 +556,23 @@ pub fn icon(game: &str, online: bool) -> Option<PathBuf> {
     if let Some(p) = custom_logo(&dir, &key) {
         return Some(p);
     }
+    // A game whose Steam page became another game's keeps its own old icon.
+    if online && let Some(url) = FIXED_ICONS.iter().find(|(k, _)| *k == key).map(|(_, u)| *u) {
+        let fixed = dir.join(format!("{key}.fixed.jpg"));
+        if fixed.exists() {
+            return Some(fixed);
+        }
+        let miss = dir.join(format!("{key}.fixed-none"));
+        if !crate::games::game_running() && !tried_recently(&miss, 86_400) {
+            match download_jpeg(url, &fixed) {
+                Ok(()) => return Some(fixed),
+                Err(e) => {
+                    crate::log!("game logo for {game}: {e}");
+                    let _ = fs::write(&miss, b"");
+                }
+            }
+        }
+    }
     if online && !not_a_game(&key) {
         // ".steam2": looked up with the stricter name match (older lookups could
         // give "Minecraft" the logo of "Minecraft Dungeons").
@@ -429,8 +581,8 @@ pub fn icon(game: &str, online: bool) -> Option<PathBuf> {
             return Some(steam);
         }
         // Never while a game is running; a miss is asked again after a week.
-        // "steam4": asked again after names like "Sea of Thieves: 2026 Edition" started to match.
-        let miss = dir.join(format!("{key}.steam4-none"));
+        // "steam5": asked again after "Sea of Thieves: 2026 Edition" and "… Multiplayer" started to match.
+        let miss = dir.join(format!("{key}.steam5-none"));
         if !crate::games::game_running() && !tried_recently(&miss, 7 * 86_400) {
             // "SpeciesUnknown-Win64-Shipping" is looked up as "Species Unknown".
             let title = crate::games::tidy_program_name(game).unwrap_or_else(|| game.to_string());
@@ -446,6 +598,23 @@ pub fn icon(game: &str, online: bool) -> Option<PathBuf> {
     let png = dir.join(format!("{key}.png"));
     if png.exists() {
         return Some(png);
+    }
+    // Not on Steam and not installed (Minecraft, Roblox, Star Citizen…): the icon from
+    // the game's own website. A miss is asked again after a week, never while you play.
+    if online && let Some(site) = site_for(&key) {
+        if let Some(p) = SITE_EXTS.iter().map(|e| dir.join(format!("{key}.site.{e}"))).find(|p| p.exists()) {
+            return Some(p);
+        }
+        let miss = dir.join(format!("{key}.site-none"));
+        if !crate::games::game_running() && !tried_recently(&miss, 7 * 86_400) {
+            match site_icon(site, &dir, &key) {
+                Ok(p) => return Some(p),
+                Err(e) => {
+                    crate::log!("game logo for {game} from {site}: {e}");
+                    let _ = fs::write(&miss, b"");
+                }
+            }
+        }
     }
     let miss = dir.join(format!("{key}.none"));
     let recent_miss = tried_recently(&miss, 86_400);
@@ -481,11 +650,28 @@ mod tests {
         assert!(same_game("residentevil3remake", "Resident Evil 3"));
         assert!(same_game("counterstrike2", "Counter-Strike 2"));
         assert!(same_game("seaofthieves", "Sea of Thieves: 2026 Edition"));
+        assert!(same_game("callofdutyghostsmultiplayer", "Call of Duty®: Ghosts"));
+        assert!(!same_game("callofdutyghosts", "Call of Duty®: Ghosts - Onslaught"));
         assert!(!same_game("seaofthieves", "Sea of Thieves: 2026 Premium Bundle"));
         assert!(!same_game("edit", "Edith Finch"));
         assert!(!same_game("funnynotcool", "Funny"));
         assert!(!same_game("residentevilrequiem", "Resident Evil"));
         assert!(not_a_game("desktop") && not_a_game("edits") && !not_a_game("valorant"));
+    }
+
+    #[test]
+    fn a_websites_best_icon_is_found() {
+        let html = r#"<head><link rel="icon" href="/favicon.ico"><LINK rel="icon" type="image/png" sizes="192x192" href="/img/icon-192.png"/>
+            <link rel="apple-touch-icon" href="https://cdn.example.com/touch.png?a=1&amp;b=2"><link rel="mask-icon" href="/m.svg">
+            <link data-href="x" rel="stylesheet" href="/s.css"></head>"#;
+        let got = page_icons(html, "https://www.example.com/en-us/");
+        assert_eq!(got[0], "https://www.example.com/img/icon-192.png");
+        assert_eq!(got[1], "https://cdn.example.com/touch.png?a=1&b=2");
+        assert!(got.contains(&"https://www.example.com/favicon.ico".to_string()));
+        assert!(!got.iter().any(|u| u.ends_with(".svg") || u.ends_with(".css")));
+        assert_eq!(picture_ext(&[0x89, b'P', b'N', b'G', 0]), Some("png"));
+        assert_eq!(picture_ext(b"<html>"), None);
+        assert_eq!(site_for("minecraft"), Some("https://www.minecraft.net/"));
     }
 
     #[test]
@@ -510,7 +696,7 @@ mod tests {
     fn live_game_icons() {
         let dir = std::env::temp_dir().join("rewind-live-icons");
         init(dir.clone());
-        for g in ["Sea of Thieves", "Tarkov", "Payday The Heist", "Battlefield 6", "Minecraft", "Render", "Hitman 3", "Rocket League", "Apex Legends", "SpeciesUnknown-Win64-Shipping", "Species Unknown", "Escape From Tarkov", "Resident Evil 3 Remake", "Edits", "funny not cool", "VALORANT", "League of Legends", "Counter-strike 2", "Marvel Rivals", "Overwatch 2", "Tom Clancys Rainbow Six Siege", "Hunt Showdown", "Payday The Heist", "Resident Evil Requiem", "The Outlast Trials", "Empyrion - Galactic Survival", "Desktop"] {
+        for g in ["Minecraft", "Roblox", "Star Citizen", "Escape From Tarkov Arena", "Call of Duty Ghosts Multiplayer", "Counter-strike Global Offensive", "Sea of Thieves", "Tarkov", "Payday The Heist", "Battlefield 6", "Minecraft", "Render", "Hitman 3", "Rocket League", "Apex Legends", "SpeciesUnknown-Win64-Shipping", "Species Unknown", "Escape From Tarkov", "Resident Evil 3 Remake", "Edits", "funny not cool", "VALORANT", "League of Legends", "Counter-strike 2", "Marvel Rivals", "Overwatch 2", "Tom Clancys Rainbow Six Siege", "Hunt Showdown", "Payday The Heist", "Resident Evil Requiem", "The Outlast Trials", "Empyrion - Galactic Survival", "Desktop"] {
             println!("{g}: {:?} -> {:?}", find_program(g), icon(g, true));
         }
     }
