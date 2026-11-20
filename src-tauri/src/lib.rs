@@ -1809,6 +1809,16 @@ async fn game_icon(app: AppHandle, name: String) -> Result<Option<String>, Strin
     blocking(move || Ok(game_icons::icon(&name, online).map(|p| p.to_string_lossy().into_owned()))).await
 }
 
+/// Steam games named like `term`, for naming a new game folder. Nothing is sent
+/// unless Online game logos is on (the same setting that lets game names go to Steam).
+#[tauri::command]
+async fn search_games(app: AppHandle, term: String) -> Result<Vec<String>, String> {
+    if !settings_of(&app).online_game_logos {
+        return Ok(Vec::new());
+    }
+    blocking(move || game_icons::search_steam(&term)).await
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GpuEncoders {
@@ -2360,6 +2370,7 @@ get_settings,
             list_clips,
             probe_file,
             known_lengths,
+            search_games,
             thumbnail,
             preview_audio,
             remux_mp4,

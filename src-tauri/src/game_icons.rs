@@ -295,6 +295,54 @@ fn steam_app(game: &str, client: &reqwest::blocking::Client) -> Option<u64> {
     None
 }
 
+/// Games on Steam whose name matches what you're typing (for naming a new game
+/// folder): only the typed text is sent. Soundtracks, DLC packs and bundles are left out.
+pub fn search_steam(term: &str) -> Result<Vec<String>, String> {
+    let term = term.trim();
+    if term.chars().count() < 2 {
+        return Ok(Vec::new());
+    }
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(6))
+        .user_agent("Hindsight")
+        .build()
+        .map_err(|e| e.to_string())?;
+    let q: String = term.bytes().map(|b| if b.is_ascii_alphanumeric() { (b as char).to_string() } else { format!("%{b:02X}") }).collect();
+    let j: serde_json::Value = client
+        .get(format!("https://store.steampowered.com/api/storesearch/?term={q}&l=english&cc=US"))
+        .send()
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| e.to_string())?
+        .json()
+        .map_err(|e| e.to_string())?;
+    const EXTRAS: [&str; 15] = [
+        "soundtrack", "dlc", "bundle", "pack", "season pass", "artbook", "upgrade", "expansion", "supporter", "currency", "offer", "coins", "points",
+        "in-game", "ingame",
+    ];
+    // Store items aren't games either, nor names dressed up with emoji or symbols.
+    let symbols = |s: &str| s.chars().any(|c| c as u32 >= 0x2190 && !c.is_alphanumeric());
+    let mut out: Vec<String> = Vec::new();
+    for name in j["items"].as_array().into_iter().flatten().filter(|i| i["type"].as_str() == Some("app")).filter_map(|i| i["name"].as_str()) {
+        let lower = name.to_lowercase();
+        // "Tom Clancy's Rainbow Six® Siege X": no trademark signs in a folder name.
+        if symbols(name) {
+            continue;
+        }
+        let clean = name.replace(['®', '™', '©'], "").replace('’', "'").split_whitespace().collect::<Vec<_>>().join(" ");
+        // "Sea of Thieves: 2026 Edition" is the "Sea of Thieves" folder.
+        let clean = match clean.split_once(": ") {
+            Some((head, _)) if same_game(&game_key(head), &clean) => head.to_string(),
+            _ => clean,
+        };
+        if !EXTRAS.iter().any(|w| lower.contains(w)) && !clean.is_empty() && !out.iter().any(|o| game_key(o) == game_key(&clean)) {
+            out.push(clean);
+        }
+    }
+    out.truncate(6);
+    Ok(out)
+}
+
 /// The game's official Steam icon, downloaded into `out`.
 fn steam_icon(game: &str, out: &Path) -> Result<(), String> {
     let _ = rustls::crypto::ring::default_provider().install_default();

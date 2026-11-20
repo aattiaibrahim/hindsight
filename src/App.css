@@ -996,26 +996,66 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
 .folder-title { display: flex; align-items: center; gap: 8px; }
 
 /* On this day: clips from this date in earlier years */
-.memories { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 18px; }
-.memories-head { display: flex; align-items: baseline; gap: 10px; }
-.memories-head h3 { margin: 0; font-size: 15px; font-weight: 600; flex: 1; color: var(--text); }
-.memories-row { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x proximity; }
+.memories { display: flex; flex-direction: column; gap: 12px; margin: 4px 0 22px; }
+.memories-head { display: flex; align-items: center; gap: 10px; }
+.memories-title { flex: 1; display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.memories-title h3 { margin: 0; font-family: var(--display); font-size: 17px; font-weight: 600; color: var(--text); }
+.memories-title small { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn.ghost { background: transparent; color: var(--text-2); }
+.btn.ghost:hover:not(:disabled) { background: var(--raised); color: var(--text); }
+.memories-row { display: flex; gap: 16px; overflow-x: auto; padding: 16px 2px 10px; margin: -10px -2px -10px; scroll-snap-type: x proximity; scrollbar-width: thin; }
 .memory-card {
-  position: relative; flex: none; width: 260px; aspect-ratio: 16 / 9; border: 0; padding: 0; border-radius: 8px; overflow: hidden;
-  background: var(--raised); cursor: pointer; scroll-snap-align: start; text-align: left;
-  transition: box-shadow 0.2s;
+  position: relative; z-index: 0; flex: none; width: 300px; aspect-ratio: 16 / 10; border: 0; padding: 0; background: none;
+  cursor: pointer; scroll-snap-align: start; text-align: left; border-radius: 14px;
+  transition: transform 0.25s var(--ease);
 }
-/* The ring sits inside the picture (like the library cards), so the scrolling row can't cut it off. */
-.memory-card::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 2px transparent; transition: box-shadow 0.2s; pointer-events: none; }
-.memory-card:hover::after, .memory-card.on::after { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 70%, transparent); }
-.memory-card:focus-visible { outline-offset: -2px; }
+/* Several clips that day: cards fanned out behind, like a stack of photos. */
+.memory-card.stack::before, .memory-card.stack::after {
+  content: ""; position: absolute; left: 12px; right: 12px; top: -6px; bottom: 6px; border-radius: 14px; z-index: 0;
+  background: color-mix(in srgb, var(--text) 16%, var(--raised)); transition: transform 0.25s var(--ease);
+}
+.memory-card.stack::after { left: 26px; right: 26px; top: -11px; bottom: 11px; z-index: -1; opacity: 0.55; }
+.memory-pic {
+  position: absolute; inset: 0; z-index: 1; display: block; overflow: hidden; border-radius: 14px; background: var(--raised);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35), inset 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent);
+}
+.memory-pic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: transform 0.6s var(--ease); }
+.memory-card:hover { transform: translateY(-2px); }
+.memory-card:hover .memory-pic img { transform: scale(1.05); }
+.memory-card.stack:hover::before { transform: translateY(-2px); }
+.memory-card.stack:hover::after { transform: translateY(-4px); }
+.memory-card.on .memory-pic { box-shadow: 0 0 0 2px var(--accent), 0 6px 18px rgba(0, 0, 0, 0.35); }
+.memory-card:focus-visible { outline: none; }
+.memory-card:focus-visible .memory-pic { box-shadow: 0 0 0 2px var(--accent); }
+.memory-shade { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0, 0, 0, 0.35) 0%, transparent 30%, transparent 45%, rgba(0, 0, 0, 0.85) 100%); }
+.memory-badge, .memory-count {
+  position: absolute; top: 10px; height: 24px; padding: 0 10px; border-radius: 999px; display: inline-flex; align-items: center;
+  font-size: 11.5px; font-weight: 600; color: #fff; background: rgba(20, 20, 22, 0.55); backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.12); white-space: nowrap;
+}
+.memory-badge { left: 10px; }
+.memory-count { right: 10px; font-weight: 500; }
+.memory-text { position: absolute; left: 14px; right: 80px; bottom: 12px; display: flex; flex-direction: column; gap: 2px; color: #fff; min-width: 0; }
+.memory-text strong { font-family: var(--display); font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.memory-text small { font-size: 12px; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.memory-games { position: absolute; right: 12px; bottom: 12px; display: flex; align-items: center; }
+.memory-games .game-icon { border-radius: 6px; box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.6); background: #111; }
+.memory-games .game-icon + .game-icon, .memory-games .game-icon + .memory-more { margin-left: -6px; }
+.memory-more { font-size: 11px; font-weight: 600; color: #fff; padding: 0 6px; height: 20px; display: inline-flex; align-items: center; border-radius: 6px; background: rgba(0, 0, 0, 0.6); }
+.memory-panel {
+  display: flex; flex-direction: column; gap: 12px; padding: 14px; border-radius: 14px;
+  background: color-mix(in srgb, var(--text) 4%, var(--panel)); border: 1px solid color-mix(in srgb, var(--text) 7%, transparent);
+  animation: memory-open 0.22s var(--ease);
+}
+@keyframes memory-open { from { opacity: 0; transform: translateY(-6px); } }
+.memory-panel-head { display: flex; align-items: center; gap: 10px; }
+.memory-panel-head strong { font-size: 14px; }
+.small-x { width: 28px; height: 28px; }
 .memory-clips { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
 .memory-clip .card-title { color: var(--text); }
-.memory-card img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.memory-shade { position: absolute; inset: 0; background: linear-gradient(180deg, transparent 35%, rgba(0, 0, 0, 0.82)); }
-.memory-text { position: absolute; left: 12px; right: 12px; bottom: 10px; display: flex; flex-direction: column; gap: 2px; color: #fff; }
-.memory-text strong { font-size: 15px; }
-.memory-text small { font-size: 11.5px; opacity: 0.85; }
+.memory-clip .card-meta { display: flex; align-items: center; gap: 6px; }
+.memory-clip .card-meta > span { overflow: hidden; text-overflow: ellipsis; }
+:root[data-motion="reduce"] .memory-card, :root[data-motion="reduce"] .memory-pic img, :root[data-motion="reduce"] .memory-panel { transition: none; animation: none; }
 
 /* Cleanup: duplicates */
 .dupes { display: flex; flex-direction: column; gap: 10px; }
@@ -1527,3 +1567,65 @@ p.small { font-size: 12px; margin: 0; }
 .me-draft { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: var(--raised); margin-bottom: 12px; }
 .me-draft > div { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .me-draft small { font-size: 12px; }
+
+/* ---------- Text never spills out of its box (app-wide) ----------
+   Buttons, chips and menu items stay on one line and are cut with "…" (their
+   full text is in a tooltip where it matters); flex and grid children may shrink
+   below their text's width; long words and links wrap instead of running off. */
+body { overflow-wrap: break-word; }
+.btn, .chip, .seg button, button.tab { max-width: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seg { max-width: 100%; min-width: 0; }
+.btn > span:not([class]), .chip > span:not([class]), .chip > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row > *, .setting > span, .modal > *, .sort-main, .sort-game, .card-meta, .card-meta > * { min-width: 0; }
+small, .muted, .err-text, .note, p { overflow-wrap: anywhere; }
+.dd-menu { max-width: min(440px, calc(100vw - 16px)); }
+.dd-item { overflow: hidden; text-overflow: ellipsis; }
+/* Game logos keep their size whatever rule matches them (a "span { flex: 1 }" once stretched them). */
+.game-icon { flex: none !important; }
+
+/* ---------- Clip preview: plays on hover, opens the player on click ---------- */
+.hover-preview { position: relative; display: block; padding: 0; border: 0; overflow: hidden; background: var(--raised); cursor: pointer; }
+.hover-preview img, .hover-preview video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.hover-preview video { opacity: 0; transition: opacity 0.18s var(--ease); }
+.hover-preview video.on { opacity: 1; }
+.hover-play {
+  position: absolute; left: 50%; top: 50%; width: 30px; height: 30px; margin: -15px 0 0 -15px; border-radius: 50%;
+  display: grid; place-items: center; color: #fff; background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(6px);
+  opacity: 0; transform: scale(0.9); transition: opacity var(--fast) var(--ease), transform var(--fast) var(--ease); pointer-events: none;
+}
+.hover-preview:hover .hover-play, .hover-preview:focus-visible .hover-play { opacity: 1; transform: none; }
+.hover-preview:hover { box-shadow: 0 0 0 2px var(--accent); }
+.hover-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.player-backdrop {
+  position: fixed; inset: 0; z-index: 1100; display: grid; place-items: center; padding: 24px;
+  background: rgba(0, 0, 0, 0.72); backdrop-filter: blur(10px); animation: fade-in 0.16s ease-out;
+}
+.player {
+  width: min(1100px, 100%); max-height: 100%; display: flex; flex-direction: column; overflow: hidden;
+  border-radius: 16px; background: #0b0b0c; box-shadow: var(--elev-3); border: 1px solid rgba(255, 255, 255, 0.07);
+  animation: modal-in 0.2s var(--ease);
+}
+.player-head { display: flex; align-items: center; gap: 12px; padding: 12px 14px 12px 18px; }
+.player-title { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.player-title strong { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; }
+.player-title small { font-size: 12px; }
+.player-x, .player-btn { width: 34px; height: 34px; flex: none; color: #fff; background: rgba(255, 255, 255, 0.08); }
+.player-x:hover, .player-btn:hover { background: rgba(255, 255, 255, 0.16); }
+.player-stage { position: relative; background: #000; aspect-ratio: 16 / 9; max-height: calc(100vh - 170px); cursor: pointer; }
+.player-stage video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.player-fail { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; }
+.player-bar { display: flex; align-items: center; gap: 12px; padding: 12px 16px 14px; }
+.player-scrub { flex: 1; min-width: 0; }
+.player-time { font-size: 12px; font-variant-numeric: tabular-nums; color: #fff; min-width: 34px; text-align: center; }
+:root[data-motion="reduce"] .player, :root[data-motion="reduce"] .player-backdrop { animation: none; }
+
+/* Typing a new game: suggestions under the box */
+.name-menu { z-index: 1050; }
+.name-item { display: flex; align-items: center; gap: 8px; }
+.name-item > span:not(.game-icon) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.name-item small { font-size: 11px; flex: none; }
+
+/* A part of the interface that failed: a message and a way back, not a black window. */
+.crash { position: fixed; inset: 0; z-index: 2000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; background: var(--bg); color: var(--text); }
+.crash strong { font-size: 16px; }

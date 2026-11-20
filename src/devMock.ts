@@ -312,6 +312,7 @@ export function installDevMock() {
     list_monitors: () => [],
     screen_preview: () => fetch("/thumb-cs2a.jpg").then((r) => r.arrayBuffer()),
     list_audio_inputs: () => [],
+    search_games: (a) => ["Overwatch 2", "Overcooked! 2", "Outer Wilds", "Overload"].filter((g) => g.toLowerCase().includes(String(a.term).toLowerCase())),
     known_lengths: (a) => (a.clips as unknown[]).map(() => 45),
     // ?medal: a Medal clip, "All Audio" (the others mixed) plus Game and Mic.
     probe_file: () => ({ duration: 45, codec: "av1", width: 1920, height: 1080, fps: 60, audioTracks: medal ? 3 : 2, container: "matroska" }),

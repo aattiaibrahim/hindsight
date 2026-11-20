@@ -68,7 +68,8 @@
 - **Library**: clips grouped by day and game, with search, thumbnails, codec and length.
   - Each game shows its own logo (its program's icon, found from the game you played, Steam, Epic, Battle.net and Riot installs). Games saved under different spellings are offered a merge: case, spaces, punctuation, editions and platforms ("Minecraft Windows 10 Edition", "Java Edition", "Game of the Year Edition"), publisher names ("Tom Clancy's") and folders named after a program file ("SpeciesUnknown-Win64-Shipping") don't make a different game. Merging brings subfolders along.
   - Clips in folders inside a game's folder (`<Game>\my best plays\`, up to three deep) count as that game's, here and on the NAS.
-  - **On this day**: clips from this date in earlier years ("1 year ago today") at the top; open one to see that day's clips.
+  - **On this day**: clips from this date in earlier years ("1 year ago today") at the top, as a stack of cards with the games in them; open one to see that day's clips.
+  - **Game finder** (Settings → Library, optional, one 106 MB download): clips in folders that don't name a game (OBS, Desktop, Screen Recording, other recorders), your edit folders and folders you mark as not a game are compared with your sorted clips, on this PC while you're not gaming. Sure matches come ticked; close calls come unticked with the likeliest 2–3 games as one-click choices. Hover a clip to see it play, click it for a full player with a scrubber. Pick **Not a game** to keep footage in Desktop, or **+ New game…** to name one you haven't sorted yet (your folders and Steam games are suggested as you type). Folders you mark as not a game are never offered as the answer. Nothing moves until you press Move, and it can be undone.
   - Sound-only files (some recorders save a clip with no video) are marked **No video** rather than damaged.
   - Only the clips near the screen load, newest requests first, and thumbnails and lengths are kept on the app's own folder, so big libraries and clips on a hard drive open quickly. **Prepare thumbnails ahead of time** makes them all in the background while you're not gaming.
   - A NAS icon on each clip: a check when it's safely on the NAS, a minus when it isn't copied yet, an arrow when it's only on the NAS.
@@ -143,7 +144,7 @@ A supervisor thread (`src-tauri/src/engine.rs`) checks the monitor layout every 
 
 ## Stream Deck and other tools
 
-- **Stream Deck plugin**: download `Hindsight.streamDeckPlugin` from the [latest release](https://github.com/aattiaibrahim/hindsight/releases/latest) and double-click it. It has four actions:
+- **Stream Deck plugin**: download `Hindsight.streamDeckPlugin` from the [latest release](https://github.com/aattiaibrahim/hindsight/releases/latest) and double-click it (do the same to update it). Its keys look like the app's own buttons. It has four actions:
   - **Save Clip**: full buffer or a set length per key.
   - **Record**: turns red and shows the timer.
   - **Replay Buffer**: on/off.

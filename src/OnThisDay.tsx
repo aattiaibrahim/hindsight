@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { ClipFile } from "./api";
+import { GameIcon } from "./GameIcon";
 import { useNearView, useThumb } from "./hooks";
 
 export type Memory = { label: string; years: number; clips: ClipFile[] };
@@ -41,16 +42,30 @@ function MemoryCard({ m, on, onOpen }: { m: Memory; on: boolean; onOpen: () => v
   const cover = m.clips[0];
   const thumb = useThumb(near ? cover.path : "", cover.modified);
   const games = [...new Set(m.clips.map((c) => c.folder))];
+  const n = m.clips.length;
   return (
-    <button ref={ref} className={`memory-card ${on ? "on" : ""}`} aria-expanded={on} onClick={onOpen} title={`${m.clips.length} clip${m.clips.length === 1 ? "" : "s"}: ${games.join(", ")}`}>
-      {thumb && <img src={thumb} alt="" />}
-      <span className="memory-shade" />
-      <span className="memory-text">
-        <strong>{m.label}</strong>
-        <small>
-          {new Date(cover.modified).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })} · {m.clips.length} clip
-          {m.clips.length === 1 ? "" : "s"}
-        </small>
+    <button
+      ref={ref}
+      className={`memory-card ${on ? "on" : ""} ${n > 1 ? "stack" : ""}`}
+      aria-expanded={on}
+      onClick={onOpen}
+      title={`${n} clip${n === 1 ? "" : "s"}: ${games.join(", ")}`}
+    >
+      <span className="memory-pic">
+        {thumb && <img src={thumb} alt="" />}
+        <span className="memory-shade" />
+        <span className="memory-badge">{m.years === 1 ? "1 year ago" : `${m.years} years ago`}</span>
+        {n > 1 && <span className="memory-count">{n} clips</span>}
+        <span className="memory-text">
+          <strong>{m.label.startsWith("This week") ? "That week" : "This day"}</strong>
+          <small>{new Date(cover.modified).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</small>
+        </span>
+        <span className="memory-games" aria-hidden="true">
+          {games.slice(0, 3).map((g) => (
+            <GameIcon key={g} name={g} size={20} />
+          ))}
+          {games.length > 3 && <span className="memory-more">+{games.length - 3}</span>}
+        </span>
       </span>
     </button>
   );
@@ -63,7 +78,10 @@ function MemoryClip({ clip, onOpen }: { clip: ClipFile; onOpen: () => void }) {
       <div className={`thumb ${thumb ? "" : "loading"}`}>{thumb && <img src={thumb} alt="" />}</div>
       <span className="card-title">{clip.name}</span>
       <span className="card-meta">
-        {clip.folder} · {new Date(clip.modified).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+        <GameIcon name={clip.folder} size={14} />
+        <span>
+          {clip.folder} · {new Date(clip.modified).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+        </span>
       </span>
     </button>
   );
@@ -85,9 +103,12 @@ export function OnThisDay({ clips, onOpenClip }: { clips: ClipFile[]; onOpenClip
   return (
     <section className="memories" aria-label="On this day">
       <div className="memories-head">
-        <h3>On this day</h3>
+        <span className="memories-title">
+          <h3>On this day</h3>
+          <small className="muted">{new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</small>
+        </span>
         <button
-          className="btn small"
+          className="btn small ghost"
           onClick={() => {
             setHidden(true);
             try {
@@ -108,10 +129,24 @@ export function OnThisDay({ clips, onOpenClip }: { clips: ClipFile[]; onOpenClip
       </div>
       {/* That day's clips, like the gallery: each opens in Studio like any other clip. */}
       {open && (
-        <div className="memory-clips">
-          {open.clips.map((c) => (
-            <MemoryClip key={c.path} clip={c} onOpen={() => onOpenClip(c.path)} />
-          ))}
+        <div className="memory-panel">
+          <div className="memory-panel-head">
+            <strong>{open.label}</strong>
+            <small className="muted">
+              {open.clips.length} clip{open.clips.length === 1 ? "" : "s"}
+            </small>
+            <span style={{ flex: 1 }} />
+            <button className="round small-x" aria-label="Close" title="Close" onClick={() => setOpen(null)}>
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+                <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+          <div className="memory-clips">
+            {open.clips.map((c) => (
+              <MemoryClip key={c.path} clip={c} onOpen={() => onOpenClip(c.path)} />
+            ))}
+          </div>
         </div>
       )}
     </section>

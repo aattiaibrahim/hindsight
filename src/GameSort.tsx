@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, ClipFile, DetectStatus, errText, GameSuggestion } from "./api";
 import { GameIcon } from "./GameIcon";
-import { useSettings, useThumb } from "./hooks";
+import { useSettings } from "./hooks";
+import { ClipPlayer, HoverPreview } from "./ClipPreview";
+import { GameNameInput } from "./GameNameInput";
 import { ProgressBar, useCountProgress } from "./Progress";
 
 /** Suggestions for unsorted clips, kept fresh as the background job looks at more. */
@@ -66,19 +68,10 @@ function Row({
   onToggle: () => void;
   onGame: (g: string) => void;
 }) {
-  const thumb = useThumb(s.path);
   const [err, setErr] = useState<string | null>(null);
   const [naming, setNaming] = useState(false);
-  const [draft, setDraft] = useState("");
+  const [playing, setPlaying] = useState(false);
   const notGame = key(game) === key(NOT_A_GAME);
-  // A game with no folder yet: its folder is made when the clip moves.
-  const addGame = () => {
-    const name = draft.replace(/[<>:"/\\|?*]/g, " ").replace(/\s+/g, " ").trim();
-    if (!name) return;
-    // Same game, other spelling: use the folder that's there.
-    onGame(games.find((g) => key(g) === key(name)) ?? name);
-    setNaming(false);
-  };
   // Buttons inside the row's label: don't tick the box as well.
   const button = (run: () => void) => (e: React.MouseEvent) => {
     e.preventDefault();
@@ -88,7 +81,8 @@ function Row({
     // Dimmed: a sure one you unticked. A close call waiting for a pick stays readable.
     <label className={`sort-row ${on || !s.sure ? "" : "off"}`}>
       <input type="checkbox" checked={on} onChange={onToggle} aria-label={`Move ${s.name}`} />
-      <span className={`sort-thumb ${thumb ? "" : "loading"}`}>{thumb && <img src={thumb} alt="" />}</span>
+      <HoverPreview path={s.path} className="sort-thumb" onOpen={() => setPlaying(true)} />
+      {playing && <ClipPlayer path={s.path} title={s.name} subtitle={`in ${s.folder}`} onClose={() => setPlaying(false)} />}
       <span className="sort-main">
         <strong title={s.path}>{s.name}</strong>
         <small className="muted">
@@ -106,7 +100,7 @@ function Row({
                 onClick={button(() => onGame(g))}
                 title={`Looks most like your ${g} clips`}
               >
-                {g} <span className="muted">{Math.round(share * 100)}%</span>
+                <span>{g}</span> <span className="muted">{Math.round(share * 100)}%</span>
               </button>
             ))}
           </span>
@@ -139,42 +133,24 @@ function Row({
         </button>
       </span>
       <span className="sort-game">
-        <GameIcon name={naming ? draft : notGame ? "" : game} size={18} />
+        {!naming && <GameIcon name={notGame ? "" : game} size={18} />}
         {naming ? (
-          <>
-            <input
-              className="text-input sort-new"
-              autoFocus
-              placeholder="Game's name"
-              value={draft}
-              maxLength={60}
-              aria-label="New game's name"
-              onChange={(e) => setDraft(e.target.value)}
-              onClick={(e) => e.preventDefault()}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addGame();
-                } else if (e.key === "Escape") {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setNaming(false);
-                }
-              }}
-            />
-            <button type="button" className="btn small primary" disabled={!draft.trim()} onClick={button(addGame)}>
-              Use
-            </button>
-          </>
+          // A game with no folder yet: its folder is made when the clip moves.
+          <GameNameInput
+            games={games}
+            onPick={(name) => {
+              onGame(name);
+              setNaming(false);
+            }}
+            onCancel={() => setNaming(false)}
+          />
         ) : (
           <Select
             className="select"
             value={game}
             onChange={(e) => {
-              if (e.target.value === NEW) {
-                setDraft("");
-                setNaming(true);
-              } else onGame(e.target.value);
+              if (e.target.value === NEW) setNaming(true);
+              else onGame(e.target.value);
             }}
             aria-label="Game"
           >

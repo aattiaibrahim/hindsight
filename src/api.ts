@@ -563,6 +563,8 @@ export const api = {
   listClips: () => invoke<ClipFile[]>("list_clips"),
   /** `tracked`: the caller registers with `want` (cards); anyone else always gets an answer. */
   /** Lengths already known for these clips (0 = not yet), in one call that reads no files. */
+  /** Steam games named like what you typed (empty when Online game logos is off). */
+  searchGames: (term: string) => invoke<string[]>("search_games", { term }),
   knownLengths: (clips: ClipFile[]) => invoke<number[]>("known_lengths", { clips: clips.map((c) => [c.path, c.size, c.modified]) }),
   probe: (path: string, key = "", now = false, tracked = false) => {
     const k = path + key;

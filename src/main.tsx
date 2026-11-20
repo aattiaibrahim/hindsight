@@ -8,6 +8,7 @@ import "@fontsource-variable/geist-mono/wght.css";
 import "./App.css";
 import { Flyout } from "./Flyout";
 import { applyCachedAppearance } from "./hooks";
+import { ErrorBoundary } from "./ErrorBoundary";
 
 function FlyoutRoot() {
   useEscapeToHide();
@@ -20,7 +21,9 @@ async function start() {
   if (import.meta.env.DEV) (await import("./devMock")).installDevMock();
   const isFlyout = getCurrentWindow().label === "flyout";
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-    <React.StrictMode>{isFlyout ? <FlyoutRoot /> : <App />}</React.StrictMode>,
+    <React.StrictMode>
+      <ErrorBoundary>{isFlyout ? <FlyoutRoot /> : <App />}</ErrorBoundary>
+    </React.StrictMode>,
   );
 }
 

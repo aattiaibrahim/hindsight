@@ -87,6 +87,13 @@ export function Select({
       window.removeEventListener("blur", close);
     };
   }, [open]);
+  // Never past the window's edge: a menu wider than its button moves left to fit.
+  useLayoutEffect(() => {
+    const m = menu.current;
+    if (!open || !m || !pos) return;
+    const over = m.getBoundingClientRect().right - (window.innerWidth - 8);
+    if (over > 0) m.style.left = `${Math.max(8, pos.left - over)}px`;
+  }, [open, pos]);
   // Keep the highlighted option in view.
   useLayoutEffect(() => {
     if (open) menu.current?.querySelector<HTMLElement>(`[data-i="${hi}"]`)?.scrollIntoView({ block: "nearest" });
@@ -170,6 +177,7 @@ export function Select({
                 onPointerEnter={() => setHi(i)}
                 onPointerDown={(e) => e.preventDefault()}
                 onClick={() => pick(i)}
+                title={o.text.length > 40 ? o.text : undefined}
               >
                 {o.label}
               </div>
