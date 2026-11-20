@@ -1199,20 +1199,20 @@ function RepairAll({ clips, onToast }: { clips: ClipFile[]; onToast: (t: string,
 const UNSORTED_FOLDERS = new Set(["desktop", "obs", "other", "imports", "imported", "recordings", "screenrecording", "captures", "xboxgamebar", "ascent", "clips", "videos", "temp", "untitled"]);
 
 /** One of your own folders (not a game's): let the game finder look through it, and
- *  suggest a game for each clip in Notifications. */
+ *  suggest a game for each clip in Cleanup. */
 function FindGameButton({ folder, onToast }: { folder: string; onToast: (t: string, err?: boolean) => void }) {
   const [asked, setAsked] = useState(false);
   return (
     <button
       className="btn small"
       disabled={asked}
-      title={`Not a game's folder? Hindsight looks at a few frames of each clip in “${folder}” and suggests which game it's from, in Notifications. Nothing moves until you say so.`}
+      title={`Not a game's folder? Hindsight looks at a few frames of each clip in “${folder}” and suggests which game it's from, in Cleanup. Nothing moves until you say so.`}
       onClick={() =>
         api
           .findGameInFolder(folder)
           .then(() => {
             setAsked(true);
-            onToast(`Looking for the game in “${folder}”. Suggestions show up in Notifications.`);
+            onToast(`Looking for the game in “${folder}”. Suggestions show up in Cleanup.`);
           })
           .catch((e) => onToast(errText(e), true))
       }

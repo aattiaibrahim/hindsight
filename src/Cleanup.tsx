@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, ClipFile, errText, fmtSize, Settings, DupeSet } from "./api";
+import { api, ClipFile, errText, fmtSize, Settings, DupeSet, GameSuggestion } from "./api";
+import { GameIcon } from "./GameIcon";
 import { ConfirmDialog } from "./ConfirmUpdate";
 import { useThumb } from "./hooks";
 import { Icon } from "./icons";
@@ -413,6 +414,44 @@ function Duplicates({ clips, onDelete, onChanged, run = 0 }: { clips: ClipFile[]
   );
 }
 
+/** Unsorted clips the game finder matched to a game: a summary with Review, which
+ *  opens the same check-before-it-moves list as the notification. */
+function GameSorting({ list, onReview }: { list: GameSuggestion[]; onReview: () => void }) {
+  if (!list.length) return null;
+  const sure = list.filter((s) => s.sure).length;
+  const close = list.length - sure;
+  const games = [...new Set(list.map((s) => s.game))];
+  return (
+    <section className="dupes">
+      <div className="dupe-summary">
+        <div>
+          <h2>Sort into game folders</h2>
+          <div className="dupe-total">
+            {sure > 0 && `${sure} clip${sure === 1 ? "" : "s"} matched to a game`}
+            {sure > 0 && close > 0 && " · "}
+            {close > 0 && `${close} to check`}
+          </div>
+          <div className="sort-games">
+            {games.slice(0, 6).map((g) => (
+              <span key={g} className="sort-game" title={g}>
+                <GameIcon name={g} size={18} />
+                <span>{g}</span>
+              </span>
+            ))}
+            {games.length > 6 && <span className="muted">+{games.length - 6} more</span>}
+          </div>
+          <p className="muted">Found from what's on screen in unsorted clips. Nothing moves until you check them and press Move, and a move can be undone.</p>
+        </div>
+        <div className="row dupe-actions">
+          <button className="btn primary" onClick={onReview}>
+            Review
+          </button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /**
  * Cleanup: the biggest clips, so you can free up space. Delete (Recycle Bin), Shrink
  * (re-encode smaller, original to the Recycle Bin) or Keep (hidden until the next
@@ -426,8 +465,12 @@ export function Cleanup({
   onDelete,
   onToast,
   onChanged,
+  sortList = [],
+  onSortReview,
 }: {
   clips: ClipFile[] | null;
+  sortList?: GameSuggestion[];
+  onSortReview?: () => void;
   settings: Settings;
   update: (p: Partial<Settings>) => void;
   onOpen: (path: string) => void;
@@ -474,6 +517,7 @@ export function Cleanup({
         cleanup check. Nothing is deleted if it couldn't really go to the Recycle Bin.
         {keptCount > 0 && ` ${keptCount} kept since the last check.`}
       </p>
+      {onSortReview && <GameSorting list={sortList} onReview={onSortReview} />}
       <Duplicates clips={all} onDelete={onDelete} onChanged={onChanged} run={checkRun} />
       {biggest.length > 0 && <h2 style={{ marginBottom: 0 }}>Biggest clips</h2>}
       <div className="clean-list">

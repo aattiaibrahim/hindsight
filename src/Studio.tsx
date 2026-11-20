@@ -1229,6 +1229,9 @@ export function Studio({
                 <option value={25}>25 MB</option>
                 <option value={50}>50 MB</option>
                 <option value={100}>100 MB</option>
+                <option value={200}>200 MB</option>
+                <option value={300}>300 MB</option>
+                <option value={500}>500 MB</option>
               </Select>
             </div>
             <button className="btn block" onClick={() => api.reveal(path)}>

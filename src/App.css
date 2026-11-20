@@ -1069,6 +1069,9 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
 .dupe-summary { display: flex; gap: 16px; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; max-width: 900px; }
 .dupe-summary p { margin: 2px 0 0; max-width: 560px; }
 .dupe-total { font-size: 18px; font-weight: 600; margin-top: 4px; }
+.sort-games { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+.sort-game { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; padding: 3px 9px 3px 4px; border-radius: 999px; background: var(--raised); border: 1px solid var(--line-2); font-size: 12.5px; }
+.sort-game > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dupe-actions { gap: 8px; }
 .dupe-groups { display: flex; flex-direction: column; border-radius: 12px; background: var(--raised); max-width: 900px; overflow: hidden; }
 .dupe-group + .dupe-group { border-top: 1px solid var(--line-2); }

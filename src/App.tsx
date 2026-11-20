@@ -283,7 +283,10 @@ export default function App() {
         ? `Found the game for ${sureSorts} unsorted clip${sureSorts === 1 ? "" : "s"}${closeSorts ? ` (and ${closeSorts} to check)` : ""}`
         : `${closeSorts} unsorted clip${closeSorts === 1 ? "" : "s"} might be a game you play`,
       detail: [...new Set(sortList.map((s) => s.game))].slice(0, 3).join(", ") + " and more, from what's on screen. Check them before they move.",
-      actions: [{ label: "Review", run: () => setSortOpen(true), primary: true }],
+      actions: [
+        { label: "Review", run: () => setSortOpen(true), primary: true },
+        { label: "Open Cleanup", run: () => setView("cleanup") },
+      ],
     });
   for (const f of oldFolders)
     notices.push({
@@ -472,6 +475,11 @@ export default function App() {
                 {trimClips.length}
               </span>
             )}
+            {id === "cleanup" && sortList.length > 0 && (
+              <span className="nav-badge quiet" title={`${sortList.length} clip${sortList.length === 1 ? "" : "s"} to sort into game folders`}>
+                {sortList.length}
+              </span>
+            )}
             {id === "notifications" && noticeState.shown.length > 0 && (
               <span className="nav-badge notif-count" title={`${noticeState.shown.length} notification${noticeState.shown.length === 1 ? "" : "s"}`}>
                 {noticeState.shown.length}
@@ -516,6 +524,8 @@ export default function App() {
             onDelete={requestDelete}
             onToast={toast}
             onChanged={refresh}
+            sortList={sortList}
+            onSortReview={() => setSortOpen(true)}
           />
         )}
         {view === "montage" && <MontageView clips={clips} untrimmed={trimClips} onOpen={openInStudio} />}

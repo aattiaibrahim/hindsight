@@ -598,7 +598,7 @@ function DetectSetting({
         Find the game in unsorted clips
         <small>
           For clips in folders that don't say which game they're from (OBS, Desktop, Imports, other recorders), Hindsight looks at a
-          few frames and compares them with your sorted clips, on this PC and the NAS. Matches appear in Notifications for you to
+          few frames and compares them with your sorted clips, on this PC and the NAS. Matches appear in Cleanup (and Notifications) for you to
           check, and nothing moves until you approve it. The matching runs on this PC while you're not gaming. Needs a one-time
           download of an image model (about 106 MB).
         </small>
