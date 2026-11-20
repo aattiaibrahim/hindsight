@@ -166,13 +166,127 @@ fn find_program(game: &str) -> Option<PathBuf> {
 }
 
 /// The program's icon as a 64×64 PNG (Windows' own icon for it).
-fn extract(exe: &Path, out: &Path) -> Result<(), String> {
+/// Logos are kept this many pixels square.
+const LOGO: u32 = 128;
+/// A program icon at least this many pixels across looks sharp at the sizes logos are shown.
+const SHARP: u32 = 48;
+
+/// The program's icon as a LOGO-sized PNG, cropped to the picture itself (Windows
+/// pads a small icon with an empty, faintly shaded margin). Returns how many pixels
+/// across the picture really is: a program with only a small icon gives a blurry logo.
+fn extract(exe: &Path, out: &Path) -> Result<u32, String> {
+    let (px, n) = shell_icon(exe)?;
+    let (cropped, side) = crop_to_picture(&px, n);
+    save_png(&cropped, LOGO, out)?;
+    Ok(side)
+}
+
+/// Pixels with less cover than this are the see-through frame Windows draws around a
+/// small icon, not picture (icons are solid where they're drawn; the frame never is).
+const SOLID: u8 = 200;
+
+/// The square around what's drawn (alpha ≥ SOLID) in an n×n RGBA picture, scaled to
+/// LOGO pixels; and how many source pixels across that square was.
+fn crop_to_picture(px: &[u8], n: u32) -> (Vec<u8>, u32) {
+    let (mut x0, mut y0, mut x1, mut y1) = (n, n, 0u32, 0u32);
+    for y in 0..n {
+        for x in 0..n {
+            if px[((y * n + x) * 4 + 3) as usize] >= SOLID {
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x);
+                y1 = y1.max(y);
+            }
+        }
+    }
+    if x1 < x0 || y1 < y0 {
+        return (scale(px, n, 0, 0, n, LOGO), n);
+    }
+    let side = (x1 - x0 + 1).max(y1 - y0 + 1);
+    // Centred on the picture, inside the image.
+    let cx = (x0 + x1 + 1) / 2;
+    let cy = (y0 + y1 + 1) / 2;
+    let left = cx.saturating_sub(side / 2).min(n - side);
+    let top = cy.saturating_sub(side / 2).min(n - side);
+    (scale(px, n, left, top, side, LOGO), side)
+}
+
+/// The side×side square at (left, top) of an n-wide RGBA picture, resized to `to`×`to`
+/// (bilinear, with premultiplied alpha so edges don't go dark).
+fn scale(px: &[u8], n: u32, left: u32, top: u32, side: u32, to: u32) -> Vec<u8> {
+    // Sampling stays inside the square: nothing from beyond its edge bleeds in.
+    let (right, bottom) = ((left + side).min(n) - 1, (top + side).min(n) - 1);
+    let at = |x: u32, y: u32| -> [f32; 4] {
+        let i = ((y.clamp(top, bottom) * n + x.clamp(left, right)) * 4) as usize;
+        let a = px[i + 3] as f32 / 255.0;
+        [px[i] as f32 * a, px[i + 1] as f32 * a, px[i + 2] as f32 * a, a]
+    };
+    let mut out = vec![0u8; (to * to * 4) as usize];
+    let ratio = side as f32 / to as f32;
+    for oy in 0..to {
+        for ox in 0..to {
+            let sx = (left as f32 + (ox as f32 + 0.5) * ratio - 0.5).max(0.0);
+            let sy = (top as f32 + (oy as f32 + 0.5) * ratio - 0.5).max(0.0);
+            let (x, y) = (sx.floor() as u32, sy.floor() as u32);
+            let (fx, fy) = (sx - x as f32, sy - y as f32);
+            let (a, b, c, d) = (at(x, y), at(x + 1, y), at(x, y + 1), at(x + 1, y + 1));
+            let mut v = [0f32; 4];
+            for k in 0..4 {
+                v[k] = a[k] * (1.0 - fx) * (1.0 - fy) + b[k] * fx * (1.0 - fy) + c[k] * (1.0 - fx) * fy + d[k] * fx * fy;
+            }
+            let o = ((oy * to + ox) * 4) as usize;
+            let alpha = v[3].clamp(0.0, 1.0);
+            for k in 0..3 {
+                out[o + k] = if alpha > 0.0 { (v[k] / alpha).round().clamp(0.0, 255.0) as u8 } else { 0 };
+            }
+            out[o + 3] = (alpha * 255.0).round() as u8;
+        }
+    }
+    out
+}
+
+/// A square PNG as RGBA pixels (any colour type), with its side; None if it isn't square.
+fn decode_square_png(bytes: &[u8]) -> Option<(Vec<u8>, u32)> {
+    let mut dec = png::Decoder::new(std::io::Cursor::new(bytes));
+    dec.set_transformations(png::Transformations::normalize_to_color8());
+    let mut reader = dec.read_info().ok()?;
+    let mut buf = vec![0; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut buf).ok()?;
+    let (w, h) = (info.width, info.height);
+    if w != h || w == 0 || w > 1024 {
+        return None;
+    }
+    let px = &buf[..info.buffer_size()];
+    let rgba: Vec<u8> = match info.color_type {
+        png::ColorType::Rgba => px.to_vec(),
+        png::ColorType::Rgb => px.chunks(3).flat_map(|c| [c[0], c[1], c[2], 255]).collect(),
+        png::ColorType::GrayscaleAlpha => px.chunks(2).flat_map(|c| [c[0], c[0], c[0], c[1]]).collect(),
+        png::ColorType::Grayscale => px.iter().flat_map(|&g| [g, g, g, 255]).collect(),
+        _ => return None,
+    };
+    (rgba.len() == (w * h * 4) as usize).then_some((rgba, w))
+}
+
+fn save_png(rgba: &[u8], side: u32, out: &Path) -> Result<(), String> {
+    let tmp = out.with_extension("part");
+    {
+        let file = fs::File::create(&tmp).map_err(|e| e.to_string())?;
+        let mut enc = png::Encoder::new(std::io::BufWriter::new(file), side, side);
+        enc.set_color(png::ColorType::Rgba);
+        enc.set_depth(png::BitDepth::Eight);
+        enc.write_header().and_then(|mut w| w.write_image_data(rgba)).map_err(|e| e.to_string())?;
+    }
+    fs::rename(&tmp, out).map_err(|e| e.to_string())
+}
+
+/// The program's icon from Windows, 256×256 RGBA (the biggest size an icon comes in).
+fn shell_icon(exe: &Path) -> Result<(Vec<u8>, u32), String> {
     use windows::Win32::Foundation::SIZE;
     use windows::Win32::Graphics::Gdi::{BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteObject, GetDC, GetDIBits, ReleaseDC};
     use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
     use windows::Win32::UI::Shell::{IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_ICONONLY};
     use windows::core::HSTRING;
-    const N: i32 = 64;
+    const N: i32 = 256;
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let f: IShellItemImageFactory = SHCreateItemFromParsingName(&HSTRING::from(exe.as_os_str()), None).map_err(|e| e.to_string())?;
@@ -195,11 +309,7 @@ fn extract(exe: &Path, out: &Path) -> Result<(), String> {
         for p in px.chunks_mut(4) {
             p.swap(0, 2);
         }
-        let file = fs::File::create(out).map_err(|e| e.to_string())?;
-        let mut enc = png::Encoder::new(std::io::BufWriter::new(file), N as u32, N as u32);
-        enc.set_color(png::ColorType::Rgba);
-        enc.set_depth(png::BitDepth::Eight);
-        enc.write_header().and_then(|mut w| w.write_image_data(&px)).map_err(|e| e.to_string())
+        Ok((px, N as u32))
     }
 }
 
@@ -526,6 +636,8 @@ fn picture_ext(b: &[u8]) -> Option<&'static str> {
 fn icon_from_sites(sites: &[String], dir: &Path, key: &str) -> Result<PathBuf, String> {
     let mut tried: Vec<String> = Vec::new();
     let mut last = String::from("no website");
+    // A small icon is kept only if no other page has a sharp one.
+    let mut fallback: Option<PathBuf> = None;
     for site in sites.iter().take(3) {
         let home = format!("{}/", site.splitn(4, '/').take(3).collect::<Vec<_>>().join("/"));
         for page in [site.clone(), home] {
@@ -534,16 +646,32 @@ fn icon_from_sites(sites: &[String], dir: &Path, key: &str) -> Result<PathBuf, S
             }
             tried.push(page.clone());
             match site_icon(&page, dir, key) {
-                Ok(p) => return Ok(p),
+                Ok((p, true)) => return Ok(p),
+                Ok((p, false)) => {
+                    // Kept aside under its own name, so a later page can't overwrite it half-way.
+                    let aside = p.with_extension(format!("{}.small", p.extension().and_then(|e| e.to_str()).unwrap_or("")));
+                    if fallback.is_none() && fs::rename(&p, &aside).is_ok() {
+                        fallback = Some(aside);
+                    } else {
+                        let _ = fs::remove_file(&p);
+                    }
+                }
                 Err(e) => last = format!("{page}: {e}"),
             }
         }
+    }
+    if let Some(aside) = fallback {
+        // "<key>.site.ico.small" back to "<key>.site.ico".
+        let back = aside.with_extension("");
+        fs::rename(&aside, &back).map_err(|e| e.to_string())?;
+        return Ok(back);
     }
     Err(last)
 }
 
 /// The game's icon from its own website, saved as `<key>.site.<ext>`.
-fn site_icon(page: &str, dir: &Path, key: &str) -> Result<PathBuf, String> {
+/// The page's icon, saved for `key`; and whether it's sharp (else it was the only one).
+fn site_icon(page: &str, dir: &Path, key: &str) -> Result<(PathBuf, bool), String> {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -551,19 +679,54 @@ fn site_icon(page: &str, dir: &Path, key: &str) -> Result<PathBuf, String> {
         .build()
         .map_err(|e| e.to_string())?;
     let html = client.get(page).send().and_then(|r| r.error_for_status()).and_then(|r| r.text()).map_err(|e| e.to_string())?;
+    // The first sharp icon wins; a small one (a 16-pixel favicon) only if there's nothing better.
+    let mut small: Option<(Vec<u8>, &'static str)> = None;
     for url in page_icons(&html, page).into_iter().take(6) {
         let Ok(bytes) = client.get(&url).send().and_then(|r| r.error_for_status()).and_then(|r| r.bytes()) else { continue };
         if bytes.len() < 100 || bytes.len() > 2_000_000 {
             continue;
         }
         let Some(ext) = picture_ext(&bytes) else { continue };
-        let out = dir.join(format!("{key}.site.{ext}"));
-        let tmp = out.with_extension("part");
-        fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
-        fs::rename(&tmp, &out).map_err(|e| e.to_string())?;
+        if picture_side(&bytes, ext) >= SHARP {
+            return save_site_icon(&bytes, ext, dir, key).map(|p| (p, true));
+        }
+        if small.is_none() {
+            small = Some((bytes.to_vec(), ext));
+        }
+    }
+    match small {
+        Some((bytes, ext)) => save_site_icon(&bytes, ext, dir, key).map(|p| (p, false)),
+        None => Err("no icon on the page".into()),
+    }
+}
+
+/// How many pixels across a downloaded icon's picture is (a PNG's, cropped; an ICO's
+/// biggest size). Other kinds aren't measured and count as sharp.
+fn picture_side(bytes: &[u8], ext: &str) -> u32 {
+    match ext {
+        "png" => decode_square_png(bytes).map(|(rgba, n)| crop_to_picture(&rgba, n).1).unwrap_or(0),
+        "ico" => {
+            let count = bytes.get(4..6).map(|c| u16::from_le_bytes([c[0], c[1]]) as usize).unwrap_or(0);
+            (0..count.min(64)).filter_map(|i| bytes.get(6 + i * 16)).map(|&w| if w == 0 { 256 } else { w as u32 }).max().unwrap_or(0)
+        }
+        _ => SHARP,
+    }
+}
+
+/// Saved as `<key>.site.<ext>`; a square PNG cropped to its picture, like program icons.
+fn save_site_icon(bytes: &[u8], ext: &str, dir: &Path, key: &str) -> Result<PathBuf, String> {
+    let out = dir.join(format!("{key}.site.{ext}"));
+    if ext == "png"
+        && let Some((rgba, n)) = decode_square_png(bytes)
+    {
+        let (cropped, _) = crop_to_picture(&rgba, n);
+        save_png(&cropped, LOGO, &out)?;
         return Ok(out);
     }
-    Err("no icon on the page".into())
+    let tmp = out.with_extension("part");
+    fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &out).map_err(|e| e.to_string())?;
+    Ok(out)
 }
 
 fn tried_recently(marker: &Path, secs: u64) -> bool {
@@ -649,25 +812,38 @@ pub fn icon(game: &str, online: bool) -> Option<PathBuf> {
             }
         }
     }
-    let png = dir.join(format!("{key}.png"));
-    if png.exists() {
+    // The game's own icon from its program, cropped to the picture (".logo": older
+    // versions kept it padded, as a small square in a dark frame).
+    let png = dir.join(format!("{key}.logo.png"));
+    // Marks a program icon too small to be sharp: the website's is used if there is one.
+    let small = dir.join(format!("{key}.logo-small"));
+    if png.exists() && !small.exists() {
         return Some(png);
     }
-    // The game's own program (installed, or played while Hindsight ran).
-    let miss = dir.join(format!("{key}.none"));
-    // A remembered program (a game just played) is always worth trying again.
-    let remembered = EXES.lock().unwrap().as_ref().is_some_and(|m| m.contains_key(&key));
-    if !tried_recently(&miss, 86_400) || remembered {
-        if let Some(Ok(())) = find_program(game).map(|exe| extract(&exe, &png)) {
-            let _ = fs::remove_file(&miss);
-            return Some(png);
+    if !png.exists() {
+        let miss = dir.join(format!("{key}.none"));
+        // A remembered program (a game just played) is always worth trying again.
+        let remembered = EXES.lock().unwrap().as_ref().is_some_and(|m| m.contains_key(&key));
+        if !tried_recently(&miss, 86_400) || remembered {
+            match find_program(game).map(|exe| extract(&exe, &png)) {
+                Some(Ok(side)) => {
+                    let _ = fs::remove_file(&miss);
+                    if side >= SHARP {
+                        let _ = fs::remove_file(&small);
+                        return Some(png);
+                    }
+                    let _ = fs::write(&small, b"");
+                }
+                _ => {
+                    let _ = fs::remove_file(&png);
+                    let _ = fs::write(&miss, b"");
+                }
+            }
         }
-        let _ = fs::remove_file(&png);
-        let _ = fs::write(&miss, b"");
     }
-    // Not on Steam and not installed (Minecraft, Roblox, Star Citizen…): the icon from
-    // the game's own website, found through Wikidata. A miss is asked again after a
-    // week, never while you play.
+    // Not on Steam, and not installed or only with a small icon (Minecraft, Roblox, Star
+    // Citizen, VALORANT…): the icon from the game's own website, found through Wikidata.
+    // A miss is asked again after a week, never while you play.
     if online && !not_a_game(&key) {
         if let Some(p) = SITE_EXTS.iter().map(|e| dir.join(format!("{key}.site.{e}"))).find(|p| p.exists()) {
             return Some(p);
@@ -684,7 +860,8 @@ pub fn icon(game: &str, online: bool) -> Option<PathBuf> {
             }
         }
     }
-    None
+    // A small program icon is still better than none.
+    png.exists().then_some(png)
 }
 
 #[cfg(test)]
@@ -708,6 +885,28 @@ mod tests {
         assert!(!same_game("funnynotcool", "Funny"));
         assert!(!same_game("residentevilrequiem", "Resident Evil"));
         assert!(not_a_game("desktop") && not_a_game("edits") && !not_a_game("valorant"));
+    }
+
+    #[test]
+    fn a_small_icon_is_cropped_out_of_its_shaded_margin() {
+        // 64×64: a faint shaded frame (what Windows adds) around a solid red 32×32 icon.
+        let n = 64u32;
+        let mut px = vec![0u8; (n * n * 4) as usize];
+        for y in 0..n {
+            for x in 0..n {
+                let i = ((y * n + x) * 4) as usize;
+                let inside = (16..48).contains(&x) && (16..48).contains(&y);
+                px[i..i + 4].copy_from_slice(&if inside { [255, 70, 84, 255] } else { [85, 85, 85, 30] });
+            }
+        }
+        let (out, side) = crop_to_picture(&px, n);
+        assert_eq!(side, 32, "the picture itself, not the frame");
+        assert_eq!(out.len(), (LOGO * LOGO * 4) as usize);
+        // Corners are the icon's red now, not the frame.
+        for i in [0, ((LOGO * LOGO - 1) * 4) as usize] {
+            assert_eq!(&out[i..i + 4], &[255, 70, 84, 255]);
+        }
+        assert!(side < SHARP, "a 32-pixel icon is too small to be sharp");
     }
 
     #[test]
@@ -746,7 +945,7 @@ mod tests {
     fn live_game_icons() {
         let dir = std::env::temp_dir().join("rewind-live-icons");
         init(dir.clone());
-        for g in ["Minecraft", "Roblox", "Star Citizen", "Escape From Tarkov Arena", "aim", "BenQ", "Fortnite", "Call of Duty Ghosts Multiplayer", "Counter-strike Global Offensive", "Sea of Thieves", "Tarkov", "Payday The Heist", "Battlefield 6", "Minecraft", "Render", "Hitman 3", "Rocket League", "Apex Legends", "SpeciesUnknown-Win64-Shipping", "Species Unknown", "Escape From Tarkov", "Resident Evil 3 Remake", "Edits", "funny not cool", "VALORANT", "League of Legends", "Counter-strike 2", "Marvel Rivals", "Overwatch 2", "Tom Clancys Rainbow Six Siege", "Hunt Showdown", "Payday The Heist", "Resident Evil Requiem", "The Outlast Trials", "Empyrion - Galactic Survival", "Desktop"] {
+        for g in ["VALORANT", "League of Legends", "Fortnite", "Moon Sweepers", "Minecraft", "Roblox", "Star Citizen", "Escape From Tarkov Arena", "aim", "BenQ", "Call of Duty Ghosts Multiplayer", "Counter-strike Global Offensive", "Sea of Thieves", "Tarkov", "Payday The Heist", "Battlefield 6", "Minecraft", "Render", "Hitman 3", "Rocket League", "Apex Legends", "SpeciesUnknown-Win64-Shipping", "Species Unknown", "Escape From Tarkov", "Resident Evil 3 Remake", "Edits", "funny not cool", "VALORANT", "League of Legends", "Counter-strike 2", "Marvel Rivals", "Overwatch 2", "Tom Clancys Rainbow Six Siege", "Hunt Showdown", "Payday The Heist", "Resident Evil Requiem", "The Outlast Trials", "Empyrion - Galactic Survival", "Desktop"] {
             println!("{g}: {:?} -> {:?}", find_program(g), icon(g, true));
         }
     }
