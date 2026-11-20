@@ -20,6 +20,7 @@ export function Select({
   title,
   style,
   "aria-label": ariaLabel,
+  icon,
 }: {
   value: string | number;
   onChange: (e: { target: { value: string } }) => void;
@@ -29,6 +30,8 @@ export function Select({
   title?: string;
   style?: React.CSSProperties;
   "aria-label"?: string;
+  /** A picture before each choice (a game's logo, say), in the menu and on the button. */
+  icon?: (value: string) => ReactNode;
 }) {
   const opts: Opt[] = [];
   Children.forEach(children, (c) => {
@@ -150,6 +153,7 @@ export function Select({
         }}
         onKeyDown={key}
       >
+        {icon && opts[at] && <span className="dd-icon">{icon(opts[at].value)}</span>}
         <span className="dd-value">{opts[at]?.label ?? ""}</span>
         <svg className="dd-chevron" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
           <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -179,6 +183,7 @@ export function Select({
                 onClick={() => pick(i)}
                 title={o.text.length > 40 ? o.text : undefined}
               >
+                {icon && <span className="dd-icon">{icon(o.value)}</span>}
                 {o.label}
               </div>
             ))}

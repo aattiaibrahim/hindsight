@@ -1629,3 +1629,8 @@ small, .muted, .err-text, .note, p { overflow-wrap: anywhere; }
 /* A part of the interface that failed: a message and a way back, not a black window. */
 .crash { position: fixed; inset: 0; z-index: 2000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; text-align: center; background: var(--bg); color: var(--text); }
 .crash strong { font-size: 16px; }
+
+/* Dropdowns with a picture per choice (game logos) */
+.dd-icon { display: inline-flex; align-items: center; flex: none; margin-right: 8px; vertical-align: -3px; }
+.dd-trigger .dd-icon { margin-right: 0; }
+.dd-trigger .dd-icon + .dd-value { flex: 1; }

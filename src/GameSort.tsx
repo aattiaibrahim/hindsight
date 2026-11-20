@@ -133,7 +133,6 @@ function Row({
         </button>
       </span>
       <span className="sort-game">
-        {!naming && <GameIcon name={notGame ? "" : game} size={18} />}
         {naming ? (
           // A game with no folder yet: its folder is made when the clip moves.
           <GameNameInput
@@ -152,6 +151,8 @@ function Row({
               if (e.target.value === NEW) setNaming(true);
               else onGame(e.target.value);
             }}
+            // Each game's logo, in the list and on the button; none for "Not a game" and "+ New game…".
+            icon={(v) => (v === NEW || key(v) === key(NOT_A_GAME) ? <span style={{ width: 16 }} /> : <GameIcon name={v} size={16} />)}
             aria-label="Game"
           >
             {games.map((g) => (
