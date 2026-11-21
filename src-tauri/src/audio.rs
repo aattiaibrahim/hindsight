@@ -40,6 +40,36 @@ fn apply_gain(samples: &mut [f32], g: f32) {
     }
 }
 
+/// Mono downmix that leaves out empty channels. An audio interface (Focusrite,
+/// GoXLR, …) shows up as "Input 1 + 2" with the mic on one input and the other
+/// empty: a plain average halved the voice (−6 dB). Each channel's loudness is
+/// followed over about a second, and channels more than 10 dB quieter than the
+/// loudest are left out; a real stereo mic is still averaged.
+struct Downmix {
+    energy: Vec<f32>,
+    keep: f32,
+}
+
+impl Downmix {
+    fn new(channels: usize, rate: u32) -> Self {
+        Self { energy: vec![0.0; channels], keep: 1.0 - 1.0 / rate.max(1) as f32 }
+    }
+
+    fn mix(&mut self, data: &[f32], out: &mut Vec<f32>) {
+        let ch = self.energy.len().max(1);
+        for frame in data.chunks_exact(ch) {
+            for (e, &x) in self.energy.iter_mut().zip(frame) {
+                *e = *e * self.keep + x * x * (1.0 - self.keep);
+            }
+        }
+        let loudest = self.energy.iter().cloned().fold(0.0f32, f32::max);
+        // -10 dB in power; all silent → every channel counts.
+        let live: Vec<bool> = self.energy.iter().map(|&e| loudest <= 0.0 || e >= loudest * 0.1).collect();
+        let n = live.iter().filter(|&&l| l).count().max(1) as f32;
+        out.extend(data.chunks_exact(ch).map(|f| f.iter().zip(&live).filter(|p| *p.1).map(|p| *p.0).sum::<f32>() / n));
+    }
+}
+
 pub enum Source {
     Desktop,
     /// Everything except Discord (falls back to `Desktop` on older Windows)
@@ -231,22 +261,28 @@ where
     T: SizedSample,
     f32: FromSample<T>,
 {
+    let mut down = Downmix::new(in_ch, config.sample_rate.0);
+    let mut raw: Vec<f32> = Vec::new();
+    let mut mixed: Vec<f32> = Vec::new();
     dev.build_input_stream(
         config,
         move |data: &[T], info: &cpal::InputCallbackInfo| {
+            raw.clear();
+            raw.extend(data.iter().map(|&x| f32::from_sample(x)));
+            let samples_in: &[f32] = if mono && in_ch > 1 {
+                mixed.clear();
+                down.mix(&raw, &mut mixed);
+                &mixed
+            } else {
+                &raw
+            };
             if let Some(chunks) = &chunks {
                 // WASAPI reports when this buffer was captured (QPC-based, the
                 // same clock as the video). Convert that to our clock.
                 let ts = info.timestamp();
                 let delay = ts.callback.duration_since(&ts.capture).unwrap_or_default();
                 let at = Instant::now().checked_sub(delay).unwrap_or_else(Instant::now);
-                let mut samples: Vec<f32> = if mono && in_ch > 1 {
-                    data.chunks(in_ch)
-                        .map(|f| f.iter().map(|&x| f32::from_sample(x)).sum::<f32>() / in_ch as f32)
-                        .collect()
-                } else {
-                    data.iter().map(|&x| f32::from_sample(x)).collect()
-                };
+                let mut samples = samples_in.to_vec();
                 if is_mic {
                     apply_gain(&mut samples, mic_gain());
                 }
@@ -259,14 +295,7 @@ where
             }
             let g = if is_mic { mic_gain() } else { 1.0 };
             let mut q = q.lock().unwrap();
-            if mono && in_ch > 1 {
-                for frame in data.chunks(in_ch) {
-                    let sum: f32 = frame.iter().map(|&x| f32::from_sample(x)).sum();
-                    q.push_back((sum / in_ch as f32 * g).clamp(-1.0, 1.0));
-                }
-            } else {
-                q.extend(data.iter().map(|&x| (f32::from_sample(x) * g).clamp(-1.0, 1.0)));
-            }
+            q.extend(samples_in.iter().map(|&x| (x * g).clamp(-1.0, 1.0)));
             while q.len() > max {
                 q.pop_front();
             }
@@ -683,6 +712,44 @@ mod gain_tests {
         assert!((s[0] - 0.1995).abs() < 0.001 && s[2] == 1.0);
         set_mic_gain_db(0.0);
         assert_eq!(mic_gain(), 1.0);
+    }
+
+    /// One second of a 2-channel signal: `l` and `r` are each channel's level.
+    fn stereo(l: f32, r: f32) -> Vec<f32> {
+        (0..48_000).flat_map(|i| {
+            let s = (i as f32 * 0.05).sin();
+            [s * l, s * r]
+        }).collect()
+    }
+
+    fn peak(v: &[f32]) -> f32 {
+        v.iter().fold(0.0f32, |m, x| m.max(x.abs()))
+    }
+
+    #[test]
+    fn an_interface_with_one_empty_input_keeps_the_mics_full_volume() {
+        // Focusrite "Analogue 1 + 2": voice on input 1, only faint noise on input 2.
+        let mut d = Downmix::new(2, 48_000);
+        let mut out = Vec::new();
+        d.mix(&stereo(0.5, 0.01), &mut out);
+        out.clear();
+        d.mix(&stereo(0.5, 0.01), &mut out);
+        assert!((peak(&out) - 0.5).abs() < 0.01, "{}", peak(&out));
+    }
+
+    #[test]
+    fn a_real_stereo_mic_is_still_averaged() {
+        let mut d = Downmix::new(2, 48_000);
+        let mut out = Vec::new();
+        d.mix(&stereo(0.5, 0.4), &mut out);
+        out.clear();
+        d.mix(&stereo(0.5, 0.4), &mut out);
+        assert!((peak(&out) - 0.45).abs() < 0.01, "{}", peak(&out));
+        // Silence everywhere: no channel is dropped, nothing breaks.
+        let mut s = Downmix::new(2, 48_000);
+        let mut o = Vec::new();
+        s.mix(&[0.0; 8], &mut o);
+        assert_eq!(o, vec![0.0; 4]);
     }
 }
 
