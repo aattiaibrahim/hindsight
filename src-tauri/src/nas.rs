@@ -1639,6 +1639,8 @@ mod tests {
         assert_eq!(undelete_on_nas(&dir, &app, rel), Ok(true));
         assert!(file.exists());
     }
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
     #[test]
     fn deleting_moves_the_nas_copy_aside_and_undo_brings_it_back() {
         let nas = std::env::temp_dir().join(format!("rewind-nas-delete-{}", std::process::id()));
@@ -1719,6 +1721,8 @@ mod tests {
         assert_eq!(v, vec!["desktop/c.mkv", "valorant x/b.mkv", "valorant!/a.mkv"]);
     }
 
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
     #[test]
     fn folder_check_warns_about_a_folder_that_isnt_for_clips() {
         let local = tmp("chk-local");
@@ -1750,6 +1754,8 @@ mod tests {
         }
     }
 
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
     #[test]
     fn edits_made_in_the_nas_app_come_down_to_this_pc() {
         let local = tmp("pull-local");
@@ -1797,6 +1803,8 @@ mod tests {
         p
     }
 
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
     #[test]
     fn remove_from_this_pc_only_with_an_identical_nas_copy() {
         let (local, nas) = (tmp("f-local"), tmp("f-nas"));
@@ -1816,6 +1824,8 @@ mod tests {
         let _ = (fs::remove_dir_all(&local), fs::remove_dir_all(&nas));
     }
 
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
     #[test]
     fn edits_update_the_nas_and_keep_the_old_version_aside() {
         let (local, nas) = (tmp("e-local"), tmp("e-nas"));
@@ -1926,6 +1936,8 @@ mod tests {
         assert_eq!(pass.copied.len(), 1);
     }
 
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
     #[test]
     fn copies_clips_into_matching_game_folders() {
         let (local, nas) = (tmp("a-local"), tmp("a-nas"));
@@ -1961,6 +1973,8 @@ mod tests {
         let _ = (fs::remove_dir_all(&local), fs::remove_dir_all(&nas));
     }
 
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
     #[test]
     fn deleting_on_the_nas_sticks_and_local_removal_needs_a_verified_copy() {
         let (local, nas) = (tmp("c-local"), tmp("c-nas"));
@@ -1984,6 +1998,8 @@ mod tests {
         let _ = (fs::remove_dir_all(&local), fs::remove_dir_all(&nas));
     }
 
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
     #[test]
     fn a_garbled_nas_copy_never_frees_up_the_local_clip() {
         let (local, nas) = (tmp("v-local"), tmp("v-nas"));
@@ -2012,6 +2028,8 @@ mod tests {
         let _ = (fs::remove_dir_all(&local), fs::remove_dir_all(&nas));
     }
 
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
     #[test]
     fn a_different_file_with_the_same_name_is_never_overwritten() {
         let (local, nas) = (tmp("d-local"), tmp("d-nas"));

@@ -429,6 +429,8 @@ mod tests {
         assert_eq!(classify(p, "", false).as_deref(), Some("RocketLeague"));
     }
 
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
     #[test]
     fn browsers_and_apps_are_desktop() {
         assert_eq!(classify(r"C:\Program Files\Google\Chrome\Application\chrome.exe", "YouTube", true), None);
@@ -456,6 +458,8 @@ mod tests {
         assert_eq!(folder_name("Halo?"), "Halo");
     }
 
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
     #[test]
     fn exe_style_titles_become_readable_names() {
         let p = r"C:\Games\SpeciesUnknown\SpeciesUnknown-Win64-Shipping.exe";
@@ -463,6 +467,8 @@ mod tests {
         assert_eq!(classify(r"C:\Games\x\cool_game_x64.exe", "", true).as_deref(), Some("cool game"));
     }
 
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
     #[test]
     fn steam_manifest_names_are_read() {
         let acf = "\"AppState\"\n{\n\t\"appid\"\t\t\"730\"\n\t\"name\"\t\t\"Counter-Strike 2\"\n\t\"installdir\"\t\t\"Counter-Strike Global Offensive\"\n}";

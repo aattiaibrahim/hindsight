@@ -262,9 +262,12 @@ export function GameSortDialog({
   clips,
   onClose,
   onDone,
+  heading,
 }: {
   list: GameSuggestion[];
   clips: ClipFile[];
+  /** In place of "Found the game for N clips" (checking one game's folder) */
+  heading?: string;
   onClose: () => void;
   onDone: (moved: number, failed: number) => void;
 }) {
@@ -276,6 +279,14 @@ export function GameSortDialog({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [folderPick, setFolderPick] = useState(false);
+  // Esc closes (not while moving, or with the folders list open; the clip player takes its own Esc first).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy && !folderPick) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, folderPick, onClose]);
   // New suggestions while it's open (a folder marked as not a game, say): sure ones come ticked.
   const seen = useRef(new Set(list.map((s) => s.path)));
   useEffect(() => {
@@ -343,7 +354,7 @@ export function GameSortDialog({
     <div className="modal-backdrop" onClick={() => !busy && !folderPick && onClose()}>
       <div className="modal sort-modal" role="dialog" aria-modal="true" aria-label="Sort clips by game" onClick={(e) => e.stopPropagation()}>
         <h2>
-          {sure.length ? `Found the game for ${sure.length} clip${sure.length === 1 ? "" : "s"}` : "Clips that might be a game you play"}
+          {heading ?? (sure.length ? `Found the game for ${sure.length} clip${sure.length === 1 ? "" : "s"}` : "Clips that might be a game you play")}
           {sure.length > 0 && close.length > 0 && <span className="muted sort-sub"> · {close.length} to check</span>}
         </h2>
         <p className="muted" style={{ margin: 0 }}>

@@ -4,6 +4,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { api, ClipFile, codecLabel, errText, fmtDuration, fmtSize, GameSuggestion, Health, Probe, Upload, UploadProgress, NOT_NEEDED, VIDEO_EXTENSIONS, want } from "./api";
 import { RETRY_MS, useNearView, useOnScreen, useSettings, useThumb, useThumbStatus } from "./hooks";
 import { MoveToDialog } from "./MoveTo";
+import { FolderCheckDialog } from "./FolderCheck";
 import { liveLink, progressText, ShareRequest, timeLeft } from "./Share";
 import { Timeline } from "./Timeline";
 import { DamagedStatus, damagedText } from "./Health";
@@ -374,7 +375,10 @@ function LibraryView({
   onMoveTo,
   sortList = [],
   onSortReview,
+  onReviewList,
 }: {
+  /** Open the move review with a given list (a folder check's finds) */
+  onReviewList?: (list: GameSuggestion[], heading: string) => void;
   /** Move the selected clips into a folder; resolves true once moved. */
   onMoveTo?: (paths: string[], folder: string) => Promise<boolean>;
   /** The game finder's suggestions (for a folder's "N clips to sort") */
@@ -902,13 +906,14 @@ clips === null ? null : clips.length === 0 && trimMode ? (
       )}
     <div className={`page lib-page ${selecting ? "selecting" : ""}`} ref={scroller} onScroll={onScroll}>
       <div className="toolbar">
-        <h1 style={{ flex: 1, display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+        {/* Room for the title before it shrinks: the controls beside it wrap to a second line instead. */}
+        <h1 className="lib-title" style={{ flex: folder !== "All" ? "1 1 380px" : "1 1 200px", display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
           {folder !== "All" && <GameIcon name={folder} size={26} />}
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {viewMode === "folders" && folder !== "All" ? folder : TITLES[mode] ?? "Clips"}
           </span>
           {folder !== "All" && <LogoButton game={folder} onToast={onToast} />}
-          {folder !== "All" && <FolderScan place="title" folder={folder} sortList={sortList} onSortReview={onSortReview} onToast={onToast} />}
+          {folder !== "All" && <FolderScan place="title" folder={folder} sortList={sortList} onSortReview={onSortReview} onReviewList={onReviewList} onToast={onToast} />}
         </h1>
         <label className="search">
           <span className="muted" style={{ fontSize: 12 }}>
@@ -1247,8 +1252,10 @@ function FolderScan({
   folder,
   sortList,
   onSortReview,
+  onReviewList,
   onToast,
 }: {
+  onReviewList?: (list: GameSuggestion[], heading: string) => void;
   /** "title": the Find the game button, if needed; "bar": the line under the header */
   place: "title" | "bar";
   folder: string;
@@ -1264,6 +1271,9 @@ function FolderScan({
     (settings?.notGameFolders ?? []).some((f) => folderKey(f) === k) ||
     (settings?.detectFolders ?? []).some((f) => folderKey(f) === k);
   if (!settings) return null;
+  // A game's folder (with the game finder on): check it for clips of other games.
+  if (settings.gameDetect && !auto && !UNSORTED_FOLDERS.has(k))
+    return place === "title" ? <CheckFolderButton folder={folder} onReviewList={onReviewList} onToast={onToast} /> : null;
   if (!settings.gameDetect || !auto) return place === "title" && !UNSORTED_FOLDERS.has(k) ? <FindGameButton folder={folder} onToast={onToast} /> : null;
   if (place !== "bar") return null;
   const waiting = sortList.filter((s) => folderKey(s.folder) === k).length;
@@ -1283,6 +1293,43 @@ function FolderScan({
         </button>
       )}
     </div>
+  );
+}
+
+/** A game's folder: a pop-up to check it for clips of other games (quick look or full scan). */
+function CheckFolderButton({
+  folder,
+  onReviewList,
+  onToast,
+}: {
+  folder: string;
+  onReviewList?: (list: GameSuggestion[], heading: string) => void;
+  onToast: (t: string, err?: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button className="btn small" onClick={() => setOpen(true)} title={`Find clips in “${folder}” that look like a different game`}>
+        Check folder…
+      </button>
+      {open && (
+        <FolderCheckDialog
+          folder={folder}
+          onClose={() => setOpen(false)}
+          onReview={(list, heading) => {
+            setOpen(false);
+            onReviewList?.(list, heading);
+          }}
+          onAlways={() => {
+            setOpen(false);
+            api
+              .findGameInFolder(folder)
+              .then(() => onToast(`Hindsight will look through “${folder}” on its own. Suggestions show up in Cleanup.`))
+              .catch((e) => onToast(errText(e), true));
+          }}
+        />
+      )}
+    </>
   );
 }
 

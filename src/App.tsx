@@ -6,7 +6,7 @@ import { useHealth } from "./Health";
 import type { UploadProgress } from "./api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
-import { api, ClipFile, errText, hostRefuses } from "./api";
+import { api, ClipFile, errText, GameSuggestion, hostRefuses } from "./api";
 import { StatusBar } from "./StatusBar";
 import { Icon, IconName } from "./icons";
 import { Cleanup } from "./Cleanup";
@@ -229,6 +229,8 @@ export default function App() {
   const nasNow = useNasState();
   const [sortList] = useGameSuggestions(!!settings?.gameDetect);
   const [sortOpen, setSortOpen] = useState(false);
+  // A game folder's check: its finds, reviewed in the same dialog (instead of the finder's list).
+  const [folderFinds, setFolderFinds] = useState<{ list: GameSuggestion[]; heading: string } | null>(null);
   // Recorder folders that moving into Hindsight emptied: offer to remove them.
   const [oldFolders, setOldFolders] = useState<OldFolder[]>([]);
   const [oldAsk, setOldAsk] = useState<OldFolder | null>(null);
@@ -547,6 +549,10 @@ export default function App() {
             onMoveTo={v === "damaged" ? undefined : moveClipsTo}
             sortList={sortList}
             onSortReview={() => setSortOpen(true)}
+            onReviewList={(list, heading) => {
+              setFolderFinds({ list, heading });
+              setSortOpen(true);
+            }}
           />
         ))}
         {view === "cleanup" && settings && (
@@ -634,11 +640,16 @@ export default function App() {
       )}
       {sortOpen && clips && (
         <GameSortDialog
-          list={sortList}
+          list={folderFinds?.list ?? sortList}
+          heading={folderFinds?.heading}
           clips={clips}
-          onClose={() => setSortOpen(false)}
+          onClose={() => {
+            setSortOpen(false);
+            setFolderFinds(null);
+          }}
           onDone={(moved, failed) => {
             setSortOpen(false);
+            setFolderFinds(null);
             refresh();
             toast(
               `Moved ${moved} clip${moved === 1 ? "" : "s"} into their game folders`,

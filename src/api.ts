@@ -27,6 +27,8 @@ export type OldFolder = { path: string; label: string; moved: number; files: num
 export type DetectStatus = { installed: boolean; downloading: number | null; lookedAt: number; toLookAt: number; error: string | null };
 /** A clip in an unsorted folder and the game it looks like. */
 /** `sure`: ticked in the review. Otherwise a close call, with its likeliest games in `choices` (best first). */
+/** Checking a game's folder for clips of other games. lookedAt: clips with a fingerprint, of clips. */
+export type FolderCheck = { suggestions: GameSuggestion[]; lookedAt: number; clips: number };
 export type GameSuggestion = { path: string; name: string; folder: string; game: string; confidence: number; likeness: number; sure: boolean; choices: [string, number][] };
 /** A montage to render: clip pieces in order, an optional song. */
 export type MontagePlan = {
@@ -669,6 +671,11 @@ export const api = {
   syncNasNow: () => invoke<void>("sync_nas_now"),
   /** Let the game finder look through one of your own folders */
   findGameInFolder: (folder: string) => invoke<void>("find_game_in_folder", { folder }),
+  /** A game's folder: its clips that look like another game, from what's been looked at (instant). */
+  checkGameFolder: (folder: string) => invoke<FolderCheck>("check_game_folder", { folder }),
+  /** The same after looking at every clip in it ("folder-scan-progress" (done, total)). */
+  scanGameFolder: (folder: string) => invoke<FolderCheck>("scan_game_folder", { folder }),
+  cancelFolderScan: () => invoke<void>("cancel_folder_scan"),
   /** A move into Hindsight running in the background (or the last one's result). */
   moveStatus: () => invoke<MoveStatus | null>("move_status"),
   stopMove: () => invoke<void>("stop_move"),

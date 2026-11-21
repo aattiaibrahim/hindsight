@@ -222,6 +222,22 @@ export function installDevMock() {
     apply_game_sort: (a) => ({ moved: (a.picks as unknown[]).length, failed: [] }),
     move_to_folder: async (a) => (await new Promise((r) => setTimeout(r, 600)), { moved: (a.paths as unknown[]).length, failed: [] }),
     dismiss_game_suggestions: () => null,
+    // A game folder check: two of its clips look like Tarkov; a full scan finds a third.
+    check_game_folder: (a) => {
+      const mine = clips.filter((c) => c.folder === a.folder);
+      const finds = mine.slice(0, 2).map((c, i) => ({ path: c.path, name: c.name, folder: c.folder, game: "Escape From Tarkov", confidence: 0.8, likeness: 0.93, sure: i === 0, choices: [["Escape From Tarkov", 0.8]] }));
+      return { suggestions: finds, lookedAt: Math.max(0, mine.length - 3), clips: mine.length };
+    },
+    scan_game_folder: async (a) => {
+      const mine = clips.filter((c) => c.folder === a.folder);
+      for (let i = 0; i <= 3; i++) {
+        (listeners.get("folder-scan-progress") ?? []).forEach((id) => callbacks.get(id)?.({ event: "folder-scan-progress", id: 0, payload: [i, 3] }));
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      const finds = mine.slice(0, 3).map((c, i) => ({ path: c.path, name: c.name, folder: c.folder, game: "Escape From Tarkov", confidence: 0.8, likeness: 0.93, sure: i !== 1, choices: [["Escape From Tarkov", 0.8]] }));
+      return { suggestions: finds, lookedAt: mine.length, clips: mine.length };
+    },
+    cancel_folder_scan: () => null,
     render_montage: async () => (await new Promise((r) => setTimeout(r, 1200)), "C:\\Users\\you\\Videos\\Hindsight\\Montages\\Montage 2026-11-06 12-00-00.mp4"),
     cancel_montage: () => null,
     game_icon: () => null,

@@ -517,6 +517,72 @@ fn suggest_from(
     skip: &[String],
     print: impl Fn(&crate::library::ClipFile) -> Option<Vec<f32>>,
 ) -> Vec<Suggestion> {
+    rank_clips(clips, dismissed, also, skip, |c| needs_game(c, also, skip), print)
+}
+
+/// What checking a game's folder found: its clips that look like another game.
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderCheck {
+    pub suggestions: Vec<Suggestion>,
+    /// Clips in the folder with a fingerprint (the ones the check could judge)
+    pub looked_at: usize,
+    pub clips: usize,
+}
+
+fn in_folder(c: &crate::library::ClipFile, folder: &str) -> bool {
+    crate::consolidate::game_key(&c.folder) == crate::consolidate::game_key(folder)
+}
+
+/// A game's folder, checked for clips of other games, with the fingerprints already
+/// made (instant). Nothing is saved: it's a look, not a setting.
+pub fn check_folder(clips: &[crate::library::ClipFile], folder: &str, dismissed: &[String], skip: &[String]) -> FolderCheck {
+    let mine: Vec<&crate::library::ClipFile> = clips.iter().filter(|c| in_folder(c, folder)).collect();
+    let looked_at = mine.iter().filter(|c| cached(c).is_some()).count();
+    let suggestions = rank_clips(clips, dismissed, &[], skip, |c| in_folder(c, folder), cached);
+    FolderCheck { suggestions, looked_at, clips: mine.len() }
+}
+
+/// `check_folder` after fingerprinting every clip in the folder that hasn't been
+/// yet (one at a time, `progress(done, total)`), until `cancel` is set. The
+/// fingerprints are kept, so the next quick look sees them too.
+pub fn scan_folder(
+    clips: &[crate::library::ClipFile],
+    folder: &str,
+    dismissed: &[String],
+    skip: &[String],
+    cancel: &std::sync::atomic::AtomicBool,
+    progress: impl Fn(usize, usize),
+) -> Result<FolderCheck, String> {
+    if !installed() {
+        return Err("Turn on Find the game in unsorted clips in Settings → Library first (it downloads the model once).".into());
+    }
+    let todo: Vec<&crate::library::ClipFile> = clips.iter().filter(|c| in_folder(c, folder) && cached(c).is_none()).collect();
+    for (i, c) in todo.iter().enumerate() {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
+        progress(i, todo.len());
+        let _ = print_of(c);
+        if i % 25 == 24 {
+            flush();
+        }
+    }
+    progress(todo.len(), todo.len());
+    flush();
+    Ok(check_folder(clips, folder, dismissed, skip))
+}
+
+/// Guesses for the clips `is_candidate` picks, against the sorted clips (game folders,
+/// and Desktop as "not a game"). A clip whose likeliest game is its own folder's is left out.
+fn rank_clips(
+    clips: &[crate::library::ClipFile],
+    dismissed: &[String],
+    also: &[String],
+    skip: &[String],
+    is_candidate: impl Fn(&crate::library::ClipFile) -> bool,
+    print: impl Fn(&crate::library::ClipFile) -> Option<Vec<f32>>,
+) -> Vec<Suggestion> {
     let mut examples: Vec<(String, Vec<f32>)> = Vec::new();
     for c in clips {
         let unsorted = needs_game(c, also, skip);
@@ -543,7 +609,7 @@ fn suggest_from(
     }
     let mut out = Vec::new();
     for c in clips {
-        if !needs_game(c, also, skip) || dismissed.contains(&c.path) {
+        if !is_candidate(c) || dismissed.contains(&c.path) {
             continue;
         }
         let Some(p) = print(c) else { continue };
@@ -685,6 +751,26 @@ mod tests {
     }
 
     #[test]
+    fn checking_a_game_folder_finds_only_the_clips_of_another_game() {
+        let mut all: Vec<_> = (0..5).map(|i| clip(&format!(r"C:\c\Valorant\{i}.mkv"), "Valorant", "local")).collect();
+        all.extend((0..5).map(|i| clip(&format!(r"C:\c\Tarkov\{i}.mkv"), "Escape From Tarkov", "local")));
+        all.push(clip(r"C:\c\Valorant\oops.mkv", "Valorant", "local"));
+        // Valorant clips point one way, Tarkov's the other; "oops" looks like Tarkov.
+        let print = |c: &crate::library::ClipFile| {
+            let tarkov = c.folder == "Escape From Tarkov" || c.path.ends_with("oops.mkv");
+            let n = c.path.len() as f32 / 1000.0;
+            Some(if tarkov { v(1.0, 0.01 + n) } else { v(0.01 + n, 1.0) })
+        };
+        let got = rank_clips(&all, &[], &[], &[], |c| in_folder(c, "valorant"), print);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!((got[0].path.as_str(), got[0].game.as_str()), (r"C:\c\Valorant\oops.mkv", "Escape From Tarkov"));
+        // Tarkov's own clips aren't checked when Valorant is.
+        assert!(got.iter().all(|s| s.folder == "Valorant"));
+        // Turned down before: not shown again.
+        assert!(rank_clips(&all, &[r"C:\c\Valorant\oops.mkv".into()], &[], &[], |c| in_folder(c, "Valorant"), print).is_empty());
+    }
+
+    #[test]
     fn edit_and_export_folders_are_never_a_game() {
         for f in ["Edits", "YT Edit", "Edit (converted)_AME", "YouTube Videos", "render", "exports"] {
             assert!(is_workshop(f), "{f}");
@@ -756,6 +842,8 @@ mod tests {
         assert_eq!(list[0].folder, "Apex", "examples come first");
     }
 
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
     #[test]
     fn sorting_moves_both_copies_under_one_free_name() {
         let d = temp("both");
@@ -771,6 +859,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(d);
     }
 
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
     #[test]
     fn a_nas_only_clip_stays_on_the_nas_and_a_different_file_is_left_alone() {
         let d = temp("nas");

@@ -65,6 +65,7 @@ mod secrets;
 #[path = "portable/secrets.rs"]
 mod secrets;
 mod settings;
+mod startup;
 #[cfg(windows)]
 mod sound;
 // Linux and macOS: stand-ins with the same functions (docs/platforms-plan.md).
@@ -1627,26 +1628,68 @@ async fn game_suggestions(app: AppHandle) -> Result<Vec<game_detect::Suggestion>
     let s = settings_of(&app);
     blocking(move || {
         let all = detect_library(&s);
-        // A clip looked at here may since have been freed up (only on the NAS now) or
-        // moved: point at its NAS copy, or leave it out. A suggestion for a file that
-        // isn't there showed no picture, and Show in folder and Move did nothing.
-        let clips_dir = PathBuf::from(&s.clips_dir);
-        Ok(game_detect::suggestions(&all, &s.detect_dismissed, &s.detect_folders, &s.not_game_folders)
-            .into_iter()
-            .filter_map(|mut g| {
-                if Path::new(&g.path).is_file() {
-                    return Some(g);
-                }
-                let rel = Path::new(&g.path).strip_prefix(&clips_dir).ok()?;
-                let on_nas = Path::new(&s.nas_dir).join(rel);
-                (!s.nas_dir.is_empty() && on_nas.is_file()).then(|| {
-                    g.path = on_nas.to_string_lossy().into_owned();
-                    g
-                })
-            })
-            .collect())
+        Ok(still_there(&s, game_detect::suggestions(&all, &s.detect_dismissed, &s.detect_folders, &s.not_game_folders)))
     })
     .await
+}
+
+/// A clip looked at earlier may since have been freed up (only on the NAS now) or
+/// moved: point at its NAS copy, or leave it out. A suggestion for a file that
+/// isn't there showed no picture, and Show in folder and Move did nothing.
+fn still_there(s: &Settings, list: Vec<game_detect::Suggestion>) -> Vec<game_detect::Suggestion> {
+    let clips_dir = PathBuf::from(&s.clips_dir);
+    list.into_iter()
+        .filter_map(|mut g| {
+            if Path::new(&g.path).is_file() {
+                return Some(g);
+            }
+            let rel = Path::new(&g.path).strip_prefix(&clips_dir).ok()?;
+            let on_nas = Path::new(&s.nas_dir).join(rel);
+            (!s.nas_dir.is_empty() && on_nas.is_file()).then(|| {
+                g.path = on_nas.to_string_lossy().into_owned();
+                g
+            })
+        })
+        .collect()
+}
+
+/// A game's folder: which of its clips look like another game, from what the game
+/// finder has already looked at (instant). Nothing is saved.
+#[tauri::command]
+async fn check_game_folder(app: AppHandle, folder: String) -> Result<game_detect::FolderCheck, String> {
+    let s = settings_of(&app);
+    blocking(move || {
+        let all = detect_library(&s);
+        let mut c = game_detect::check_folder(&all, &folder, &s.detect_dismissed, &s.not_game_folders);
+        c.suggestions = still_there(&s, c.suggestions);
+        Ok(c)
+    })
+    .await
+}
+
+static FOLDER_SCAN_CANCEL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The same, after looking at every clip in the folder now ("folder-scan-progress"
+/// (done, total) as it goes). The folder isn't added to the ones looked at for good.
+#[tauri::command]
+async fn scan_game_folder(app: AppHandle, folder: String) -> Result<game_detect::FolderCheck, String> {
+    let s = settings_of(&app);
+    FOLDER_SCAN_CANCEL.store(false, std::sync::atomic::Ordering::Relaxed);
+    let a = app.clone();
+    blocking(move || {
+        let all = detect_library(&s);
+        let mut c = game_detect::scan_folder(&all, &folder, &s.detect_dismissed, &s.not_game_folders, &FOLDER_SCAN_CANCEL, |done, total| {
+            let _ = a.emit("folder-scan-progress", (done, total));
+        })?;
+        c.suggestions = still_there(&s, c.suggestions);
+        Ok(c)
+    })
+    .await
+}
+
+#[tauri::command]
+fn cancel_folder_scan() {
+    FOLDER_SCAN_CANCEL.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Move the chosen clips into their game's folder, on this PC and the NAS together
@@ -2167,8 +2210,14 @@ mod tests {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    // Logged before anything else, so a start that fails (at sign-in especially) leaves a trace.
+    startup::begin();
+    let built = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // A retry of a start at sign-in that found Hindsight running after all: nothing to do.
+            if args.iter().any(|a| a.starts_with("--startup-retry=")) {
+                return;
+            }
             // `Rewind.exe --save-clip` etc. control the running copy; a plain launch shows it.
             if !control::handle_args(app, &args) {
                 show_main(app);
@@ -2420,11 +2469,12 @@ pub fn run() {
 
             // Launched by a command (e.g. Stream Deck) while not running: start
             // quietly in the tray. There's nothing buffered yet to save.
-            let by_command = std::env::args().any(|a| a.starts_with("--") && a != "--minimized");
+            let by_command = std::env::args().any(|a| a.starts_with("--") && a != "--minimized" && !a.starts_with("--startup-retry="));
             let minimized = by_command || (std::env::args().any(|a| a == "--minimized") && s.start_minimized);
             if !minimized {
                 show_main(&handle);
             }
+            startup::ready();
             Ok(())
         })
         .on_window_event(|window, event| match (window.label(), event) {
@@ -2491,6 +2541,9 @@ get_settings,
             detect_install,
             game_suggestions,
             apply_game_sort,
+            check_game_folder,
+            scan_game_folder,
+            cancel_folder_scan,
             move_to_folder,
             dismiss_game_suggestions,
             run_diagnostics,
@@ -2543,9 +2596,16 @@ get_settings,
             cancel_bench,
             bench_state,
         ])
-        .build(tauri::generate_context!())
-        .expect("error while building Hindsight")
-        .run(|app, event| {
+        .build(tauri::generate_context!());
+    let app = match built {
+        Ok(app) => app,
+        Err(e) => {
+            startup::note(&format!("couldn't start: {e}"));
+            startup::try_again();
+            std::process::exit(1);
+        }
+    };
+    app.run(|app, event| {
             if let RunEvent::Exit = event {
                 // A downloaded update installs on quit (after the engine stops).
                 if settings_of(app).auto_update && updater::has_ready_update(app) {

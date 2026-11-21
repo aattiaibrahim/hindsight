@@ -289,6 +289,9 @@ input[type="range"].track { width: auto; }
 .setting:first-of-type { border-top: 0; }
 .setting > span { font-size: 13px; color: var(--text-2); display: flex; flex-direction: column; gap: 2px; }
 .setting small { font-size: 11px; color: var(--muted); }
+/* The text wraps; the control beside it (button, dropdown, switch) keeps its full size. */
+.setting > span { flex: 1 1 auto; }
+.setting > .btn, .setting > button, .setting > .select, .setting > .dd, .setting > .switch, .setting > input, .setting > .seg { flex: none; }
 .select, .text-input {
   height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line-2); background: var(--bg);
   font-size: 12px; max-width: 240px;
@@ -1654,3 +1657,26 @@ small, .muted, .err-text, .note, p { overflow-wrap: anywhere; }
 .dd-icon { display: inline-flex; align-items: center; flex: none; margin-right: 8px; vertical-align: -3px; }
 .dd-trigger .dd-icon { margin-right: 0; }
 .dd-trigger .dd-icon + .dd-value { flex: 1; }
+
+/* Checking a game's folder for clips of other games */
+.fc-modal { width: min(560px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 14px; }
+.fc-modal h2 { display: flex; align-items: center; gap: 10px; margin: 0; }
+.fc-modal h2 > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fc-options { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 520px) { .fc-options { grid-template-columns: 1fr; } }
+.fc-option { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 14px; border-radius: 12px; border: 1px solid var(--line-2); background: var(--raised); color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: border-color 0.15s ease, background 0.15s ease; }
+.fc-option:hover:not(:disabled) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--raised)); }
+.fc-option:disabled { opacity: 0.55; cursor: default; }
+.fc-option b { font-size: 14px; }
+.fc-option span { font-size: 12.5px; color: var(--text-2); line-height: 1.45; }
+.fc-summary { display: flex; flex-direction: column; gap: 2px; }
+.fc-summary b { font-size: 15px; }
+.fc-summary .muted { font-size: 12px; }
+.fc-list { display: flex; flex-direction: column; gap: 4px; max-height: min(320px, 45vh); overflow-y: auto; }
+.fc-row { display: flex; align-items: center; gap: 10px; padding: 6px; border-radius: 8px; background: var(--raised); }
+.fc-thumb { width: 72px; aspect-ratio: 16 / 9; flex: none; border-radius: 5px; overflow: hidden; background: var(--panel); }
+.fc-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.fc-game { display: inline-flex; align-items: center; gap: 6px; flex: none; max-width: 45%; font-size: 12.5px; }
+.fc-game > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-title > .btn, .lib-title > button { flex: none; }

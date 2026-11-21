@@ -72,6 +72,11 @@ the bundled tools and the GPU encoder.
 Useful for people who record elsewhere, or keep their clips on a NAS.
 
 - Library, Studio, Cleanup, the game finder, Montage, sharing, the NAS as a mounted folder.
+- Port the logic that assumes Windows paths (drive letters, `\`), which 18 tests marked
+  `#[cfg(windows)]` cover today: NAS sync and its relative paths (`nas.rs`, 9 tests), sorting
+  clips into game folders (`game_detect.rs`), game names from program paths (`games.rs`),
+  recorder folder labels (`drives.rs`), hiding the user name in diagnostics (`diag.rs`) and
+  old recorder folders (`old_folders.rs`). Each test runs on all three systems once ported.
 - `encoders.rs` learns VAAPI and VideoToolbox for edits.
 - Bundle FFmpeg per system and architecture.
 - Paths: `~/.local/share/hindsight` (Linux), `~/Library/Application Support/Hindsight` (macOS).

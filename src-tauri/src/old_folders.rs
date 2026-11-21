@@ -269,6 +269,8 @@ mod tests {
         let _ = fs::remove_dir_all(base.parent().unwrap());
     }
 
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
     #[test]
     fn copies_and_protected_folders_are_never_offered() {
         let base = tmp("protect");

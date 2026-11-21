@@ -353,6 +353,8 @@ fn _exists(p: &Path) -> bool {
 mod tests {
     use super::*;
 
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
     #[test]
     fn user_folder_is_hidden_and_messages_are_kept() {
         let home = std::env::var("USERPROFILE").unwrap();
@@ -370,6 +372,8 @@ mod tests {
         assert_eq!(parse_volumedetect("nothing"), (None, None));
     }
 
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
     #[test]
     fn report_has_the_pc_and_hides_the_user() {
         let r = report("0.0.0", &[("Settings", settings_json(&crate::settings::Settings::default()))], None);
