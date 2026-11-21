@@ -10,14 +10,19 @@
 
 use std::path::Path;
 
+#[cfg(windows)]
 use windows::Win32::Foundation::{CloseHandle, HWND, RECT};
+#[cfg(windows)]
 use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow};
+#[cfg(windows)]
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
+#[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId,
 };
+#[cfg(windows)]
 use windows::core::PWSTR;
 
 pub const DESKTOP_FOLDER: &str = "Desktop";
@@ -218,6 +223,7 @@ pub fn observe() {
     }
 }
 
+#[cfg(windows)]
 fn still_running(pid: u32) -> bool {
     use windows::Win32::System::Threading::GetExitCodeProcess;
     unsafe {
@@ -227,6 +233,11 @@ fn still_running(pid: u32) -> bool {
         let _ = CloseHandle(h);
         ok && code == 259 // STILL_ACTIVE
     }
+}
+#[cfg(not(windows))]
+/// Linux / macOS: a process is running while /proc (or kill -0) knows it (phase 4).
+fn still_running(_pid: u32) -> bool {
+    false
 }
 
 /// The game for a clip saved now: the one in front, or the one you were just
@@ -343,6 +354,7 @@ mod store {
     }
 }
 
+#[cfg(windows)]
 fn foreground_info() -> Option<(String, String, bool, u32)> {
     unsafe {
         let hwnd = GetForegroundWindow();
@@ -354,6 +366,12 @@ fn foreground_info() -> Option<(String, String, bool, u32)> {
         Some((exe_path(hwnd)?, window_title(hwnd), is_fullscreen(hwnd), pid))
     }
 }
+#[cfg(not(windows))]
+/// Linux / macOS: which window is in front comes in phase 4.
+fn foreground_info() -> Option<(String, String, bool, u32)> {
+    None
+}
+#[cfg(windows)]
 unsafe fn exe_path(hwnd: HWND) -> Option<String> {
     let mut pid = 0u32;
     unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
@@ -366,6 +384,7 @@ unsafe fn exe_path(hwnd: HWND) -> Option<String> {
     Some(String::from_utf16_lossy(&buf[..len as usize]))
 }
 
+#[cfg(windows)]
 unsafe fn window_title(hwnd: HWND) -> String {
     let mut buf = [0u16; 256];
     let n = unsafe { GetWindowTextW(hwnd, &mut buf) };
@@ -373,6 +392,7 @@ unsafe fn window_title(hwnd: HWND) -> String {
 }
 
 /// Covers its whole monitor (exclusive or borderless fullscreen).
+#[cfg(windows)]
 unsafe fn is_fullscreen(hwnd: HWND) -> bool {
     let mut r = RECT::default();
     if unsafe { GetWindowRect(hwnd, &mut r) }.is_err() {

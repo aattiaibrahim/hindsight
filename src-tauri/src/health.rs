@@ -237,12 +237,18 @@ pub fn repair(path: &str) -> Result<String, String> {
 
 /// Network shares and mapped network drives have no Recycle Bin: anything
 /// "recycled" there is gone for good.
+#[cfg(windows)]
 pub fn on_network(path: &str) -> bool {
     use windows::Win32::Storage::FileSystem::GetDriveTypeW;
     use windows::core::HSTRING;
     if path.starts_with(r"\\") || path.starts_with("//") {
         return true;
     }
+#[cfg(not(windows))]
+/// Linux / macOS: Windows-style share paths, or a share mounted by gvfs / in /Volumes.
+pub fn on_network(path: &str) -> bool {
+    path.starts_with(r"\\") || path.starts_with("//") || path.contains("/gvfs/") || path.starts_with("/Volumes/")
+}
     let Some(root) = path.get(..3).filter(|r| r.ends_with(":\\") || r.ends_with(":/")) else { return false };
     const DRIVE_REMOTE: u32 = 4;
     unsafe { GetDriveTypeW(&HSTRING::from(root)) == DRIVE_REMOTE }

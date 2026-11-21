@@ -1,7 +1,9 @@
 //! Finding and running the bundled ffmpeg / ffprobe.
 
 use std::ffi::c_void;
+#[cfg(windows)]
 use std::os::windows::io::AsRawHandle;
+#[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::io::Read;
 use std::path::PathBuf;
@@ -9,16 +11,21 @@ use std::process::{Child, Command, Stdio};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
 use windows::Win32::Foundation::HANDLE;
+#[cfg(windows)]
 use windows::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
     SetInformationJobObject,
 };
+#[cfg(windows)]
 use windows::core::PCWSTR;
 
+#[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// Games always win CPU time over capture and exports.
+#[cfg(windows)]
 const BELOW_NORMAL_PRIORITY_CLASS: u32 = 0x0000_4000;
 
 static DIR: OnceLock<PathBuf> = OnceLock::new();
@@ -51,16 +58,22 @@ pub fn skip_media_tests() -> bool {
 }
 
 pub fn exe(name: &str) -> PathBuf {
-    DIR.get().cloned().unwrap_or_default().join(format!("{name}.exe"))
+    // ".exe" on Windows, nothing on Linux and macOS.
+    DIR.get().cloned().unwrap_or_default().join(format!("{name}{}", std::env::consts::EXE_SUFFIX))
 }
 
 /// A command with no console window, at below-normal CPU priority.
 /// Is Windows shutting down, restarting or signing out? A program started then can't
 /// load (Windows shows "ffmpeg.exe - Application Error (0xc0000142)"), so nothing new
 /// is started; whatever ffmpeg was running finishes or is stopped with the app.
+#[cfg(windows)]
 pub fn windows_shutting_down() -> bool {
     use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_SHUTTINGDOWN};
     unsafe { GetSystemMetrics(SM_SHUTTINGDOWN) != 0 }
+}
+#[cfg(not(windows))]
+pub fn windows_shutting_down() -> bool {
+    false
 }
 
 pub fn cmd(name: &str) -> Command {
@@ -70,11 +83,13 @@ pub fn cmd(name: &str) -> Command {
         return Command::new("hindsight-not-started-windows-is-shutting-down");
     }
     let mut c = Command::new(exe(name));
+    #[cfg(windows)]
     c.creation_flags(CREATE_NO_WINDOW | BELOW_NORMAL_PRIORITY_CLASS);
     c
 }
 
 /// Free space on the drive holding `path`, in bytes.
+#[cfg(windows)]
 pub fn free_bytes(path: &std::path::Path) -> Option<u64> {
     use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
     use windows::core::HSTRING;
@@ -86,6 +101,18 @@ pub fn free_bytes(path: &std::path::Path) -> Option<u64> {
     let mut free = 0u64;
     unsafe { GetDiskFreeSpaceExW(&HSTRING::from(p.as_os_str()), Some(&mut free), None, None).ok()? };
     Some(free)
+}
+#[cfg(not(windows))]
+/// Linux / macOS: `df` for now (statvfs in phase 2).
+pub fn free_bytes(path: &std::path::Path) -> Option<u64> {
+    let mut p = path.to_path_buf();
+    while !p.exists() {
+        p = p.parent()?.to_path_buf();
+    }
+    let out = Command::new("df").arg("-k").arg(&p).output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let kb: u64 = text.lines().nth(1)?.split_whitespace().nth(3)?.parse().ok()?;
+    Some(kb * 1024)
 }
 
 /// Turn string literals into an argument list that can also hold paths.
@@ -219,6 +246,7 @@ pub fn run_limited<S: AsRef<std::ffi::OsStr>>(name: &str, args: &[S], limit: Opt
 }
 
 /// Put a child in a job object so it dies with Hindsight, even if Hindsight crashes.
+#[cfg(windows)]
 pub fn adopt(child: &Child) {
     let raw = *JOB.get_or_init(|| unsafe {
         let Ok(job) = CreateJobObjectW(None, PCWSTR::null()) else {
@@ -243,6 +271,10 @@ pub fn adopt(child: &Child) {
         }
     }
 }
+#[cfg(not(windows))]
+/// Linux / macOS: ffmpeg is stopped with the app on a normal quit (dying with it
+/// on a crash, like Windows' job object, is phase 2).
+pub fn adopt(_child: &Child) {}
 
 #[cfg(test)]
 mod tests {

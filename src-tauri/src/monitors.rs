@@ -2,8 +2,11 @@
 
 use serde::Serialize;
 
+#[cfg(windows)]
 use windows::Win32::Foundation::POINT;
+#[cfg(windows)]
 use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
+#[cfg(windows)]
 use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -32,6 +35,7 @@ impl Monitor {
 /// A small PNG of what's on a monitor right now (for the recording-area preview
 /// in Settings): scaled to `max_w` wide on the GPU-free GDI path, cheap enough
 /// for a few frames a second while that page is open.
+#[cfg(windows)]
 pub fn preview_png(m: &Monitor, max_w: i32) -> Result<Vec<u8>, String> {
     use windows::Win32::Graphics::Gdi::*;
     if m.width <= 0 || m.height <= 0 {
@@ -78,7 +82,13 @@ pub fn preview_png(m: &Monitor, max_w: i32) -> Result<Vec<u8>, String> {
     }
     Ok(out)
 }
+#[cfg(not(windows))]
+/// Linux / macOS: no preview yet (phase 3 captures the screen there).
+pub fn preview_png(_m: &Monitor, _max_w: i32) -> Result<Vec<u8>, String> {
+    Err("No screen preview on this system yet".into())
+}
 
+#[cfg(windows)]
 pub fn list() -> Vec<Monitor> {
     let mut out = Vec::new();
     unsafe {
@@ -112,9 +122,15 @@ pub fn list() -> Vec<Monitor> {
     }
     out
 }
+#[cfg(not(windows))]
+/// Linux / macOS: monitors come with screen capture (phase 3).
+pub fn list() -> Vec<Monitor> {
+    Vec::new()
+}
 
 /// The monitor's device path for a display like \\.\DISPLAY1, e.g.
 /// `\\?\DISPLAY#DELA0C0#5&2f3c&0&UID4353#{…}`; "" if Windows doesn't say.
+#[cfg(windows)]
 fn hardware_id(display: &str) -> String {
     use windows::Win32::Graphics::Gdi::{DISPLAY_DEVICEW, EnumDisplayDevicesW};
     use windows::core::HSTRING;
@@ -127,10 +143,15 @@ fn hardware_id(display: &str) -> String {
     String::from_utf16_lossy(&dd.DeviceID).trim_end_matches('\0').to_string()
 }
 
+#[cfg(windows)]
 fn cursor() -> Option<(i32, i32)> {
     let mut p = POINT::default();
     unsafe { GetCursorPos(&mut p).ok()? };
     Some((p.x, p.y))
+}
+#[cfg(not(windows))]
+fn cursor() -> Option<(i32, i32)> {
+    None
 }
 
 /// The chosen screen: by its hardware id first (survives Windows renumbering

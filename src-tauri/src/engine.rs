@@ -1288,7 +1288,8 @@ mod tests {
             stop: AtomicBool::new(false),
             last_push: Mutex::new(Instant::now() - Duration::from_secs(9)),
         });
-        let child = std::process::Command::new("cmd").args(["/c", "exit"]).spawn().unwrap();
+        // Any program that exits at once.
+        let child = if cfg!(windows) { std::process::Command::new("cmd").args(["/c", "exit"]).spawn() } else { std::process::Command::new("true").spawn() }.unwrap();
         let r = Running {
             child,
             sig: String::new(),

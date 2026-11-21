@@ -95,6 +95,7 @@ pub fn anonymize(text: &str) -> String {
     out
 }
 
+#[cfg(windows)]
 fn reg(path: &str, name: &str) -> Option<String> {
     use windows::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ, RegGetValueW};
     use windows::core::HSTRING;
@@ -108,7 +109,12 @@ fn reg(path: &str, name: &str) -> Option<String> {
     let n = (len as usize / 2).saturating_sub(1);
     Some(String::from_utf16_lossy(&buf[..n.min(buf.len())]))
 }
+#[cfg(not(windows))]
+fn reg(_path: &str, _name: &str) -> Option<String> {
+    None
+}
 
+#[cfg(windows)]
 fn windows_version() -> String {
     let k = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion";
     let mut product = reg(k, "ProductName").unwrap_or_default();
@@ -119,8 +125,13 @@ fn windows_version() -> String {
     }
     format!("{product} {} (build {build})", reg(k, "DisplayVersion").unwrap_or_default())
 }
+#[cfg(not(windows))]
+fn windows_version() -> String {
+    format!("{} {}", std::env::consts::OS, std::env::consts::ARCH)
+}
 
 /// GPUs with their driver versions (from DXGI).
+#[cfg(windows)]
 fn gpus() -> Vec<String> {
     use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIDevice, IDXGIFactory1};
     use windows::core::Interface;
@@ -144,7 +155,12 @@ fn gpus() -> Vec<String> {
     }
     out
 }
+#[cfg(not(windows))]
+fn gpus() -> Vec<String> {
+    Vec::new()
+}
 
+#[cfg(windows)]
 fn free_space(dir: &str) -> String {
     use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
     use windows::core::HSTRING;
@@ -155,6 +171,10 @@ fn free_space(dir: &str) -> String {
         }
     }
     "unknown".into()
+}
+#[cfg(not(windows))]
+fn free_space(dir: &str) -> String {
+    crate::ffmpeg::free_bytes(std::path::Path::new(dir)).map(|b| format!("{:.1} GB free", b as f64 / 1e9)).unwrap_or_else(|| "unknown".into())
 }
 
 fn section(out: &mut String, title: &str) {

@@ -950,6 +950,7 @@ fn sha256_of(mut r: impl Read, buf: &mut [u8]) -> std::io::Result<[u8; 32]> {
 
 /// SHA-256 of a file as it really is on disk (or the NAS), not as Windows
 /// remembers it from writing it a moment ago: read with no cache.
+#[cfg(windows)]
 fn sha256_uncached(p: &Path) -> Result<[u8; 32], String> {
     use std::os::windows::fs::OpenOptionsExt;
     const FILE_FLAG_NO_BUFFERING: u32 = 0x2000_0000;
@@ -965,6 +966,13 @@ fn sha256_uncached(p: &Path) -> Result<[u8; 32], String> {
         // Some shares refuse uncached reads: an ordinary read still catches a bad copy.
         Err(_) => fs::File::open(p).and_then(|f| sha256_of(f, buf)).map_err(|e| e.to_string()),
     }
+}
+#[cfg(not(windows))]
+/// Linux / macOS: an ordinary read (reading past the cache is phase 2).
+fn sha256_uncached(p: &Path) -> Result<[u8; 32], String> {
+    let mut buf = vec![0u8; 4 << 20];
+    let f = fs::File::open(p).map_err(|e| e.to_string())?;
+    sha256_of(f, &mut buf).map_err(|e| e.to_string())
 }
 
 /// Copy `src` to `tmp`, fingerprinting it on the way, then read `tmp` back

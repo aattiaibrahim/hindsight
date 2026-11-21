@@ -364,6 +364,7 @@ pub fn discord_link_expiry(url: &str) -> Option<i64> {
 }
 
 /// Put text on the Windows clipboard (works with the window hidden, unlike the web clipboard).
+#[cfg(windows)]
 pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
     use windows::Win32::Foundation::{HANDLE, HGLOBAL};
     use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
@@ -398,6 +399,11 @@ pub fn copy_to_clipboard(text: &str) -> Result<(), String> {
         let _ = CloseClipboard();
         res
     }
+}
+#[cfg(not(windows))]
+/// Linux / macOS: the interface copies the link itself (the system clipboard from here is phase 2).
+pub fn copy_to_clipboard(_text: &str) -> Result<(), String> {
+    Err("Copying isn't available on this system yet.".into())
 }
 
 /// Links made for each clip, newest last (uploads.json in the app's data folder).

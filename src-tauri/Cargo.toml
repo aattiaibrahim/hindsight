@@ -32,10 +32,13 @@ tauri-plugin-updater = "2"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "multipart", "blocking", "json"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
-windows-core = "0.61"
 ort = { version = "=2.0.0-rc.10", default-features = false, features = ["load-dynamic", "std"] }
 
-[dependencies.windows]
+# Windows only: on Linux and macOS the modules that use them have stand-ins in src/portable.
+[target.'cfg(windows)'.dependencies]
+windows-core = "0.61"
+
+[target.'cfg(windows)'.dependencies.windows]
 version = "0.61"
 features = [
   "Win32_Foundation",

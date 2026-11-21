@@ -1,5 +1,6 @@
 # Checks the desktop app on every push and pull request: the frontend type-checks and
-# builds, and the Rust tests pass. GitHub's machines have no NVIDIA GPU and the repo
+# builds, and the Rust tests pass, on Windows (x64 and ARM64), Linux (x64 and
+# ARM64) and macOS (Apple Silicon). GitHub's machines have no NVIDIA GPU and the repo
 # doesn't carry ffmpeg, so the tests that encode real video skip themselves there
 # (HINDSIGHT_NO_MEDIA); they run on a developer's PC before every release.
 name: Desktop tests
@@ -52,6 +53,90 @@ jobs:
 
       # The bundled tools (ffmpeg, PresentMon) aren't in the repo: empty stand-ins
       # let the build find its resources. Nothing runs them (HINDSIGHT_NO_MEDIA).
+      - name: Stand-ins for the bundled tools
+        shell: pwsh
+        run: |
+          foreach ($f in "vendor/ffmpeg/bin/ffmpeg.exe", "vendor/ffmpeg/bin/ffprobe.exe", "vendor/ffmpeg/bin/placeholder.dll", "vendor/ffmpeg/LICENSE.txt", "vendor/presentmon/PresentMon.exe", "vendor/presentmon/LICENSE.txt") {
+            New-Item -ItemType File -Force -Path $f | Out-Null
+          }
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --lib -- --test-threads=1
+
+  # Linux and macOS (docs/platforms-plan.md, phase 0): the app builds and its tests
+  # pass there. The Windows-only parts have stand-ins in src-tauri/src/portable.
+  other-systems:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Linux x64 and ARM64; macOS on Apple Silicon.
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      HINDSIGHT_NO_MEDIA: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux libraries (WebKitGTK, tray, ALSA)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev libasound2-dev
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.27.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Stand-ins for the bundled tools
+        run: |
+          for f in vendor/ffmpeg/bin/ffmpeg.exe vendor/ffmpeg/bin/ffprobe.exe vendor/ffmpeg/bin/placeholder.dll vendor/ffmpeg/LICENSE.txt vendor/presentmon/PresentMon.exe vendor/presentmon/LICENSE.txt; do
+            mkdir -p "$(dirname "$f")" && touch "$f"
+          done
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --lib -- --test-threads=1
+
+  # Windows on ARM (Snapdragon laptops), on GitHub's ARM64 Windows machine.
+  windows-arm64:
+    runs-on: windows-11-arm
+    env:
+      HINDSIGHT_NO_MEDIA: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.27.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: arm64
+
       - name: Stand-ins for the bundled tools
         shell: pwsh
         run: |

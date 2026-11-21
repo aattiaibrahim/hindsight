@@ -1,7 +1,22 @@
+#[cfg(windows)]
+mod app_audio;
+// Linux and macOS: stand-ins with the same functions (docs/platforms-plan.md).
+#[cfg(not(windows))]
+#[path = "portable/app_audio.rs"]
 mod app_audio;
 mod encoders;
+#[cfg(windows)]
+mod audio_sessions;
+// Linux and macOS: stand-ins with the same functions (docs/platforms-plan.md).
+#[cfg(not(windows))]
+#[path = "portable/audio_sessions.rs"]
 mod audio_sessions;
 mod scrub;
+#[cfg(windows)]
+mod session_end;
+// Linux and macOS: stand-ins with the same functions (docs/platforms-plan.md).
+#[cfg(not(windows))]
+#[path = "portable/session_end.rs"]
 mod session_end;
 mod prepare;
 mod game_icons;
@@ -12,6 +27,11 @@ mod game_detect;
 mod diag;
 mod audio;
 mod audio_edit;
+#[cfg(windows)]
+mod bench;
+// Linux and macOS: stand-ins with the same functions (docs/platforms-plan.md).
+#[cfg(not(windows))]
+#[path = "portable/bench.rs"]
 mod bench;
 mod consolidate;
 mod control;
@@ -25,11 +45,31 @@ mod library;
 mod monitors;
 mod media_server;
 mod nas;
+#[cfg(windows)]
+mod nas_connect;
+// Linux and macOS: stand-ins with the same functions (docs/platforms-plan.md).
+#[cfg(not(windows))]
+#[path = "portable/nas_connect.rs"]
 mod nas_connect;
 mod old_folders;
+#[cfg(windows)]
 mod native;
+// Linux and macOS: stand-ins with the same functions (docs/platforms-plan.md).
+#[cfg(not(windows))]
+#[path = "portable/native.rs"]
+mod native;
+#[cfg(windows)]
+mod secrets;
+// Linux and macOS: stand-ins with the same functions (docs/platforms-plan.md).
+#[cfg(not(windows))]
+#[path = "portable/secrets.rs"]
 mod secrets;
 mod settings;
+#[cfg(windows)]
+mod sound;
+// Linux and macOS: stand-ins with the same functions (docs/platforms-plan.md).
+#[cfg(not(windows))]
+#[path = "portable/sound.rs"]
 mod sound;
 mod updater;
 mod upload;
@@ -934,8 +974,19 @@ fn log_ui(text: String) {
 fn open_log_folder(app: AppHandle) -> Result<(), String> {
     let dir = data_file(&app, "logs")?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    std::process::Command::new("explorer").arg(&dir).spawn().map_err(|e| e.to_string())?;
-    Ok(())
+    open_folder(&dir)
+}
+
+/// Show a folder in the system's file manager: Explorer, Finder, or the Linux desktop's.
+fn open_folder(dir: &std::path::Path) -> Result<(), String> {
+    let app = if cfg!(windows) {
+        "explorer"
+    } else if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(app).arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// Clips being uploaded right now (so one clip isn't sent twice at once).
@@ -1362,6 +1413,7 @@ pub(crate) fn remember_edited(app: &AppHandle, path: &str) {
 
 /// Windows' accent colour as "#rrggbb", made light enough to read on a dark
 /// background (the way Windows' own dark mode shows it).
+#[cfg(windows)]
 #[tauri::command]
 fn system_accent() -> Option<String> {
     use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
@@ -1383,6 +1435,13 @@ fn system_accent() -> Option<String> {
     // Stored as 0xAABBGGRR.
     let (r, g, b) = ((v & 0xff) as f32, ((v >> 8) & 0xff) as f32, ((v >> 16) & 0xff) as f32);
     Some(lighten_for_dark(r, g, b))
+}
+
+/// Linux / macOS: no system accent colour yet; the app's own default is used.
+#[cfg(not(windows))]
+#[tauri::command]
+fn system_accent() -> Option<String> {
+    None
 }
 
 /// Mix with white until it's bright enough on a dark background.
@@ -1897,6 +1956,7 @@ async fn compress_clip(
 }
 
 /// Open Explorer with the file selected (or the folder itself, for a folder).
+#[cfg(windows)]
 #[tauri::command]
 fn reveal_file(path: String) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
@@ -1913,6 +1973,20 @@ fn reveal_file(path: String) -> Result<(), String> {
         cmd.raw_arg(format!("/select,\"{path}\""));
     }
     cmd.spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Linux / macOS: Finder shows the file selected; on Linux its folder opens.
+#[cfg(not(windows))]
+#[tauri::command]
+fn reveal_file(path: String) -> Result<(), String> {
+    let p = std::path::Path::new(&path);
+    if !p.exists() {
+        return Err("That file isn't there anymore.".into());
+    }
+    if cfg!(target_os = "macos") && !p.is_dir() {
+        return std::process::Command::new("open").arg("-R").arg(p).spawn().map(|_| ()).map_err(|e| e.to_string());
+    }
+    open_folder(if p.is_dir() { p } else { p.parent().unwrap_or(p) })
 }
 
 /// Move clips to the Recycle Bin. Imported files stay listed so Undo brings them back.

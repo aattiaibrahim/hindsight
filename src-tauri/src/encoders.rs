@@ -275,6 +275,7 @@ fn mf_quality(q: u32) -> u32 {
 }
 
 /// The graphics cards Windows knows, as (vendor id, name), skipping its basic display driver.
+#[cfg(windows)]
 fn adapters() -> Vec<(u32, String)> {
     use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIFactory1};
     let mut out = Vec::new();
@@ -291,6 +292,10 @@ fn adapters() -> Vec<(u32, String)> {
         }
     }
     out
+}
+#[cfg(not(windows))]
+fn adapters() -> Vec<(u32, String)> {
+    Vec::new()
 }
 
 const AMD: u32 = 0x1002;

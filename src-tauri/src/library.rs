@@ -1102,6 +1102,7 @@ fn map_mixed_audio(args: &mut Vec<OsString>, path: &str, audio_tracks: u32, audi
 /// when the drive's bin is set to "Don't move files to the Recycle Bin", or the
 /// file is bigger than the bin's maximum size. Either way it would be gone, so
 /// Hindsight refuses instead. Unknown settings (no entry) count as fine.
+#[cfg(windows)]
 pub fn recycle_check(path: &Path) -> Result<(), String> {
     use windows::Win32::Storage::FileSystem::{GetVolumeNameForVolumeMountPointW, GetVolumePathNameW};
     use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
@@ -1139,6 +1140,11 @@ pub fn recycle_check(path: &Path) -> Result<(), String> {
             ));
         }
     }
+    Ok(())
+}
+#[cfg(not(windows))]
+/// Linux / macOS: the system trash always keeps the file.
+pub fn recycle_check(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 

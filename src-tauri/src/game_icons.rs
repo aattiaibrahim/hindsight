@@ -280,6 +280,7 @@ fn save_png(rgba: &[u8], side: u32, out: &Path) -> Result<(), String> {
 }
 
 /// The program's icon from Windows, 256×256 RGBA (the biggest size an icon comes in).
+#[cfg(windows)]
 fn shell_icon(exe: &Path) -> Result<(Vec<u8>, u32), String> {
     use windows::Win32::Foundation::SIZE;
     use windows::Win32::Graphics::Gdi::{BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteObject, GetDC, GetDIBits, ReleaseDC};
@@ -311,6 +312,11 @@ fn shell_icon(exe: &Path) -> Result<(Vec<u8>, u32), String> {
         }
         Ok((px, N as u32))
     }
+}
+#[cfg(not(windows))]
+/// Linux / macOS: program icons (.desktop icons, NSWorkspace) are phase 4.
+fn shell_icon(_exe: &Path) -> Result<(Vec<u8>, u32), String> {
+    Err("No program icons on this system yet".into())
 }
 
 /// Folder names that are never a game (and never looked up online).
