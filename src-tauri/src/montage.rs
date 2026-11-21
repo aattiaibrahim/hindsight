@@ -177,8 +177,10 @@ pub fn args(m: &Montage, audio_tracks: &[Vec<usize>]) -> Result<(Vec<std::ffi::O
         g.push("[aclips]anull[aout]".into());
     }
     a.extend(ffmpeg::args(&["-filter_complex", &g.join(";"), "-map", "[vout]", "-map", "[aout]"]));
+    let video = crate::encoders::args("h264", crate::encoders::Rate::Quality(21), crate::encoders::Speed::Good, &["-preset", "p5", "-cq", "21", "-b:v", "0"]);
+    a.extend(video.into_iter().map(std::ffi::OsString::from));
     a.extend(ffmpeg::args(&[
-        "-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21", "-b:v", "0", "-g", &(fps * 2).to_string(),
+        "-g", &(fps * 2).to_string(),
         "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", "-t", &format!("{total:.3}"),
     ]));
     Ok((a, total))

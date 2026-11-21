@@ -857,8 +857,9 @@ fn supervise(
 
     loop {
         let mut s = settings.lock().unwrap().clone();
-        // "auto", or a choice this GPU can't encode, becomes what it can (AV1 needs an RTX 40).
-        s.encoder = crate::native::nvenc::effective_encoder(&s.encoder).to_string();
+        // "auto", or a choice this GPU can't encode, becomes what it can (AV1 needs an RTX 40,
+        // a Radeon RX 7000 or an Intel Arc).
+        s.encoder = crate::encoders::effective(&s.encoder).to_string();
         // Back on compatibility capture for a while: try native again (never mid-recording).
         {
             let mut n = native.lock().unwrap();
@@ -868,7 +869,8 @@ fn supervise(
                 n.gave_up_at = None;
             }
         }
-        let use_native = s.capture_engine == "native" && native.lock().unwrap().failures < NATIVE_MAX_FAILURES;
+        // The native engine is NVENC's: AMD, Intel and other GPUs record with the FFmpeg engine.
+        let use_native = s.capture_engine == "native" && crate::encoders::is_nvenc() && native.lock().unwrap().failures < NATIVE_MAX_FAILURES;
         let recording = rec.lock().unwrap().is_some() || native.lock().unwrap().rec.is_some();
         // A recording keeps capture running even if the replay buffer is paused.
         let want = s.buffer_enabled || recording;
@@ -1142,11 +1144,7 @@ fn spawn(s: &Settings, m: &monitors::Monitor, generation: &Gen) -> Result<Spawne
     }
 
     let per = segs_needed(s.buffer_seconds);
-    let codec = match s.encoder.as_str() {
-        "h264" => "h264_nvenc",
-        "hevc" => "hevc_nvenc",
-        _ => "av1_nvenc",
-    };
+    let nvenc = crate::encoders::is_nvenc();
     let mut src = format!(
         "ddagrab=output_idx={}:framerate={}:draw_mouse={}",
         m.index,
@@ -1163,6 +1161,10 @@ fn spawn(s: &Settings, m: &monitors::Monitor, generation: &Gen) -> Result<Spawne
         // (about 1-5% of a modern CPU): this FFmpeg's GPU scalers can't take
         // desktop-capture frames.
         src.push_str(&format!(",hwdownload,format=bgra,scale={w}:{h}:flags=bicubic,format=nv12"));
+    } else if !nvenc {
+        // AMD, Intel and Windows' encoders take ordinary frames: copy them off the GPU
+        // and convert to NV12 (the format they all take) on the CPU.
+        src.push_str(",hwdownload,format=bgra,format=nv12");
     }
     let gop = (s.fps * SEG_SECONDS).to_string();
     let cq = s.quality.to_string();
@@ -1193,8 +1195,18 @@ fn spawn(s: &Settings, m: &monitors::Monitor, generation: &Gen) -> Result<Spawne
     if !caps.is_empty() {
         cmd.args(["-c:a", "aac", "-ar", "48000"]).args(crate::ffmpeg::AAC_SAFE);
     }
-    cmd.args(["-c:v", codec, "-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", &cq, "-b:v", "0"])
-        .args(["-g", &gop])
+    cmd.args(crate::encoders::args(
+        &s.encoder,
+        crate::encoders::Rate::Quality(s.quality),
+        crate::encoders::Speed::Live,
+        &["-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", &cq, "-b:v", "0"],
+    ))
+    .args(["-g", &gop]);
+    if !nvenc {
+        // Every segment must start on a keyframe; NVENC keeps to -g exactly, the others are told.
+        cmd.args(["-force_key_frames", &format!("expr:gte(t,n_forced*{SEG_SECONDS})")]);
+    }
+    cmd
         .args(["-f", "segment", "-segment_time", &seg, "-segment_format", "matroska"])
         .args(["-reset_timestamps", "1"]);
     match &ram {

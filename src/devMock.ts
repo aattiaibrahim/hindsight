@@ -225,7 +225,7 @@ export function installDevMock() {
     render_montage: async () => (await new Promise((r) => setTimeout(r, 1200)), "C:\\Users\\you\\Videos\\Hindsight\\Montages\\Montage 2026-11-06 12-00-00.mp4"),
     cancel_montage: () => null,
     game_icon: () => null,
-    gpu_encoders: () => ({ gpu: "NVIDIA GeForce RTX 3070", supported: ["hevc", "h264"], auto: "hevc" }),
+    gpu_encoders: () => ({ gpu: "NVIDIA GeForce RTX 3070", encoder: "NVIDIA NVENC", native: true, supported: ["hevc", "h264"], auto: "hevc" }),
     // Uploads (preview only): pretend to prepare and upload, with progress events, then give a fake link.
     upload_clip: async (a) => {
       const path = a.path as string, host = (a.host as string) ?? settings.uploadHost;

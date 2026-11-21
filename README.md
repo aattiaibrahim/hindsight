@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>The lightweight game clipper for Windows.</b><br />
-  Always-on replay buffer on your NVIDIA GPU, a frame-exact trimmer, and one-click sharing that plays inside Discord.<br />
+  Always-on replay buffer on your NVIDIA, AMD or Intel GPU, a frame-exact trimmer, and one-click sharing that plays inside Discord.<br />
   Free and open source. No ads, no account, no watermark, no tracking: your clips stay on your PC and your NAS.
 </p>
 
@@ -48,13 +48,13 @@
         <li>Saving a 2-minute clip takes under a second.</li>
         <li>A built-in <a href="benchmarks/README.md">performance test</a> measures the cost against OBS, NVIDIA Instant Replay and Medal on your own PC.</li>
       </ul>
-      <p>Needs Windows 10/11 and an NVIDIA GTX 10-series or newer (AV1 needs an RTX 40/50). The installer isn't code-signed yet, so SmartScreen may warn you: click <b>More info → Run anyway</b>.</p>
+      <p>Needs Windows 10/11 and an NVIDIA (GTX 10-series or newer), AMD or Intel GPU (AV1 needs an RTX 40/50, a Radeon RX 7000 or an Intel Arc). The installer isn't code-signed yet, so SmartScreen may warn you: click <b>More info → Run anyway</b>.</p>
     </td>
   </tr>
 </table>
 ## Features
 
-- **Replay buffer on NVENC**: AV1, HEVC or H.264, 15 s to 20 min, constant-quality mode. **Auto** (the default) asks the driver what your GPU can encode and uses the best: AV1 on an RTX 40/50, else HEVC, else H.264. A saved choice your GPU can't do falls back the same way.
+- **Replay buffer on your GPU**: NVENC, AMD AMF or Intel Quick Sync (see [Graphics cards](#graphics-cards)). AV1, HEVC or H.264, 15 s to 20 min, constant-quality mode. **Auto** (the default) checks what your GPU can encode and uses the best: AV1 on an RTX 40/50, a Radeon RX 7000 or an Intel Arc, else HEVC, else H.264. A saved choice your GPU can't do falls back the same way.
 - **Buffer in RAM by default**: no constant SSD writes. A disk mode remains for very long buffers.
 - **Tray icon shows a red dot** while capturing, like OBS.
 - **Save clip hotkey** (default `Alt+F10`). Clips from a detected game go to `Videos\Hindsight\<Game>\`; everything else goes to `Videos\Hindsight\Desktop\`.
@@ -125,7 +125,7 @@ Hindsight is in beta. Found a bug? Open a [bug report](https://github.com/aattia
 
 ## How it works (native engine, default)
 
-The pipeline works the same way OBS's does. Everything stays on the NVIDIA GPU, and audio and video share one clock:
+This is the engine on NVIDIA GPUs. The pipeline works the same way OBS's does. Everything stays on the GPU, and audio and video share one clock:
 
 1. **Windows Graphics Capture** hands Hindsight each frame as a texture on the GPU that drives the monitor.
 2. **The D3D11 Video Processor** converts and resizes it to NV12 on the GPU, at any output size including 4K and 720p.
@@ -135,11 +135,25 @@ The pipeline works the same way OBS's does. Everything stays on the NVIDIA GPU, 
 
 Measured on an RTX 5080 at 1080p60: about 2.5 ms of GPU encode per frame, about 3% of one CPU core for the whole capture, and a 12 s clip saved in under 1 s. Recordings stream to disk as they go, so a crash leaves parts that are recovered on the next start.
 
-If the native engine can't start (no NVIDIA GPU, driver problem), Hindsight falls back to the FFmpeg engine below. It can also be picked under **Settings → Display & capture → Capture engine**.
+If the native engine can't start (driver problem), Hindsight falls back to the FFmpeg engine below. It can also be picked under **Settings → Display & capture → Capture engine**.
+
+## Graphics cards
+
+`src-tauri/src/encoders.rs` picks the video encoder once, with a short test encode of each candidate, so a missing or old driver is skipped instead of breaking recording:
+
+| GPU | Encoder | Engine |
+| --- | --- | --- |
+| NVIDIA (GTX 10-series or newer) | NVENC | Native (above) |
+| AMD | AMF (`h264_amf`, `hevc_amf`, `av1_amf`) | FFmpeg |
+| Intel | Quick Sync (`h264_qsv`, `hevc_qsv`, `av1_qsv`) | FFmpeg |
+| Anything else | Windows Media Foundation (the GPU's own encoder through Windows, else Microsoft's software one) | FFmpeg |
+| Windows "N" without Media Foundation | OpenH264 on the CPU | FFmpeg |
+
+AV1, HEVC and H.264 are each tested, and Auto records the best one the card has. Trimming, exports, compressing, healing, montages and scrub previews use the same encoder; on NVIDIA they're unchanged. On other GPUs an exact trim re-encodes the whole range (still frame-exact), and Compress makes the picture smaller if the encoder overshoots the size. `HINDSIGHT_ENCODER=amf|qsv|mf|openh264` forces one, for testing.
 
 ## How it works (compatibility engine)
 
-ffmpeg's `ddagrab` captures the monitor on the GPU and feeds frames straight into NVENC, with no CPU copy. Output goes to 2-second MKV segments in a rolling ring. In RAM mode, ffmpeg streams each finished segment to Hindsight over localhost and nothing touches the disk. In disk mode, segments go under `%LOCALAPPDATA%\com.rewind.app\buffer`. Saving joins the newest segments without re-encoding (`-c copy`), so it is instant and lossless.
+ffmpeg's `ddagrab` captures the monitor on the GPU and feeds frames straight into NVENC, with no CPU copy. On AMD, Intel and other GPUs each frame is copied off the GPU and converted to NV12 on the CPU first, then encoded on the GPU's own encoder. Output goes to 2-second MKV segments in a rolling ring. In RAM mode, ffmpeg streams each finished segment to Hindsight over localhost and nothing touches the disk. In disk mode, segments go under `%LOCALAPPDATA%\com.rewind.app\buffer`. Saving joins the newest segments without re-encoding (`-c copy`), so it is instant and lossless.
 
 A supervisor thread (`src-tauri/src/engine.rs`) checks the monitor layout every second. If it changes, or ffmpeg exits, it starts a new capture "generation" on the right monitor. ffmpeg runs in a Windows job object, so it always dies with the app.
 
@@ -171,13 +185,13 @@ Clip resolution can be **same as screen** (captured fully on the GPU), 4K, 1440p
 
 ```powershell
 cd src-tauri
-cargo test                                   # unit + file-tool tests (needs an NVIDIA GPU)
+cargo test                                   # unit + file-tool tests (HINDSIGHT_ENCODER=mf runs them on Windows' encoder)
 cargo test live_ -- --ignored --nocapture    # real capture: buffer, clip, recording, recovery
 ```
 
 ## Develop
 
-Requirements: Rust, Node + pnpm, Visual Studio C++ Build Tools, an NVIDIA GPU.
+Requirements: Rust, Node + pnpm, Visual Studio C++ Build Tools. The media tests make their sample clips with NVENC, so they need an NVIDIA GPU.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\get-ffmpeg.ps1   # once: LGPL FFmpeg + PresentMon into vendor\

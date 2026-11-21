@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Hindsight · a free replay buffer and clip library for Windows</title>
-  <meta name="description" content="Hindsight is a free, open-source replay buffer and clip library for Windows with an NVIDIA GPU. Save the last minutes with a key, trim them, share them, and keep them on your NAS.">
+  <meta name="description" content="Hindsight is a free, open-source replay buffer and clip library for Windows, on NVIDIA, AMD or Intel graphics. Save the last minutes with a key, trim them, share them, and keep them on your NAS.">
   <meta name="theme-color" content="#000000">
   <meta property="og:title" content="Hindsight: a free replay buffer and clip library for Windows">
   <meta property="og:description" content="Save the last two minutes with a key, trim it, share it, keep it on your NAS. Free and open source.">
@@ -33,13 +33,13 @@
         <div>
           <h1>A free replay buffer and clip library for Windows</h1>
           <p class="lead">Save the last two minutes with a key, trim it, share it, keep it on your NAS. No account, no watermark, no ads.</p>
-          <a class="btn primary" href="https://github.com/aattiaibrahim/hindsight/releases/latest" data-download-label>Download 0.1.76</a>
+          <a class="btn primary" href="https://github.com/aattiaibrahim/hindsight/releases/latest" data-download-label>Download 0.1.77</a>
           <div class="facts">
-            <span id="fact-version">Version 0.1.76</span>
+            <span id="fact-version">Version 0.1.77</span>
             <span id="fact-size">52 MB</span>
             <span id="fact-date">Released November 7, 2026</span>
             <span id="fact-downloads"></span>
-            <span>Windows 10 and 11 · NVIDIA GTX 10-series or newer</span>
+            <span>Windows 10 and 11 · NVIDIA, AMD or Intel graphics</span>
           </div>
         </div>
         <div class="demo">
@@ -51,7 +51,7 @@
         <div class="text">
           <h2>Save the moment</h2>
           <p>Hindsight keeps the last few minutes in memory while you play. Press Alt+F10 and they're a clip in under a second, in a folder named after the game.</p>
-          <p>It records on the NVIDIA chip that's there for video, so it costs about 3% of one CPU core at 1080p60. Your game, your microphone and Discord are three separate audio tracks.</p>
+          <p>It records on your graphics card's video encoder, NVIDIA, AMD or Intel, so the game keeps the GPU's power. On NVIDIA it costs about 3% of one CPU core at 1080p60. Your game, your microphone and Discord are three separate audio tracks, and a mic on an audio interface (a Focusrite, a GoXLR) records at full volume.</p>
         </div>
         <div class="saved" aria-label="Pressing Alt+F10 saves the last two minutes as a clip">
           <div class="keys"><kbd>Alt</kbd><span>+</span><kbd>F10</kbd></div>
@@ -67,7 +67,7 @@
       <section class="panel row flip">
         <div class="text">
           <h2>Trim it exactly</h2>
-          <p>Set a start and an end and save. The cut lands on the frame you chose, and the rest of the video is copied as it is, so it's quick and keeps full quality.</p>
+          <p>Set a start and an end and save. The cut lands on the frame you chose, and the rest of the video is copied as it is, so it's quick and keeps full quality. Compress any clip to 10, 25, 50, 100, 200, 300 or 500 MB.</p>
           <p>Each audio track gets its own waveform: mute a stretch, turn your friends down, or save just the audio.</p>
         </div>
         <div class="shot"><img src="img/studio.jpg" alt="The editor: a clip with its trim timeline and two audio tracks" width="2000" height="1175" loading="lazy"></div>
@@ -76,8 +76,8 @@
       <section class="panel row">
         <div class="text">
           <h2>A library that keeps itself tidy</h2>
-          <p>Your clips by game and by day, with the game's logo. To trim lists every clip you haven't cut down yet and how much space trimming would free.</p>
-          <p>Clips from Medal, OBS, NVIDIA and other recorders show up in the same place, even in folders inside folders. Damaged clips, duplicates (OBS's MKV next to its MP4 too) and folders spelled two ways are pointed out, never changed without asking, and Cleanup clears them in one go.</p>
+          <p>Your clips by game and by day, with the game's logo. Hover a clip to watch it, click it for a full player with a scrubber. Select a few and Move them to any folder, on your PC and NAS together, with undo. To trim lists every clip you haven't cut down yet and how much space trimming would free.</p>
+          <p>Clips from Medal, OBS, NVIDIA and other recorders show up in the same place, even in folders inside folders. Damaged clips, duplicates (OBS's MKV next to its MP4 too), clips waiting for their game's folder and folders spelled two ways are pointed out, never changed without asking, and Cleanup clears them in one go.</p>
         </div>
         <div class="shot"><img src="img/totrim.jpg" alt="To trim: clips not trimmed yet, grouped by day, with how much space trimming would free" width="2000" height="1175" loading="lazy"></div>
       </section>
@@ -112,8 +112,11 @@
         <div class="more">
           <div><b>Montages</b><p>Pick a length and which clips (trimmed, untrimmed, a game, a time frame) and get a montage to fine-tune: crossfades or fades through black, a song under it, each clip's own volume, up to 4K at 120 fps.</p></div>
           <div><b>Smooth scrubbing</b><p>Clips from other recorders that skip frames when you drag through them get a quick preview copy on your graphics card, so scrubbing stays smooth. Your edits still use the original.</p></div>
-          <div><b>On this day</b><p>Clips from this day in earlier years, at the top of your library.</p></div>
-          <div><b>Finds the game for you</b><p>Clips from OBS, your desktop or a folder of your own are matched to your games from what's on screen. Hover one to watch it, pick from the likeliest games, and nothing moves until you say so.</p></div>
+          <div><b>On this day</b><p>Clips from this day in earlier years, at the top of your library, with the games in them.</p></div>
+          <div><b>Finds the game for you</b><p>Clips from OBS, your desktop, your edit folders or a folder of your own are matched to your games from what's on screen, and wait in Cleanup. Hover one to watch it, pick from the likeliest games or name a new one, and nothing moves until you say so.</p></div>
+          <div><b>Every game's logo</b><p>From Steam, the game's own website or the installed game itself, sharp at any size. Pick your own picture for any game.</p></div>
+          <div><b>Stream Deck</b><p>A plugin with keys that look like the app's buttons: save a clip (any length per key), start and stop recording with a timer, turn the buffer on or off, switch quality.</p></div>
+          <div><b>Any graphics card</b><p>NVIDIA records with its own native engine. AMD (AMF), Intel (Quick Sync) and other graphics use their own video encoder too, and trimming, exports, compressing and montages work on all of them.</p></div>
           <div><b>Sound you can hear everywhere</b><p>Every clip carries an "All audio" track, so phones, browsers and other players hear your game, mic and friends together, without anything playing twice.</p></div>
           <div><b>Moves in the background</b><p>Bringing hundreds of clips over from another recorder or drive happens in the background, waits while you play, and can be undone.</p></div>
           <div><b>Diagnostics in one click</b><p>One file with what's needed to fix a problem (your PC, audio devices, the clip's tracks), with your user name taken out.</p></div>
@@ -151,7 +154,7 @@
               <tr><td>Discord on its own audio track</td><td class="us"><span class="yes">Automatic</span></td><td>No</td><td>No</td><td>With manual setup</td></tr>
               <tr><td>Copies clips to your own NAS</td><td class="us"><span class="yes">Yes, checked</span></td><td>No (its own cloud)</td><td>No</td><td>No</td></tr>
               <tr><td>Finds and heals damaged clips</td><td class="us"><span class="yes">Yes</span></td><td>No</td><td>No</td><td>No</td></tr>
-              <tr><td>AMD and Intel graphics</td><td class="us">Not yet (NVIDIA only)</td><td>Yes</td><td>No (NVIDIA only)</td><td>Yes</td></tr>
+              <tr><td>AMD and Intel graphics</td><td class="us"><span class="yes">Yes</span> (new)</td><td>Yes</td><td>No (NVIDIA only)</td><td>Yes</td></tr>
               <tr><td>Cloud backup</td><td class="us">No (your NAS instead)</td><td>Yes</td><td>No</td><td>No</td></tr>
             </tbody>
           </table>
@@ -161,9 +164,9 @@
 
       <section class="panel" id="faq">
         <h2>Questions</h2>
-        <details><summary>Do I need an NVIDIA graphics card?</summary><p>Yes, for now: a GTX 10-series or newer. Hindsight picks the best format your card has: AV1 on an RTX 40 or 50 series, HEVC or H.264 on older ones.</p></details>
+        <details><summary>Which graphics cards does it work with?</summary><p>NVIDIA (GTX 10-series or newer), AMD (Radeon RX 400 or newer) and Intel (UHD, Iris Xe and Arc), and any other PC through Windows' own video encoder. Hindsight picks the best format your card has: AV1 on an RTX 40 or 50, a Radeon RX 7000 or an Intel Arc, HEVC or H.264 on older ones. AMD and Intel support is new: if something doesn't look right, <a href="https://github.com/aattiaibrahim/hindsight/issues/new?template=bug_report.yml">tell us</a> with a diagnostics file.</p></details>
         <details><summary>Windows says it "protected my PC". Is it safe?</summary><p>The installer isn't code-signed yet, so SmartScreen doesn't recognise it. Click <b>More info</b>, then <b>Run anyway</b>. The source code is on GitHub for anyone to check.</p></details>
-        <details><summary>Will it slow my game down?</summary><p>Very little: about 3% of one CPU core at 1080p60, with encoding on the GPU's video chip. Copying to the NAS, thumbnails, damage checks and duplicate searches wait until you're out of game (turn on Sync while you play if you'd rather the NAS copy carries on).</p></details>
+        <details><summary>Will it slow my game down?</summary><p>Very little: encoding happens on the GPU's video chip. On NVIDIA that's about 3% of one CPU core at 1080p60; AMD and Intel use a little more, since each frame is converted on the CPU first. Copying to the NAS, thumbnails, damage checks and duplicate searches wait until you're out of game (turn on Sync while you play if you'd rather the NAS copy carries on).</p></details>
         <details><summary>What if my PC crashes or restarts while it's copying?</summary><p>Nothing is lost. A copy goes to a hidden file first and only counts once it's been read back and matches the original byte for byte; the original is never removed before that. After a crash the unfinished copy is cleaned up and that clip is simply copied again. Updates also wait until a copy is done.</p></details>
         <details><summary>Are there ads, or a paid version?</summary><p>No ads and no paid version. Hindsight is free and open source, and it doesn't collect anything about you to sell.</p></details>
         <details><summary>If I delete a clip on my PC, is it deleted on the NAS too?</summary><p>No. The NAS keeps your safe copy. Deleting on your PC sends the clip to the Recycle Bin and leaves the NAS copy alone.</p></details>
@@ -177,7 +180,7 @@
         <h3>What Hindsight sends over the internet</h3>
         <ul>
           <li>A check for updates, to GitHub.</li>
-          <li>Game folder names, to Steam's store search, for game logos. You can turn this off in Settings → Library.</li>
+          <li>Game folder names, to Steam's store search and Wikidata, for game logos and name suggestions. You can turn this off in Settings → Library.</li>
           <li>Your clip, only when you press Share, to the host you pick.</li>
           <li>The game finder's image model, only if you turn it on.</li>
           <li>Nothing else: no accounts, no analytics, no telemetry.</li>

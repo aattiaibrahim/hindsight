@@ -204,17 +204,14 @@ pub fn repair(path: &str) -> Result<String, String> {
     if info.codec.is_empty() {
         return Err("This file has no picture to repair.".into());
     }
-    let enc = match info.codec.as_str() {
-        "hevc" => "hevc_nvenc",
-        "av1" => "av1_nvenc",
-        _ => "h264_nvenc",
-    };
     let gop = (info.fps.round() as i64).max(1).to_string();
     let mut a = crate::ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y", "-err_detect", "ignore_err", "-ec", "guess_mvs+deblock", "-fflags", "+genpts", "-i"]);
     a.push(path.into());
-    a.extend(crate::ffmpeg::args(&[
-        "-map", "0:v:0", "-map", "0:a?", "-c:v", enc, "-preset", "p5", "-cq", "20", "-b:v", "0", "-g", &gop, "-c:a", "aac", "-b:a", "192k",
-    ]));
+    a.extend(crate::ffmpeg::args(&["-map", "0:v:0", "-map", "0:a?"]));
+    // The same codec on this PC's encoder (H.264 if it can't make that one).
+    let video = crate::encoders::args(&info.codec, crate::encoders::Rate::Quality(20), crate::encoders::Speed::Good, &["-preset", "p5", "-cq", "20", "-b:v", "0"]);
+    a.extend(video.into_iter().map(std::ffi::OsString::from));
+    a.extend(crate::ffmpeg::args(&["-g", &gop, "-c:a", "aac", "-b:a", "192k"]));
     if ext == "mp4" {
         a.extend(crate::ffmpeg::args(&["-movflags", "+faststart"]));
     }

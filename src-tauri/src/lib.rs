@@ -1,4 +1,5 @@
 mod app_audio;
+mod encoders;
 mod audio_sessions;
 mod scrub;
 mod session_end;
@@ -1842,21 +1843,27 @@ async fn search_games(app: AppHandle, term: String) -> Result<Vec<String>, Strin
 #[serde(rename_all = "camelCase")]
 struct GpuEncoders {
     gpu: String,
+    /// "NVIDIA NVENC", "AMD AMF", "Intel Quick Sync", "Windows Media Foundation", "OpenH264 (CPU)"
+    encoder: &'static str,
+    /// Only NVIDIA has the native capture engine
+    native: bool,
     /// "av1" | "hevc" | "h264" this GPU can encode
     supported: Vec<&'static str>,
     /// What "auto" records with
     auto: &'static str,
 }
 
-/// Which encoders this PC's NVIDIA GPU has (for the Encoder setting).
+/// Which encoders this PC's GPU has (for the Encoder setting): NVIDIA, AMD, Intel or Windows'.
 #[tauri::command]
 async fn gpu_encoders() -> Result<GpuEncoders, String> {
-    use crate::native::nvenc;
     blocking(|| {
+        let f = encoders::found();
         Ok(GpuEncoders {
-            gpu: nvenc::nvidia_gpu_name(),
-            supported: nvenc::supported_codecs().into_iter().map(|c| c.setting()).collect(),
-            auto: nvenc::effective_encoder("auto"),
+            gpu: f.gpu.clone(),
+            encoder: f.kind.label(),
+            native: f.kind == encoders::Kind::Nvenc,
+            supported: f.codecs.clone(),
+            auto: encoders::effective("auto"),
         })
     })
     .await

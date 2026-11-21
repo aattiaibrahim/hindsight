@@ -375,8 +375,8 @@ export function SettingsView({
             <span>
               Encoder
               <small>
-                All run on your NVIDIA GPU (NVENC){enc?.gpu ? `: ${enc.gpu.replace(/^NVIDIA /, "")}` : ""}. Auto picks the best
-                one it has. AV1 needs an RTX 40 series or newer.
+                {enc ? `Recorded with ${enc.encoder}${enc.gpu ? ` on your ${enc.gpu}` : ""}. ` : ""}Auto picks the best one it has. AV1 needs an
+                RTX 40, a Radeon RX 7000, an Intel Arc or newer.
               </small>
               {enc && s.encoder !== "auto" && enc.supported.length > 0 && !enc.supported.includes(s.encoder) && (
                 <small className="err-text">Your GPU can't record {s.encoder.toUpperCase()}, so it records {enc.auto.toUpperCase()} instead.</small>
@@ -386,8 +386,8 @@ export function SettingsView({
               <option value="auto">Auto{enc ? ` (${({ av1: "AV1", hevc: "HEVC", h264: "H.264" } as const)[enc.auto]})` : ""}</option>
               {(
                 [
-                  ["av1", "AV1 (smallest files)", "needs RTX 40 or newer"],
-                  ["hevc", "HEVC / H.265", "needs GTX 950 or newer"],
+                  ["av1", "AV1 (smallest files)", "your GPU can't"],
+                  ["hevc", "HEVC / H.265", "your GPU can't"],
                   ["h264", "H.264 (plays everywhere)", ""],
                 ] as const
               ).map(([v, label, need]) => {
@@ -629,14 +629,17 @@ export function SettingsView({
             <span>
               Capture engine
               <small>
-                {s.captureEngine === "native"
-                  ? "Captures and encodes entirely on your NVIDIA GPU, with audio and video on one clock."
-                  : "Older FFmpeg-based capture. Use only if Native gives you trouble."}
+                {enc && !enc.native
+                  ? `Native capture needs an NVIDIA GPU, so Hindsight records with FFmpeg and ${enc.encoder} on this PC.`
+                  : s.captureEngine === "native"
+                    ? "Captures and encodes entirely on your NVIDIA GPU, with audio and video on one clock."
+                    : "Older FFmpeg-based capture. Use only if Native gives you trouble."}
               </small>
             </span>
             <Select
               className="select"
-              value={s.captureEngine}
+              disabled={!!enc && !enc.native}
+              value={enc && !enc.native ? "ffmpeg" : s.captureEngine}
               onChange={(e) => set({ captureEngine: e.target.value as Settings["captureEngine"] })}
             >
               <option value="native">Native (recommended)</option>

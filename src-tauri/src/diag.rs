@@ -261,8 +261,8 @@ pub fn report(version: &str, extra: &[(&str, String)], clip: Option<&str>) -> St
     for g in gpus() {
         let _ = writeln!(out, "GPU: {g}");
     }
-    let enc = crate::native::nvenc::supported_codecs();
-    let _ = writeln!(out, "NVENC: {:?} (auto records {})", enc, crate::native::nvenc::effective_encoder("auto"));
+    let enc = crate::encoders::found();
+    let _ = writeln!(out, "Encoder: {} on {} {:?} (auto records {})", enc.kind.label(), enc.gpu, enc.codecs, crate::encoders::effective("auto"));
     for m in crate::monitors::list() {
         let _ = writeln!(out, "Screen: {} {}x{} at {},{}{}", m.name, m.width, m.height, m.x, m.y, if m.primary { " (primary)" } else { "" });
     }

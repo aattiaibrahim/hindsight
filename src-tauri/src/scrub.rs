@@ -99,7 +99,12 @@ fn make(dir: &Path, path: &str, out: &Path, progress: impl Fn(f64) + 'static) ->
     a.extend(crate::ffmpeg::args(&[
         "-map", "0:v:0", "-map", "0:a?",
         "-vf", "scale=-2:'min(1080,ih)'",
-        "-c:v", "h264_nvenc", "-preset", "p2", "-cq", "27", "-g", "30", "-bf", "0", "-pix_fmt", "yuv420p",
+    ]));
+    let video = crate::encoders::args("h264", crate::encoders::Rate::Quality(27), crate::encoders::Speed::Fast, &["-preset", "p2", "-cq", "27", "-pix_fmt", "yuv420p"]);
+    a.extend(video.into_iter().map(std::ffi::OsString::from));
+    a.extend(crate::ffmpeg::args(&[
+        // A keyframe every 30 frames and no B-frames: any spot is quick to seek to.
+        "-g", "30", "-bf", "0",
         "-c:a", "aac", "-b:a", "160k",
         "-movflags", "+faststart",
     ]));

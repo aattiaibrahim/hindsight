@@ -60,7 +60,7 @@ export function About({ version, hidden, logSetting }: { version: string | null;
             Hindsight <span className="beta-tag">BETA</span>
           </h2>
           <small className="muted">
-            Version {version ?? "…"} · a free, open-source game clipper for Windows and NVIDIA GPUs
+            Version {version ?? "…"} · a free, open-source game clipper for Windows
           </small>
         </div>
       </div>
@@ -111,7 +111,7 @@ export function About({ version, hidden, logSetting }: { version: string | null;
           </p>
         )}
         <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-          Built on FFmpeg, Tauri and NVIDIA NVENC. Game logos from Steam. Third-party licences are in THIRD_PARTY_NOTICES.md.
+          Built on FFmpeg, Tauri, NVIDIA NVENC, AMD AMF and Intel Quick Sync. Game logos from Steam. Third-party licences are in THIRD_PARTY_NOTICES.md.
         </p>
       </div>
     </section>

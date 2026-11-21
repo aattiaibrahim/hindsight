@@ -40,7 +40,8 @@ export type MontagePlan = {
   transitionSecs: number;
 };
 /** What this PC's NVIDIA GPU can encode. */
-export type GpuEncoders = { gpu: string; supported: Exclude<Encoder, "auto">[]; auto: Exclude<Encoder, "auto"> };
+/** encoder: "NVIDIA NVENC" | "AMD AMF" | "Intel Quick Sync" | "Windows Media Foundation" | "OpenH264 (CPU)"; native: the native engine works here (NVIDIA only). */
+export type GpuEncoders = { gpu: string; encoder: string; native: boolean; supported: Exclude<Encoder, "auto">[]; auto: Exclude<Encoder, "auto"> };
 export type MonitorMode = "primary" | "cursor" | "fixed";
 
 export type Settings = {

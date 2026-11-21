@@ -171,49 +171,17 @@ fn detect() -> Result<(String, Vec<Codec>), String> {
     }
 }
 
-/// The encoder to really use for a setting: "auto" is the best this GPU has
-/// (AV1, then HEVC, then H.264), and a choice the GPU can't do falls back the
-/// same way, so an older card never fails to record.
-pub fn effective_encoder(setting: &str) -> &'static str {
-    pick(setting, &supported_codecs())
-}
-
-pub fn pick(setting: &str, supported: &[Codec]) -> &'static str {
-    if supported.is_empty() {
-        // Nothing to go on (no NVIDIA driver): keep the old behaviour.
-        return if setting == "auto" { "av1" } else { Codec::from_setting(setting).setting() };
-    }
-    if setting != "auto" {
-        let want = Codec::from_setting(setting);
-        if supported.contains(&want) {
-            return want.setting();
-        }
-    }
-    [Codec::Av1, Codec::Hevc, Codec::H264].into_iter().find(|c| supported.contains(c)).unwrap_or(Codec::H264).setting()
-}
+// Picking a codec from these (and for AMD / Intel / other GPUs) is encoders::effective.
 
 #[cfg(test)]
-mod pick_tests {
+mod live_tests {
     use super::*;
-
-    #[test]
-    fn auto_and_unsupported_choices_fall_back() {
-        let rtx40 = [Codec::Av1, Codec::Hevc, Codec::H264];
-        let rtx30 = [Codec::Hevc, Codec::H264];
-        let old = [Codec::H264];
-        assert_eq!(pick("auto", &rtx40), "av1");
-        assert_eq!(pick("auto", &rtx30), "hevc");
-        assert_eq!(pick("av1", &rtx30), "hevc", "AV1 on an RTX 30 records HEVC instead");
-        assert_eq!(pick("av1", &old), "h264");
-        assert_eq!(pick("h264", &rtx40), "h264", "an explicit choice the GPU can do is kept");
-        assert_eq!(pick("auto", &[]), "av1");
-    }
 
     /// cargo test live_gpu_codecs -- --ignored --nocapture
     #[test]
     #[ignore]
     fn live_gpu_codecs() {
-        println!("{}: {:?} -> auto = {}", nvidia_gpu_name(), supported_codecs(), effective_encoder("auto"));
+        println!("{}: {:?}", nvidia_gpu_name(), supported_codecs());
         assert!(!supported_codecs().is_empty());
     }
 }

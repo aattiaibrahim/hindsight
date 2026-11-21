@@ -50,7 +50,7 @@ pub struct Probe {
 }
 
 /// Medal can save each clip's sound as extra files next to it:
-/// "MedalTVValorant20250914010640_Game.mp4" and "…_Mic.mp4" beside
+/// "MedalTVValorant20250914010640_Game.mp4" and "â€¦_Mic.mp4" beside
 /// "MedalTVValorant20250914010640.mp4". They're sound only, part of that clip,
 /// not clips of their own.
 pub(crate) fn is_sidecar(p: &Path) -> bool {
@@ -476,7 +476,7 @@ fn track_name(tags: &Value) -> String {
     }
 }
 
-/// `-metadata:s:a:N title=…` for each named track, for saves that keep every track
+/// `-metadata:s:a:N title=â€¦` for each named track, for saves that keep every track
 /// in order. Medal names tracks with a tag ffmpeg doesn't write back, so without
 /// this a trimmed clip loses "All Audio" / "Game" / "Mic" (and its mix copy could
 /// no longer be told apart, doubling the sound in later exports).
@@ -666,7 +666,7 @@ pub fn thumbnail(path: &str, cache: &Path) -> Result<String, String> {
     Err("Couldn't make a thumbnail".into())
 }
 
-/// "<dir>/<stem><suffix>.<ext>", adding (2), (3)… if it already exists.
+/// "<dir>/<stem><suffix>.<ext>", adding (2), (3)â€¦ if it already exists.
 fn unique(src: &Path, suffix: &str, ext: &str) -> PathBuf {
     let dir = src.parent().unwrap_or(Path::new("."));
     let stem = src.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
@@ -683,12 +683,11 @@ pub(crate) fn ext_of(p: &Path) -> String {
     p.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default()
 }
 
-fn nvenc_for(codec: &str) -> &'static str {
-    match codec {
-        "av1" => "av1_nvenc",
-        "hevc" => "hevc_nvenc",
-        _ => "h264_nvenc",
-    }
+/// The video encoder's arguments for this PC: on NVIDIA exactly `nvenc` (after
+/// `-c:v <codec>_nvenc`), on AMD / Intel / other GPUs the same quality from their
+/// own encoder (see encoders.rs).
+fn venc(codec: &str, rate: crate::encoders::Rate, nvenc: &[&str]) -> Vec<OsString> {
+    crate::encoders::args(codec, rate, crate::encoders::Speed::Good, nvenc).into_iter().map(OsString::from).collect()
 }
 
 /// Run ffmpeg into `out` (the last argument): written under a hidden name
@@ -818,9 +817,8 @@ pub fn trim(path: &str, start: f64, end: f64, exact: bool, audio: &AudioEdit) ->
         let gop = (p.fps.round() as i64).max(1).to_string();
         // Audio is re-encoded too: copied audio can't be cut mid-packet and drifts out of sync.
         // A keyframe every second keeps later trims of this file quick.
-        args.extend(ffmpeg::args(&[
-            "-c:v", nvenc_for(&p.codec), "-preset", "p5", "-cq", "20", "-b:v", "0", "-g", &gop, "-c:a", "aac", "-b:a", "192k",
-        ]));
+        args.extend(venc(&p.codec, crate::encoders::Rate::Quality(20), &["-preset", "p5", "-cq", "20", "-b:v", "0"]));
+        args.extend(ffmpeg::args(&["-g", &gop, "-c:a", "aac", "-b:a", "192k"]));
     } else {
         args.extend(ffmpeg::args(&["-c", "copy", "-avoid_negative_ts", "make_zero"]));
     }
@@ -889,6 +887,15 @@ fn match_level_args(ci: &CutInfo) -> Vec<String> {
     a
 }
 
+/// The raw bitstream format ffmpeg writes a codec in (for joining and muxing).
+fn raw_format(codec: &str) -> &'static str {
+    match codec {
+        "av1" => "obu",
+        "hevc" => "hevc",
+        _ => "h264",
+    }
+}
+
 fn cut_info(path: &str) -> Result<CutInfo, String> {
     let mut a = ffmpeg::args(&["-v", "error", "-print_format", "json", "-show_streams", "-i"]);
     a.push(path.into());
@@ -942,6 +949,12 @@ fn keyframes(path: &str, ci: &CutInfo, from: f64, to: f64) -> Result<Vec<i64>, S
 
 fn smart_trim(path: &str, start: f64, end: f64, out: &Path, audio: &AudioEdit) -> Result<(), String> {
     let ci = cut_info(path)?;
+    // Joining re-encoded frames onto copied ones needs an encoder that makes the very
+    // same stream (codec, profile, level): NVENC is matched for that. Other GPUs'
+    // encoders re-encode the whole range (still frame-exact), so nothing is joined.
+    let nvenc = crate::encoders::is_nvenc();
+    let codec = if nvenc { ci.codec.as_str() } else { crate::encoders::codec_for(&ci.codec) };
+    let raw = if nvenc { ci.raw } else { raw_format(codec) };
     let fps = ci.fps;
     // Work in frame numbers so rounding can't add or drop a frame.
     // The frame on screen at `start` is the first kept; frames before `end` are kept.
@@ -951,7 +964,7 @@ fn smart_trim(path: &str, start: f64, end: f64, out: &Path, audio: &AudioEdit) -
         return Err("range shorter than a frame".into());
     }
     let key = keyframes(path, &ci, start, end)?.into_iter().filter(|k| *k >= i_start && *k < i_end).min();
-    let i_key = key.unwrap_or(i_end); // no keyframe inside: re-encode it all
+    let i_key = if nvenc { key.unwrap_or(i_end) } else { i_end }; // no keyframe inside: re-encode it all
     let at = |i: i64| format!("{:.6}", ci.first + i as f64 / fps);
     // Half a frame early, so a cut lands cleanly between two frames.
     let before = |i: i64| format!("{:.6}", ci.first + (i as f64 - 0.5) / fps);
@@ -986,20 +999,25 @@ fn smart_trim(path: &str, start: f64, end: f64, out: &Path, audio: &AudioEdit) -
             let mut a = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y", "-copyts", "-ss", &pre(i_start), "-i"]);
             a.push(path.into());
             a.extend(ffmpeg::args(&["-map", "0:v:0", "-an", "-vf", &format!("trim=start={}:end={}", before(i_start), before(i_key))]));
-            a.extend(ffmpeg::args(&[
-                "-c:v", nvenc_for(&ci.codec), "-preset", "p5", "-tune", "hq", "-rc", "vbr", "-cq", "16", "-b:v", "0", "-bf", "0", "-g", &gop,
-                "-pix_fmt", "yuv420p",
-            ]));
-            // Same level and profile as the original, so the stream doesn't change halfway.
-            a.extend(match_level_args(&ci).into_iter().map(OsString::from));
-            a.extend(ffmpeg::args(&["-f", ci.raw]));
+            if nvenc {
+                a.extend(ffmpeg::args(&[
+                    "-c:v", &crate::encoders::name(crate::encoders::Kind::Nvenc, &ci.codec), "-preset", "p5", "-tune", "hq", "-rc", "vbr", "-cq", "16", "-b:v", "0", "-bf", "0", "-g", &gop,
+                    "-pix_fmt", "yuv420p",
+                ]));
+                // Same level and profile as the original, so the stream doesn't change halfway.
+                a.extend(match_level_args(&ci).into_iter().map(OsString::from));
+            } else {
+                a.extend(venc(codec, crate::encoders::Rate::Quality(16), &[]));
+                a.extend(ffmpeg::args(&["-bf", "0", "-g", &gop]));
+            }
+            a.extend(ffmpeg::args(&["-f", raw]));
             a.push(head.clone().into());
             ffmpeg::run("ffmpeg", &a)?;
             // Joining two different-looking streams makes a file some players refuse
             // (e.g. an OBS clip at AV1 level 4.1 with a start at "no level"):
             // if anything still differs, re-encode the whole range instead.
             if i_key < i_end {
-                let mut p = ffmpeg::args(&["-v", "error", "-f", ci.raw, "-print_format", "json", "-show_streams", "-i"]);
+                let mut p = ffmpeg::args(&["-v", "error", "-f", raw, "-print_format", "json", "-show_streams", "-i"]);
                 p.push(head.clone().into());
                 let j: Value = serde_json::from_str(&ffmpeg::run("ffprobe", &p)?).map_err(|e| e.to_string())?;
                 let got = j["streams"].get(0).map(stream_sig).unwrap_or_default();
@@ -1013,7 +1031,7 @@ fn smart_trim(path: &str, start: f64, end: f64, out: &Path, audio: &AudioEdit) -
         if i_key < i_end {
             let mut a = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y", "-copyts", "-ss", &pre(i_key), "-i"]);
             a.push(path.into());
-            a.extend(ffmpeg::args(&["-ss", &before(i_key), "-to", &before(i_end), "-map", "0:v:0", "-an", "-c", "copy", "-f", ci.raw]));
+            a.extend(ffmpeg::args(&["-ss", &before(i_key), "-to", &before(i_end), "-map", "0:v:0", "-an", "-c", "copy", "-f", raw]));
             a.push(tail.clone().into());
             ffmpeg::run("ffmpeg", &a)?;
         }
@@ -1027,7 +1045,7 @@ fn smart_trim(path: &str, start: f64, end: f64, out: &Path, audio: &AudioEdit) -
         if let Some(job) = audio_job {
             job.join().map_err(|_| "audio step crashed".to_string())??;
         }
-        let mut a = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y", "-r", &format!("{fps}"), "-f", ci.raw, "-i"]);
+        let mut a = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y", "-r", &format!("{fps}"), "-f", raw, "-i"]);
         a.push(video.clone().into());
         if ci.audio > 0 {
             a.push("-i".into());
@@ -1306,7 +1324,7 @@ pub struct Crop {
 }
 
 impl Crop {
-    /// ffmpeg's crop filter for a `width` × `height` video, in even pixels
+    /// ffmpeg's crop filter for a `width` Ã— `height` video, in even pixels
     /// (encoders need even sizes), kept inside the frame.
     pub fn filter(&self, width: i64, height: i64) -> String {
         let even = |v: f64| ((v.round() as i64) / 2 * 2).max(2);
@@ -1353,9 +1371,8 @@ pub fn trim_cropped(path: &str, start: f64, end: f64, audio: &AudioEdit, crop: C
         args.extend(ffmpeg::args(&["-map", &format!("[a{i}]"), &format!("-map_metadata:s:a:{i}"), &format!("0:s:a:{i}")]));
     }
     let gop = (p.fps.round() as i64).max(1).to_string();
-    args.extend(ffmpeg::args(&[
-        "-c:v", nvenc_for(&p.codec), "-preset", "p5", "-cq", "20", "-b:v", "0", "-g", &gop, "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
-    ]));
+    args.extend(venc(&p.codec, crate::encoders::Rate::Quality(20), &["-preset", "p5", "-cq", "20", "-b:v", "0", "-pix_fmt", "yuv420p"]));
+    args.extend(ffmpeg::args(&["-g", &gop, "-c:a", "aac", "-b:a", "192k"]));
     args.extend(keep_track_names(path));
     if ext == "mp4" {
         args.extend(ffmpeg::args(&["-movflags", "+faststart"]));
@@ -1386,7 +1403,8 @@ pub fn shareable_mp4(path: &str, out: PathBuf) -> Result<String, String> {
         let kbps = if info.duration > 0.5 { (size as f64 * 8.0 / info.duration / 1000.0) as u64 } else { 0 };
         let video = kbps.saturating_sub(192).max(800);
         let (max, buf) = (format!("{video}k"), format!("{}k", video * 2));
-        args.extend(ffmpeg::args(&["-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21", "-b:v", "0", "-maxrate", &max, "-bufsize", &buf, "-pix_fmt", "yuv420p"]));
+        let rate = crate::encoders::Rate::Bitrate { kbps: video, max_kbps: video, buf_kbps: video * 2 };
+        args.extend(venc("h264", rate, &["-preset", "p5", "-cq", "21", "-b:v", "0", "-maxrate", &max, "-bufsize", &buf, "-pix_fmt", "yuv420p"]));
     }
     args.extend(ffmpeg::args(&["-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"]));
     args.push(out.clone().into());
@@ -1401,10 +1419,8 @@ fn export_h264_vf(path: &str, out: PathBuf, audio: &AudioEdit, crop: Option<Crop
     if let Some(c) = crop.filter(|c| !c.is_whole()) {
         args.extend(ffmpeg::args(&["-vf", &c.filter(info.width, info.height)]));
     }
-    args.extend(ffmpeg::args(&[
-        "-c:v", "h264_nvenc", "-preset", "p5", "-cq", "21", "-b:v", "0",
-        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
-    ]));
+    args.extend(venc("h264", crate::encoders::Rate::Quality(21), &["-preset", "p5", "-cq", "21", "-b:v", "0", "-pix_fmt", "yuv420p"]));
+    args.extend(ffmpeg::args(&["-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart"]));
     args.push(out.clone().into());
     finish(args, out)
 }
@@ -1456,7 +1472,29 @@ fn compress_vf(path: &str, target_mb: u32, out: PathBuf, audio: &AudioEdit, crop
     }
     let audio_kbps = if info.audio_tracks > 0 { 128.0 } else { 0.0 };
     let total_kbps = target_mb as f64 * 8.0 * 1024.0 * 0.93 / info.duration;
-    let video_kbps = (total_kbps - audio_kbps).max(300.0).round() as u64;
+    let mut video_kbps = (total_kbps - audio_kbps).max(300.0).round() as u64;
+    // NVENC keeps to its bitrate; AMD's, Intel's and Windows' encoders can go over
+    // on short or busy clips, so a file that's too big is made again, smaller.
+    let limit = target_mb as u64 * 1024 * 1024;
+    // Each try after the first is smaller: a lower bitrate, then fewer pixels (720p,
+    // then 480p and 360p at 30 fps), which every encoder can fit.
+    const STEPS: [(u32, bool); 4] = [(0, false), (720, false), (480, true), (360, true)];
+    for (attempt, (max_h, fps30)) in STEPS.into_iter().enumerate() {
+        let made = compress_once(path, &info, video_kbps, max_h, fps30, out.clone(), audio, crop)?;
+        let size = fs::metadata(&made).map(|m| m.len()).unwrap_or(0);
+        if crate::encoders::is_nvenc() || size <= limit || attempt + 1 == STEPS.len() {
+            return Ok(made);
+        }
+        let _ = fs::remove_file(&made);
+        let next = ((video_kbps as f64 * limit as f64 / size as f64 * 0.9) as u64).max(300);
+        crate::log!("[rewind] compress made {size} bytes for a {limit}-byte target; again at {next} kbps, smaller");
+        video_kbps = next;
+    }
+    unreachable!()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compress_once(path: &str, info: &Probe, video_kbps: u64, max_h: u32, fps30: bool, out: PathBuf, audio: &AudioEdit, crop: Option<Crop>) -> Result<String, String> {
     let (b, buf) = (format!("{video_kbps}k"), format!("{}k", video_kbps * 2));
     let mut args = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-i"]);
     args.push(path.into());
@@ -1465,16 +1503,19 @@ fn compress_vf(path: &str, target_mb: u32, out: PathBuf, audio: &AudioEdit, crop
     if let Some(c) = crop.filter(|c| !c.is_whole()) {
         vf.push(c.filter(info.width, info.height));
     }
-    if video_kbps < 2500 && info.height > 720 {
-        vf.push("scale=-2:'min(720,ih)'".to_string());
+    let cap = if max_h > 0 { max_h } else if video_kbps < 2500 { 720 } else { 0 };
+    if cap > 0 && info.height > cap as i64 {
+        vf.push(format!("scale=-2:'min({cap},ih)'"));
+    }
+    if fps30 && info.fps > 31.0 {
+        vf.push("fps=30".to_string());
     }
     if !vf.is_empty() {
         args.extend(ffmpeg::args(&["-vf", &vf.join(",")]));
     }
-    args.extend(ffmpeg::args(&[
-        "-c:v", "h264_nvenc", "-preset", "p6", "-rc", "vbr", "-b:v", &b, "-maxrate", &b, "-bufsize", &buf,
-        "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart",
-    ]));
+    let rate = crate::encoders::Rate::Bitrate { kbps: video_kbps, max_kbps: video_kbps, buf_kbps: video_kbps * 2 };
+    args.extend(venc("h264", rate, &["-preset", "p6", "-rc", "vbr", "-b:v", &b, "-maxrate", &b, "-bufsize", &buf, "-pix_fmt", "yuv420p"]));
+    args.extend(ffmpeg::args(&["-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart"]));
     args.push(out.clone().into());
     finish(args, out)
 }
@@ -1846,9 +1887,12 @@ mod tests {
             assert_eq!(frames, 281 - 76, "{codec}: exact frame count");
             assert_eq!(p.audio_tracks, 2);
             // Frames 120.. of the source (keyframe at 2 s) are copied: identical after decoding.
-            let copied = frame_hashes(&out, 120 - 76, 60);
-            let original = frame_hashes(&src, 120, 60);
-            assert_eq!(copied, original, "{codec}: copied frames must be bit-identical");
+            // NVENC joins onto copied frames; other encoders re-encode the whole range.
+            if crate::encoders::is_nvenc() {
+                let copied = frame_hashes(&out, 120 - 76, 60);
+                let original = frame_hashes(&src, 120, 60);
+                assert_eq!(copied, original, "{codec}: copied frames must be bit-identical");
+            }
         }
         let _ = fs::remove_dir_all(d);
     }
@@ -1872,7 +1916,8 @@ mod tests {
     fn smart_trim_keeps_the_source_level_and_profile() {
         let d = tmp("smart-level");
         crate::ffmpeg::init(None);
-        if crate::ffmpeg::skip_media_tests() {
+        // Only NVENC joins re-encoded frames onto copied ones (and so has to match them).
+        if crate::ffmpeg::skip_media_tests() || !crate::encoders::is_nvenc() {
             return;
         }
         fs::create_dir_all(&d).unwrap();
