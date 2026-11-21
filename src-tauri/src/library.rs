@@ -1263,6 +1263,7 @@ fn friendly_delete_error(e: &str) -> String {
 }
 
 /// Put files back from the Recycle Bin (newest deletion of each path).
+#[cfg(not(target_os = "macos"))]
 pub fn restore_clips(paths: &[String]) -> Result<usize, String> {
     let wanted: std::collections::HashSet<PathBuf> = paths.iter().map(PathBuf::from).collect();
     let mut items: Vec<trash::TrashItem> = trash::os_limited::list()
@@ -1280,6 +1281,12 @@ pub fn restore_clips(paths: &[String]) -> Result<usize, String> {
     }
     trash::os_limited::restore_all(items).map_err(|e| e.to_string())?;
     Ok(n)
+}
+
+/// macOS: the trash crate can't put files back from Finder's Trash.
+#[cfg(target_os = "macos")]
+pub fn restore_clips(_paths: &[String]) -> Result<usize, String> {
+    Err("Undo isn't available on macOS yet: the clips are in the Trash, where Finder can put them back.".into())
 }
 
 /// Swap an edited file in for the original (original goes to the Recycle Bin).

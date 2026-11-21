@@ -244,14 +244,15 @@ pub fn on_network(path: &str) -> bool {
     if path.starts_with(r"\\") || path.starts_with("//") {
         return true;
     }
-#[cfg(not(windows))]
-/// Linux / macOS: Windows-style share paths, or a share mounted by gvfs / in /Volumes.
-pub fn on_network(path: &str) -> bool {
-    path.starts_with(r"\\") || path.starts_with("//") || path.contains("/gvfs/") || path.starts_with("/Volumes/")
-}
     let Some(root) = path.get(..3).filter(|r| r.ends_with(":\\") || r.ends_with(":/")) else { return false };
     const DRIVE_REMOTE: u32 = 4;
     unsafe { GetDriveTypeW(&HSTRING::from(root)) == DRIVE_REMOTE }
+}
+
+/// Linux / macOS: Windows-style share paths, or a share mounted by gvfs / in /Volumes.
+#[cfg(not(windows))]
+pub fn on_network(path: &str) -> bool {
+    path.starts_with(r"\\") || path.starts_with("//") || path.contains("/gvfs/") || path.starts_with("/Volumes/")
 }
 
 /// Heal a damaged clip in place: keep only its longest good part (copied
