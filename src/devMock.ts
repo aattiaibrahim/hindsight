@@ -36,6 +36,7 @@ export function installDevMock() {
   // A clip from another PC on the NAS, and one from Medal's folder.
   clips.push(
     { path: "C:\\Users\\you\\nas\\VALORANT\\VALORANT 2026-11-02 - OTHER-PC.mkv", name: "VALORANT 2026-11-02 - OTHER-PC", folder: "VALORANT", size: 52 << 20, modified: now - 0.5 * day, external: false, location: "nas", onNas: false, source: "NAS" },
+    { path: "C:\\Users\\you\\Videos\\Hindsight\\OBS\\2026-11-03 21-14-09.mkv", name: "2026-11-03 21-14-09", folder: "OBS", size: 88 << 20, modified: now - 0.7 * day, external: false, location: "local", onNas: false, source: "Hindsight" },
     { path: "C:\\Users\\you\\Medal\\Clips\\Valorant\\Medal clip.mp4", name: "Medal clip", folder: "Valorant", size: 30 << 20, modified: now - 0.6 * day, external: true, location: "linked", onNas: false, source: "Medal" },
   );
   // Clips from this date one and two years back, for "On this day".
@@ -219,6 +220,7 @@ export function installDevMock() {
         return { path: c.path, name: c.name, folder: i === 4 ? "Desktop" : "OBS", game, confidence: choices[0][1], likeness: 0.94, sure, choices };
       }),
     apply_game_sort: (a) => ({ moved: (a.picks as unknown[]).length, failed: [] }),
+    move_to_folder: async (a) => (await new Promise((r) => setTimeout(r, 600)), { moved: (a.paths as unknown[]).length, failed: [] }),
     dismiss_game_suggestions: () => null,
     render_montage: async () => (await new Promise((r) => setTimeout(r, 1200)), "C:\\Users\\you\\Videos\\Hindsight\\Montages\\Montage 2026-11-06 12-00-00.mp4"),
     cancel_montage: () => null,

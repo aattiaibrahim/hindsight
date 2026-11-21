@@ -615,6 +615,8 @@ export const api = {
   detectInstall: () => invoke<void>("detect_install"),
   gameSuggestions: () => invoke<GameSuggestion[]>("game_suggestions"),
   applyGameSort: (picks: [string, string][]) => invoke<MoveOutcome>("apply_game_sort", { picks }),
+  /** Selected clips into one folder (new or existing), on this PC and the NAS together; undoable. */
+  moveToFolder: (paths: string[], folder: string) => invoke<MoveOutcome>("move_to_folder", { paths, folder }),
   dismissGameSuggestions: (paths: string[]) => invoke<void>("dismiss_game_suggestions", { paths }),
   /** Save a diagnostics report in Downloads (about one clip, if given); returns its path. */
   /** Remove this PC's copy of a clip that's identical on the NAS (the NAS copy stays). */

@@ -361,6 +361,37 @@ export default function App() {
     [settings, update, toast],
   );
 
+  // Library → select clips → Move to…: one folder, PC and NAS together, with Undo.
+  const moveClipsTo = useCallback(
+    async (paths: string[], folder: string) => {
+      try {
+        const out = await api.moveToFolder(paths, folder);
+        refresh();
+        const failed = out.failed.length;
+        toast(
+          out.moved ? `Moved ${out.moved} clip${out.moved === 1 ? "" : "s"} to ${folder}` : `Nothing moved: they're already in ${folder}`,
+          failed > 0,
+          failed ? `${failed} file${failed === 1 ? "" : "s"} couldn't be moved: ${out.failed[0][1]}` : undefined,
+          out.moved
+            ? {
+                label: "Undo",
+                run: () =>
+                  api
+                    .undoLastMove()
+                    .then(() => refresh())
+                    .catch((e) => toast(errText(e), true)),
+              }
+            : undefined,
+        );
+        return true;
+      } catch (e) {
+        toast(errText(e), true);
+        return false;
+      }
+    },
+    [refresh, toast],
+  );
+
   // With a NAS: the clips on this PC, and the ones on the NAS (synced from here, or from other PCs).
   const syncing = !!settings?.nasDir;
   const localClips = useMemo(() => (clips ? clips.filter((c) => c.location !== "nas") : null), [clips]);
@@ -513,6 +544,9 @@ export default function App() {
             onShare={requestShare}
             health={health}
             onKeepWhole={v === "totrim" ? keepClipsWhole : undefined}
+            onMoveTo={v === "damaged" ? undefined : moveClipsTo}
+            sortList={sortList}
+            onSortReview={() => setSortOpen(true)}
           />
         ))}
         {view === "cleanup" && settings && (

@@ -1593,6 +1593,23 @@ async fn game_suggestions(app: AppHandle) -> Result<Vec<game_detect::Suggestion>
 /// (logged, so Undo works like other moves).
 #[tauri::command]
 async fn apply_game_sort(app: AppHandle, picks: Vec<(String, String)>) -> Result<consolidate::Outcome, String> {
+    move_into_folders(app, picks, "Sorted by game").await
+}
+
+/// Selected clips → one folder (an existing one or a new one), on this PC and the
+/// NAS together, undoable like any other move.
+#[tauri::command]
+async fn move_to_folder(app: AppHandle, paths: Vec<String>, folder: String) -> Result<consolidate::Outcome, String> {
+    let name = consolidate::safe_name(&folder);
+    if name.trim().is_empty() {
+        return Err("Give the folder a name.".into());
+    }
+    let label = format!("Moved to {name}");
+    move_into_folders(app, paths.into_iter().map(|p| (p, name.clone())).collect(), &label).await
+}
+
+async fn move_into_folders(app: AppHandle, picks: Vec<(String, String)>, label: &str) -> Result<consolidate::Outcome, String> {
+    let label = label.to_string();
     let s = settings_of(&app);
     if move_running() {
         return Err("Another move is still running. Try again when it's done.".into());
@@ -1610,9 +1627,11 @@ async fn apply_game_sort(app: AppHandle, picks: Vec<(String, String)>) -> Result
     let a = app.clone();
     nas::hold(true);
     let out = blocking(move || {
-        let sorted = game_detect::plan(Path::new(&s.clips_dir), Path::new(&s.nas_dir), &picks);
+        let mut sorted = game_detect::plan(Path::new(&s.clips_dir), Path::new(&s.nas_dir), &picks);
+        sorted.plan.label = label.clone();
         let _ = std::fs::create_dir_all(&dir);
-        let log = dir.join(format!("{}-Sorted_by_game.jsonl", chrono::Local::now().format("%Y%m%d-%H%M%S")));
+        let file_label: String = label.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+        let log = dir.join(format!("{}-{file_label}.jsonl", chrono::Local::now().format("%Y%m%d-%H%M%S")));
         let mut out = consolidate::run(&sorted.plan, &log, |done, total| {
             let _ = a.emit("move-progress", (done, total));
         });
@@ -2391,6 +2410,7 @@ get_settings,
             detect_install,
             game_suggestions,
             apply_game_sort,
+            move_to_folder,
             dismiss_game_suggestions,
             run_diagnostics,
             free_local_copy,

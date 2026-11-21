@@ -1,8 +1,9 @@
 import { Select } from "./Select";
 import { open } from "@tauri-apps/plugin-dialog";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, ClipFile, codecLabel, errText, fmtDuration, fmtSize, Health, Probe, Upload, UploadProgress, NOT_NEEDED, VIDEO_EXTENSIONS, want } from "./api";
-import { RETRY_MS, useNearView, useOnScreen, useThumb, useThumbStatus } from "./hooks";
+import { api, ClipFile, codecLabel, errText, fmtDuration, fmtSize, GameSuggestion, Health, Probe, Upload, UploadProgress, NOT_NEEDED, VIDEO_EXTENSIONS, want } from "./api";
+import { RETRY_MS, useNearView, useOnScreen, useSettings, useThumb, useThumbStatus } from "./hooks";
+import { MoveToDialog } from "./MoveTo";
 import { liveLink, progressText, ShareRequest, timeLeft } from "./Share";
 import { Timeline } from "./Timeline";
 import { DamagedStatus, damagedText } from "./Health";
@@ -370,7 +371,15 @@ function LibraryView({
   mode = "clips",
   active = true,
   onKeepWhole,
+  onMoveTo,
+  sortList = [],
+  onSortReview,
 }: {
+  /** Move the selected clips into a folder; resolves true once moved. */
+  onMoveTo?: (paths: string[], folder: string) => Promise<boolean>;
+  /** The game finder's suggestions (for a folder's "N clips to sort") */
+  sortList?: GameSuggestion[];
+  onSortReview?: () => void;
   /** "damaged": the Damaged section (only the damaged clips); "local" / "synced": this PC's or the NAS's; "totrim": not trimmed yet. */
   mode?: "clips" | "damaged" | "local" | "synced" | "totrim";
   /** False while Studio covers it (it stays loaded, so coming back is instant) */
@@ -673,6 +682,13 @@ function LibraryView({
 
   const selecting = selected.size > 0;
   const [previewing, setPreviewing] = useState(false);
+  const [movingTo, setMovingTo] = useState<"ask" | "busy" | null>(null);
+  // Every folder in the library, one per spelling (for Move to…).
+  const allFolders = useMemo(() => {
+    const by = new Map<string, string>();
+    for (const c of clips ?? []) if (c.folder && !by.has(folderKey(c.folder))) by.set(folderKey(c.folder), c.folder);
+    return [...by.values()];
+  }, [clips]);
   const [healing, setHealing] = useState(false);
   // In the order they appear on the page.
   const selectedClips = useMemo(
@@ -892,7 +908,7 @@ clips === null ? null : clips.length === 0 && trimMode ? (
             {viewMode === "folders" && folder !== "All" ? folder : TITLES[mode] ?? "Clips"}
           </span>
           {folder !== "All" && <LogoButton game={folder} onToast={onToast} />}
-          {folder !== "All" && !UNSORTED_FOLDERS.has(folder.toLowerCase().replace(/[^a-z0-9]/g, "")) && <FindGameButton folder={folder} onToast={onToast} />}
+          {folder !== "All" && <FolderScan place="title" folder={folder} sortList={sortList} onSortReview={onSortReview} onToast={onToast} />}
         </h1>
         <label className="search">
           <span className="muted" style={{ fontSize: 12 }}>
@@ -927,8 +943,24 @@ clips === null ? null : clips.length === 0 && trimMode ? (
           </button>
         )}
       </div>
+      {folder !== "All" && <FolderScan place="bar" folder={folder} sortList={sortList} onSortReview={onSortReview} onToast={onToast} />}
       {damagedMode && !!clips?.length && <RepairAll clips={clips} onToast={onToast} />}
       {healing && clips && health && <HealReview clips={clips} health={health} onClose={() => setHealing(false)} onToast={onToast} />}
+      {movingTo && onMoveTo && selectedClips.length > 0 && (
+        <MoveToDialog
+          count={selectedClips.length}
+          folders={allFolders}
+          current={selectedClips.every((c) => folderKey(c.folder) === folderKey(selectedClips[0].folder)) ? selectedClips[0].folder : null}
+          busy={movingTo === "busy"}
+          onCancel={() => setMovingTo(null)}
+          onMove={async (to) => {
+            setMovingTo("busy");
+            const done = await onMoveTo(selectedClips.map((c) => c.path), to);
+            setMovingTo(null);
+            if (done) setSelected(new Set());
+          }}
+        />
+      )}
       {showFilters && (
         <div className="lib-filters">
           {mode === "clips" && (
@@ -1012,6 +1044,11 @@ clips === null ? null : clips.length === 0 && trimMode ? (
               title="They're fine as they are: take them off this list"
             >
               Keep whole
+            </button>
+          )}
+          {onMoveTo && (
+            <button className="btn small" onClick={() => setMovingTo("ask")} title="Move the selected clips into a folder, on this PC and the NAS">
+              Move to…
             </button>
           )}
           <button className="btn small" onClick={() => setPreviewing(true)} title="Look through the selected clips before deleting them">
@@ -1197,6 +1234,57 @@ function RepairAll({ clips, onToast }: { clips: ClipFile[]; onToast: (t: string,
 /** Pick a picture as this game's logo (for games with no logo, or the wrong one). */
 // Folders the game finder already looks through (game_detect::UNSORTED).
 const UNSORTED_FOLDERS = new Set(["desktop", "obs", "other", "imports", "imported", "recordings", "screenrecording", "captures", "xboxgamebar", "ascent", "clips", "videos", "temp", "untitled"]);
+
+/** Your own work ("Edits", "funnysiegevideo"): the game finder looks through these too (game_detect::is_workshop). */
+const WORKSHOP = /(^|[^a-z0-9])(edit|render|export|youtube|montage|funny|meme|highlight)/i;
+const folderKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/** A folder's header: in a folder the game finder already looks through on its own
+ *  (OBS, Recordings, your edit folders, ones you marked as not a game), say so, with
+ *  how many of its clips are waiting to be sorted and Review. Otherwise offer to look. */
+function FolderScan({
+  place,
+  folder,
+  sortList,
+  onSortReview,
+  onToast,
+}: {
+  /** "title": the Find the game button, if needed; "bar": the line under the header */
+  place: "title" | "bar";
+  folder: string;
+  sortList: GameSuggestion[];
+  onSortReview?: () => void;
+  onToast: (t: string, err?: boolean) => void;
+}) {
+  const [settings] = useSettings();
+  const k = folderKey(folder);
+  const auto =
+    UNSORTED_FOLDERS.has(k) ||
+    WORKSHOP.test(folder) ||
+    (settings?.notGameFolders ?? []).some((f) => folderKey(f) === k) ||
+    (settings?.detectFolders ?? []).some((f) => folderKey(f) === k);
+  if (!settings) return null;
+  if (!settings.gameDetect || !auto) return place === "title" && !UNSORTED_FOLDERS.has(k) ? <FindGameButton folder={folder} onToast={onToast} /> : null;
+  if (place !== "bar") return null;
+  const waiting = sortList.filter((s) => folderKey(s.folder) === k).length;
+  return (
+    <div
+      className="scan-bar"
+      title={`Hindsight looks through “${folder}” for the game on its own, a few frames per clip, while you're not gaming. Suggestions show up in Cleanup, and nothing moves until you check them.`}
+    >
+      <Icon name="game" size={16} />
+      <span className="scan-text">
+        Hindsight finds the game for clips in this folder on its own.
+        <span className="muted"> {waiting ? `${waiting} clip${waiting === 1 ? " is" : "s are"} ready to sort into ${waiting === 1 ? "its game's folder" : "their games' folders"}.` : "Nothing to sort right now."}</span>
+      </span>
+      {waiting > 0 && onSortReview && (
+        <button className="btn small primary" onClick={onSortReview}>
+          Review
+        </button>
+      )}
+    </div>
+  );
+}
 
 /** One of your own folders (not a game's): let the game finder look through it, and
  *  suggest a game for each clip in Cleanup. */
