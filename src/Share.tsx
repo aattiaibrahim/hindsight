@@ -68,18 +68,16 @@ export function liveLink(links: Upload[] | undefined): Upload | null {
 
 export type ShareRequest = { path: string; host?: UploadHost; size?: number };
 
-/** Asks before uploading (unless turned off), then uploads. Lives once in App. */
+/** Asks before uploading (always: nothing uploads from one click), then uploads. Lives once in App. */
 export function ShareConfirm({
   req,
   settings,
-  update,
   onClose,
   onOpenSettings,
   onError,
 }: {
   req: ShareRequest;
   settings: Settings;
-  update: (p: Partial<Settings>) => Promise<void>;
   onClose: () => void;
   onOpenSettings: () => void;
   onError: (m: string) => void;
@@ -90,7 +88,6 @@ export function ShareConfirm({
     return hostRefuses(h, req.size) ? "litterbox" : h;
   });
   const refused = hostRefuses(host, req.size);
-  const [dontAsk, setDontAsk] = useState(false);
   const [have, setHave] = useState<{ discordWebhook: boolean; streamablePassword: boolean } | null>(null);
   const [reach, setReach] = useState<[UploadHost, Reach[]][] | null>(null);
   useEffect(() => {
@@ -107,7 +104,6 @@ export function ShareConfirm({
       return;
     }
     if (refused) return;
-    if (dontAsk) await update({ confirmUploads: false }).catch(() => {});
     onClose();
     api.uploadClip(req.path, host).catch((e) => onError(errText(e)));
   };
@@ -149,10 +145,6 @@ export function ShareConfirm({
           </li>
         ))}
       </ul>
-      <label className="row" style={{ gap: 8, fontSize: 12 }}>
-        <input type="checkbox" checked={dontAsk} onChange={(e) => setDontAsk(e.target.checked)} />
-        Don't ask again (turn it back on in Settings → Sharing)
-      </label>
     </ConfirmDialog>
   );
 }
@@ -188,7 +180,8 @@ export function SharePanel({
   const pct = progress?.stage === "uploading" && progress.total ? (progress.sent / progress.total) * 100 : progress?.stage === "preparing" ? 4 : 0;
   return (
     <div className="share-box">
-      <div className="row" style={{ gap: 8, flexWrap: "nowrap" }}>
+      {/* Wraps: when the panel is narrow the button gets its own line, at full width, instead of being cut short. */}
+      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
         <Select className="select" value={host} onChange={(e) => setHost(e.target.value as UploadHost)} aria-label="Upload to" disabled={!!busy}>
           {UPLOAD_HOSTS.map((h) => (
             <option key={h.id} value={h.id}>
@@ -196,7 +189,7 @@ export function SharePanel({
             </option>
           ))}
         </Select>
-        <button className="btn primary" style={{ flex: 1, minWidth: 0 }} disabled={!!busy || !!refused} onClick={() => onShare({ path, host, size })}>
+        <button className="btn primary" style={{ flex: "1 1 190px" }} disabled={!!busy || !!refused} onClick={() => onShare({ path, host, size })}>
           {busy ? progressText(progress!) : "Upload & copy link"}
         </button>
       </div>
@@ -317,13 +310,6 @@ export function SharingSettings({
           </Select>
         </label>
       )}
-      <label className="setting">
-        <span>
-          Ask before uploading
-          <small>Shows what's about to be shared first. Links are public to anyone who has them.</small>
-        </span>
-        <Toggle label="Ask before uploading" checked={s.confirmUploads} onChange={(v) => set({ confirmUploads: v })} />
-      </label>
       <label className="setting">
         <span>
           Upload every new clip automatically

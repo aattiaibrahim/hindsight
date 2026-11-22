@@ -1601,6 +1601,8 @@ body { overflow-wrap: break-word; }
 .seg { max-width: 100%; min-width: 0; }
 .btn > span:not([class]), .chip > span:not([class]), .chip > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row > *, .setting > span, .modal > *, .sort-main, .sort-game, .card-meta, .card-meta > * { min-width: 0; }
+/* …but a button keeps its whole label: the text beside it gives way (or the row wraps) first. */
+.row > .btn, .row > button.btn, .row > .select { min-width: auto; flex-shrink: 0; }
 small, .muted, .err-text, .note, p { overflow-wrap: anywhere; }
 .dd-menu { max-width: min(440px, calc(100vw - 16px)); }
 .dd-item { overflow: hidden; text-overflow: ellipsis; }

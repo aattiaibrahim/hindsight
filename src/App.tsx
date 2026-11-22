@@ -6,7 +6,7 @@ import { useHealth } from "./Health";
 import type { UploadProgress } from "./api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
-import { api, ClipFile, errText, GameSuggestion, hostRefuses } from "./api";
+import { api, ClipFile, errText, GameSuggestion } from "./api";
 import { StatusBar } from "./StatusBar";
 import { Icon, IconName } from "./icons";
 import { Cleanup } from "./Cleanup";
@@ -97,15 +97,8 @@ export default function App() {
     [toast],
   );
   // Share: ask first (unless turned off in Settings → Sharing), then upload.
-  const requestShare = useCallback(
-    (r: ShareRequest) => {
-      const no = hostRefuses(r.host ?? settings?.uploadHost ?? "catbox", r.size);
-      if (settings && !settings.confirmUploads && no) toast(no, true);
-      else if (settings && !settings.confirmUploads) api.uploadClip(r.path, r.host).catch((e) => toast(errText(e), true));
-      else setShareReq(r);
-    },
-    [settings, toast],
-  );
+  // Share always asks first: nothing uploads until Upload is pressed in the dialog.
+  const requestShare = useCallback((r: ShareRequest) => setShareReq(r), []);
 
   const showBanner =
     upd && (upd.stage === "ready" || upd.stage === "available") && upd.version;
@@ -616,7 +609,6 @@ export default function App() {
         <ShareConfirm
           req={shareReq}
           settings={settings}
-          update={update}
           onClose={() => setShareReq(null)}
           onOpenSettings={() => {
             try {
