@@ -178,14 +178,15 @@ h1 { margin: 0; font-family: var(--display); font-size: 28px; font-weight: 600; 
 .badge.tl { left: 8px; top: 8px; }
 .badge.br { right: 8px; bottom: 8px; color: #e8ebf0; font-size: 11px; }
 .card-actions {
-  position: absolute; right: 8px; top: 8px; display: flex; gap: 6px;
+  /* Right of the select box (8 + 24 + 10 px), never over it: on a narrow card they wrap to a second row. */
+  position: absolute; right: 8px; top: 8px; left: 42px; display: flex; flex-wrap: wrap; justify-content: flex-end; align-content: flex-start; gap: 6px;
   opacity: 0; transform: translateY(-3px); pointer-events: none;
   transition: opacity var(--fast) var(--ease), transform var(--med) var(--ease);
 }
 .card:hover .card-actions, .card:focus-within .card-actions { opacity: 1; transform: none; pointer-events: auto; }
 .card-actions span {
   font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 6px; background: rgba(14, 16, 20, 0.92);
-  color: #e8ebf0; border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #e8ebf0; border: 1px solid rgba(255, 255, 255, 0.14); white-space: nowrap;
 }
 .card-actions span:hover { border-color: var(--accent); }
 .card-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
