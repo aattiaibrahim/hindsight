@@ -67,6 +67,10 @@ export type Settings = {
   launchOnStartup: boolean;
   autoUpdate: boolean;
   saveSound: boolean;
+  /** New clips' file names: "{game} {date} {time}" by default (see naming.rs for the tokens) */
+  fileNameTemplate: string;
+  /** Add this PC's name to new clips' names */
+  fileNamePc: boolean;
   nasDir: string;
   /** Id in the confirmed NAS folder's marker file. */
   nasLibraryId: string;
@@ -620,6 +624,10 @@ export const api = {
   applyGameSort: (picks: [string, string][]) => invoke<MoveOutcome>("apply_game_sort", { picks }),
   /** Selected clips into one folder (new or existing), on this PC and the NAS together; undoable. */
   moveToFolder: (paths: string[], folder: string) => invoke<MoveOutcome>("move_to_folder", { paths, folder }),
+  /** Rename a clip (and its NAS copy); `name` without the extension. Returns its new path. */
+  renameClip: (path: string, name: string) => invoke<string>("rename_clip", { path, name }),
+  /** What a clip saved now would be called with this template. */
+  previewFileName: (template: string, pc: boolean) => invoke<string>("preview_file_name", { template, pc }),
   dismissGameSuggestions: (paths: string[]) => invoke<void>("dismiss_game_suggestions", { paths }),
   /** Save a diagnostics report in Downloads (about one clip, if given); returns its path. */
   /** Remove this PC's copy of a clip that's identical on the NAS (the NAS copy stays). */

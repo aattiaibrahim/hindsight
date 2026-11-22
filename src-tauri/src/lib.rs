@@ -64,6 +64,7 @@ mod secrets;
 #[cfg(not(windows))]
 #[path = "portable/secrets.rs"]
 mod secrets;
+mod naming;
 mod settings;
 mod startup;
 #[cfg(windows)]
@@ -99,29 +100,43 @@ fn settings_of(app: &AppHandle) -> Settings {
     app.state::<AppState>().settings.lock().unwrap().clone()
 }
 
-/// Clips folder/<Game or Desktop>/<Game or Desktop> <label><timestamp>.mkv
-/// With a shared NAS, the PC's name is added (" - GAMING-PC") so clips from
-/// several PCs in the same game folder never clash.
-fn output_path(s: &Settings, label: &str) -> PathBuf {
+/// Clips folder/<Game or Desktop>/<name from the template in Settings>.mkv
+/// ("Valorant 2026-11-22 14-05-33" by default). This PC's name is added only if
+/// that's ticked; a name that's taken (here or on the NAS) gets " (2)".
+fn output_path(s: &Settings, recording: bool) -> PathBuf {
     let folder = games::clip_folder();
     // A spelling picked when merging this game's folders wins, so they don't split again.
     let folder = s.folder_names.get(&consolidate::game_key(&folder)).cloned().unwrap_or(folder);
-    let ts = chrono::Local::now().format("%Y-%m-%d %H-%M-%S");
-    let pc = if s.nas_dir.is_empty() { String::new() } else { nas::pc_suffix() };
+    let pc_name = nas::pc_suffix().trim_start_matches(" - ").to_string();
+    let mut stem = naming::file_stem(&s.file_name_template, &folder, recording, chrono::Local::now(), &pc_name);
+    if s.file_name_pc && !s.file_name_template.contains("{pc}") {
+        stem.push_str(&nas::pc_suffix());
+    }
     let dir = PathBuf::from(&s.clips_dir).join(&folder);
     let taken = |p: &PathBuf| p.exists() || nas::exists_on_nas(s, p);
-    let mut p = dir.join(format!("{folder} {label}{ts}{pc}.mkv"));
+    let mut p = dir.join(format!("{stem}.mkv"));
     let mut n = 2;
     while taken(&p) {
-        p = dir.join(format!("{folder} {label}{ts}{pc} ({n}).mkv"));
+        p = dir.join(format!("{stem} ({n}).mkv"));
         n += 1;
     }
     p
 }
 
+/// What a clip saved now would be called, for the example in Settings.
+#[tauri::command]
+fn preview_file_name(template: String, pc: bool) -> String {
+    let pc_name = nas::pc_suffix().trim_start_matches(" - ").to_string();
+    let mut stem = naming::file_stem(&template, "Valorant", false, chrono::Local::now(), &pc_name);
+    if pc && !template.contains("{pc}") {
+        stem.push_str(&nas::pc_suffix());
+    }
+    format!("{stem}.mkv")
+}
+
 fn save_now(app: &AppHandle, seconds: Option<u32>) -> Result<String, String> {
     let s = settings_of(app);
-    let out = output_path(&s, "");
+    let out = output_path(&s, false);
     let saved = app.state::<AppState>().engine.save_clip(seconds.unwrap_or(s.buffer_seconds), &out);
     if s.save_sound {
         if saved.is_ok() { sound::saved() } else { sound::failed() }
@@ -158,7 +173,7 @@ fn toggle_record_now(app: &AppHandle) -> Result<Option<String>, String> {
         let _ = app.emit("recording-changed", false);
         Ok(files.into_iter().next())
     } else {
-        let out = output_path(&settings_of(app), "Recording ");
+        let out = output_path(&settings_of(app), true);
         st.engine.start_recording(&out)?;
         let _ = app.emit("recording-changed", true);
         Ok(None)
@@ -1713,6 +1728,78 @@ async fn move_to_folder(app: AppHandle, paths: Vec<String>, folder: String) -> R
 
 async fn move_into_folders(app: AppHandle, picks: Vec<(String, String)>, label: &str) -> Result<consolidate::Outcome, String> {
     let label = label.to_string();
+    run_sort_plan(app, label.clone(), move |s| {
+        let mut sorted = game_detect::plan(Path::new(&s.clips_dir), Path::new(&s.nas_dir), &picks);
+        sorted.plan.label = label;
+        Ok(sorted)
+    })
+    .await
+}
+
+/// Rename a clip (on this PC and its NAS copy together), from the title in Studio.
+/// `name` is the new name without the extension. Returns the clip's new path; Undo
+/// in Settings → Library puts the old name back like any other move.
+#[tauri::command]
+async fn rename_clip(app: AppHandle, path: String, name: String) -> Result<String, String> {
+    let stem = name.trim().to_string();
+    if stem.is_empty() {
+        return Err("Type a name.".into());
+    }
+    let (p, st) = (path.clone(), stem.clone());
+    let new_paths = std::sync::Arc::new(Mutex::new(Vec::<(String, String)>::new()));
+    let seen = new_paths.clone();
+    let out = run_sort_plan(app.clone(), "Renamed".into(), move |s| {
+        let plan = game_detect::rename_plan(Path::new(&s.clips_dir), Path::new(&s.nas_dir), &p, &st)?;
+        *seen.lock().unwrap() = plan.plan.moves.iter().map(|m| (m.from.to_string_lossy().into_owned(), m.to.to_string_lossy().into_owned())).collect();
+        Ok(plan)
+    })
+    .await?;
+    if let Some((_, why)) = out.failed.first() {
+        return Err(format!("Couldn't rename it: {why}"));
+    }
+    let renamed = new_paths.lock().unwrap().clone();
+    // Lists that remember clips by path follow the new name.
+    let mut s = settings_of(&app);
+    let mut changed = false;
+    for (from, to) in &renamed {
+        for list in [&mut s.external_files, &mut s.keep_whole, &mut s.detect_dismissed] {
+            for p in list.iter_mut().filter(|p| p.eq_ignore_ascii_case(from)) {
+                *p = to.clone();
+                changed = true;
+            }
+        }
+        if let Some(size) = s.cleanup_kept.remove(from) {
+            s.cleanup_kept.insert(to.clone(), size);
+            changed = true;
+        }
+    }
+    if changed {
+        let _ = set_settings(app.clone(), s);
+    }
+    // Its share links and "edited" mark follow it too.
+    for (from, to) in &renamed {
+        if let Ok(f) = data_file(&app, "uploads.json") {
+            upload::renamed(&f, from, to);
+        }
+        if let Ok(f) = data_file(&app, "edited.json") {
+            let mut list: Vec<String> = std::fs::read_to_string(&f).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+            if let Some(p) = list.iter_mut().find(|p| p.eq_ignore_ascii_case(from)) {
+                *p = to.clone();
+                let _ = std::fs::write(&f, serde_json::to_string(&list).unwrap_or_default());
+            }
+        }
+    }
+    let _ = app.emit("uploads-changed", ());
+    renamed.iter().find(|(from, _)| from.eq_ignore_ascii_case(&path)).map(|(_, to)| to.clone()).ok_or_else(|| "Couldn't rename it.".into())
+}
+
+/// Run a move plan (sorting into game folders, Move to…, a rename): never while
+/// another move or a NAS copy is running, both copies together, logged for Undo.
+async fn run_sort_plan(
+    app: AppHandle,
+    label: String,
+    make: impl FnOnce(&Settings) -> Result<game_detect::SortPlan, String> + Send + 'static,
+) -> Result<consolidate::Outcome, String> {
     let s = settings_of(&app);
     if move_running() {
         return Err("Another move is still running. Try again when it's done.".into());
@@ -1730,8 +1817,7 @@ async fn move_into_folders(app: AppHandle, picks: Vec<(String, String)>, label: 
     let a = app.clone();
     nas::hold(true);
     let out = blocking(move || {
-        let mut sorted = game_detect::plan(Path::new(&s.clips_dir), Path::new(&s.nas_dir), &picks);
-        sorted.plan.label = label.clone();
+        let sorted = make(&s)?;
         let _ = std::fs::create_dir_all(&dir);
         let file_label: String = label.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
         let log = dir.join(format!("{}-{file_label}.jsonl", chrono::Local::now().format("%Y%m%d-%H%M%S")));
@@ -2545,6 +2631,8 @@ get_settings,
             scan_game_folder,
             cancel_folder_scan,
             move_to_folder,
+            rename_clip,
+            preview_file_name,
             dismiss_game_suggestions,
             run_diagnostics,
             free_local_copy,

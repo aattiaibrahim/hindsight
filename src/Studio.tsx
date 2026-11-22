@@ -25,6 +25,7 @@ import { AudioLanes, hasAudioEdits, isMutedAt } from "./AudioLanes";
 import { useThumb } from "./hooks";
 import { SharePanel, ShareRequest } from "./Share";
 import { DiagnosticsButton } from "./About";
+import { ClipTitle } from "./ClipTitle";
 import { HealReview } from "./HealReview";
 import { HealthNotice } from "./Health";
 import { StudioNas } from "./NasProgress";
@@ -723,7 +724,6 @@ export function Studio({
 
   const [a, b] = range;
   const pct = (t: number) => (duration ? `${Math.min(100, Math.max(0, (t / duration) * 100))}%` : "0%");
-  const name = path.split("\\").pop() ?? path;
   const busy = !!job;
   const wholeFile = a <= 0.01 && duration - b <= 0.05;
   const cropped = !isWhole(crop);
@@ -749,8 +749,8 @@ export function Studio({
           <ChevronLeft size={16} strokeWidth={2} aria-hidden="true" />
           Clips
         </button>
-        <div className="studio-title" style={{ flex: 1 }} title={path}>
-          {name}
+        <div className="studio-title" style={{ flex: 1 }}>
+          <ClipTitle path={path} disabled={busy} onRenamed={(to) => onOpen(to)} onError={(m) => setResult({ text: m, err: true })} />
         </div>
         {smooth?.for === path && (smooth.pct != null || smooth.copy || smooth.err) && (
           <span

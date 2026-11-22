@@ -78,7 +78,7 @@ export function installDevMock() {
     recordHotkey: "Alt+F9", bufferEnabled: true, launchOnStartup: false, autoUpdate: true, startMinimized: true,
     keepOriginalAfterRemux: true, replaceOriginalOnEdit: true, detailedLog: true, externalFiles: [], desktopAudio: true, discordTrack: true,
     micEnabled: true, micMono: true, micDevice: "", micGainDb: 0, theme: "tinted", accent: "winblue", keepWhole: [], reduceMotion: false,
-    saveSound: true, nasDir: "\\\\nas\\clips", nasLibraryId: "mock", nasServer: "", nasRemoveLocal: false, nasSyncWhileGaming: false, linkedFolders: [] as string[], benchmarkMode: false, uploadHost: "catbox", litterboxTime: "72h", autoUpload: false, postLinkToDiscord: false, streamableEmail: "", discordWebhookName: "", confirmUploads: true, healthCheck: true, prepareThumbnails: true, gameDetect: true, detectDismissed: [] as string[], notGameFolders: [] as string[],
+    saveSound: true, fileNameTemplate: "{game} {date} {time}", fileNamePc: false, nasDir: "\\\\nas\\clips", nasLibraryId: "mock", nasServer: "", nasRemoveLocal: false, nasSyncWhileGaming: false, linkedFolders: [] as string[], benchmarkMode: false, uploadHost: "catbox", litterboxTime: "72h", autoUpload: false, postLinkToDiscord: false, streamableEmail: "", discordWebhookName: "", confirmUploads: true, healthCheck: true, prepareThumbnails: true, gameDetect: true, detectDismissed: [] as string[], notGameFolders: [] as string[],
     folderNames: {} as Record<string, string>, similarDismissed: [] as string[], cleanupKept: {} as Record<string, number>,
   };
   // Same game under two folder names (preview of the merge prompt).
@@ -220,6 +220,28 @@ export function installDevMock() {
         return { path: c.path, name: c.name, folder: i === 4 ? "Desktop" : "OBS", game, confidence: choices[0][1], likeness: 0.94, sure, choices };
       }),
     apply_game_sort: (a) => ({ moved: (a.picks as unknown[]).length, failed: [] }),
+    rename_clip: async (a) => {
+      const c = clips.find((x) => x.path === a.path);
+      if (!c) throw "That clip isn't there anymore.";
+      const ext = c.path.split(".").pop();
+      const to = c.path.replace(/[^\\]+$/, `${a.name}.${ext}`);
+      Object.assign(c, { path: to, name: a.name });
+      await new Promise((r) => setTimeout(r, 300));
+      return to;
+    },
+    preview_file_name: (a) => {
+      const now = new Date();
+      const p = (n: number) => String(n).padStart(2, "0");
+      const h12 = now.getHours() % 12 || 12;
+      const map: Record<string, string> = {
+        "{game}": "Valorant", "{date}": `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`, "{time}": `${p(now.getHours())}-${p(now.getMinutes())}-${p(now.getSeconds())}`,
+        "{date-us}": `${p(now.getMonth() + 1)}-${p(now.getDate())}-${now.getFullYear()}`, "{date-eu}": `${p(now.getDate())}-${p(now.getMonth() + 1)}-${now.getFullYear()}`,
+        "{time12}": `${h12}-${p(now.getMinutes())}-${p(now.getSeconds())} ${now.getHours() < 12 ? "AM" : "PM"}`, "{month}": p(now.getMonth() + 1), "{day}": p(now.getDate()), "{pc}": "GAMING-PC",
+      };
+      let s = String(a.template || "{game} {date} {time}");
+      for (const [k, v] of Object.entries(map)) s = s.split(k).join(v);
+      return `${s}${a.pc ? " - GAMING-PC" : ""}.mkv`;
+    },
     move_to_folder: async (a) => (await new Promise((r) => setTimeout(r, 600)), { moved: (a.paths as unknown[]).length, failed: [] }),
     dismiss_game_suggestions: () => null,
     // A game folder check: two of its clips look like Tarkov; a full scan finds a third.

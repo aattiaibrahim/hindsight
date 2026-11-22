@@ -411,6 +411,21 @@ pub fn history(file: &Path) -> std::collections::BTreeMap<String, Vec<Upload>> {
     fs::read_to_string(file).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
 
+/// A clip was renamed: its links stay with it.
+pub fn renamed(file: &Path, from: &str, to: &str) {
+    let mut all = history(file);
+    let Some(key) = all.keys().find(|k| k.eq_ignore_ascii_case(from)).cloned() else { return };
+    if let Some(list) = all.remove(&key) {
+        all.insert(to.to_string(), list);
+    }
+    let tmp = file.with_extension("json.tmp");
+    if let Ok(t) = serde_json::to_string_pretty(&all)
+        && fs::write(&tmp, t).is_ok()
+    {
+        let _ = fs::rename(&tmp, file);
+    }
+}
+
 pub fn remember(file: &Path, clip: &str, u: Upload) {
     let mut all = history(file);
     let list = all.entry(clip.to_string()).or_default();

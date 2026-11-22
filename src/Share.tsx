@@ -27,10 +27,13 @@ export function useUploads() {
       });
       if (p.stage === "done") refresh();
     });
+    // A clip was renamed: its links moved with it.
+    const un2 = listen("uploads-changed", () => refresh());
     // Links run out over time: re-render once a minute so "time left" stays right.
     const tick = setInterval(() => setHistory((h) => ({ ...h })), 60_000);
     return () => {
       un.then((f) => f());
+      un2.then((f) => f());
       clearInterval(tick);
     };
   }, [refresh]);

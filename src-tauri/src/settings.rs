@@ -58,6 +58,11 @@ pub struct Settings {
     pub reduce_motion: bool,
     /// Play a short chime when a clip or recording is saved (and a low one if it fails)
     pub save_sound: bool,
+    /// New clips' file names (see naming.rs): "{game} {date} {time}" by default
+    pub file_name_template: String,
+    /// Add this PC's name (" - GAMING-PC") to new clips' names. Off by default: a name
+    /// that's taken (another PC on the same NAS) gets " (2)" anyway.
+    pub file_name_pc: bool,
     /// Network folder (e.g. \\nas\clips) that saved clips are copied to in the background; "" = off
     pub nas_dir: String,
     /// The id in the NAS folder's `.hindsight-library` marker, set when the folder
@@ -183,6 +188,8 @@ impl Default for Settings {
             accent: "winblue".into(),
             reduce_motion: false,
             save_sound: true,
+            file_name_template: crate::naming::DEFAULT_TEMPLATE.into(),
+            file_name_pc: false,
             nas_dir: String::new(),
             nas_library_id: String::new(),
             nas_server: String::new(),
@@ -234,6 +241,9 @@ impl Settings {
             self.output_height = 0;
         }
         self.capture_area = self.capture_area.and_then(Area::cleaned);
+        if self.file_name_template.trim().is_empty() || self.file_name_template.chars().count() > 120 {
+            self.file_name_template = d.file_name_template.clone();
+        }
         if self.hotkey.trim().is_empty() {
             self.hotkey = d.hotkey;
         }

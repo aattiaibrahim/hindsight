@@ -11,6 +11,7 @@ import { Slider } from "./Slider";
 import { useUpdate } from "./hooks";
 import { SlidingPill } from "./SlidingPill";
 import { About } from "./About";
+import { FileNameSetting } from "./FileNameSetting";
 
 function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
   return (
@@ -328,6 +329,7 @@ export function SettingsView({
             </span>
             <Toggle label="Save sound" checked={s.saveSound} onChange={(v) => set({ saveSound: v })} />
           </label>
+          <FileNameSetting s={s} set={set} />
           <HotkeyInput label="Save clip hotkey" value={s.hotkey} onPick={(hk) => set({ hotkey: hk })} />
           <HotkeyInput label="Start / stop recording hotkey" value={s.recordHotkey} onPick={(hk) => set({ recordHotkey: hk })} />
         </section>

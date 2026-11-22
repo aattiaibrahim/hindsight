@@ -649,6 +649,54 @@ pub struct SortPlan {
     pub clips: Vec<SortedClip>,
 }
 
+/// Rename one clip to `stem` (its extension stays), on this PC and its NAS copy alike,
+/// in the folder it's in. Never overwrites: a name that's taken is refused.
+pub fn rename_plan(clips_dir: &Path, nas_dir: &Path, path: &str, stem: &str) -> Result<SortPlan, String> {
+    use crate::library::same_path;
+    let from = PathBuf::from(path);
+    let size = std::fs::metadata(&from).map_err(|_| "That clip isn't there anymore.".to_string())?.len();
+    let ext = from.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+    let stem = crate::consolidate::safe_name(stem);
+    let name = if ext.is_empty() { stem.clone() } else { format!("{stem}.{ext}") };
+    if from.file_name().is_some_and(|n| n.to_string_lossy() == name) {
+        return Err("That's already its name.".into());
+    }
+    let mut roots = vec![clips_dir];
+    if !nas_dir.as_os_str().is_empty() {
+        roots.push(nas_dir);
+    }
+    let old_rel = roots.iter().find_map(|r| crate::nas::rel_on_nas(&r.to_string_lossy(), path));
+    // The same clip in the other place (this PC / the NAS), if it's there: renamed too.
+    let mut files: Vec<PathBuf> = vec![from.clone()];
+    if let Some(rel) = &old_rel {
+        for root in &roots {
+            let p = root.join(rel.replace('/', "\\"));
+            if !same_path(&p, &from) && std::fs::metadata(&p).is_ok_and(|m| m.is_file() && m.len() == size) {
+                files.push(p);
+            }
+        }
+    }
+    let mut plan = crate::consolidate::Plan { label: "Renamed".into(), ..Default::default() };
+    for p in &files {
+        let to = p.with_file_name(&name);
+        // A different file with that name (changing only capitals is the same file).
+        if to.exists() && !same_path(&to, p) {
+            return Err(format!("There's already a clip called “{name}” in that folder."));
+        }
+        plan.count += 1;
+        plan.bytes += size;
+        plan.moves.push(crate::consolidate::Move { from: p.clone(), to, size, copied: false });
+    }
+    let new_rel = match &old_rel {
+        Some(rel) => match rel.rsplit_once('/') {
+            Some((dir, _)) => format!("{dir}/{name}"),
+            None => name.clone(),
+        },
+        None => name.clone(),
+    };
+    Ok(SortPlan { plan, clips: vec![SortedClip { from: files, old_rel, new_rel }] })
+}
+
 /// The moves that put each chosen clip in its game's folder, never overwriting. A clip
 /// on this PC and the NAS moves on both, under one new name, so sync still sees one
 /// clip. A clip only on the NAS is renamed there, not copied back to this PC. A file
@@ -856,6 +904,26 @@ mod tests {
         assert_eq!(to, vec![pc.join(r"Apex\a (2).mkv"), nas.join(r"Apex\a (2).mkv")]);
         assert_eq!(p.clips[0].old_rel.as_deref(), Some("OBS/a.mkv"));
         assert_eq!(p.clips[0].new_rel, "Apex/a (2).mkv");
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    // Windows paths (drive letters, backslashes); Linux and macOS: phase 2 of docs/platforms-plan.md.
+    #[cfg(windows)]
+    #[test]
+    fn renaming_renames_both_copies_and_never_overwrites() {
+        let d = temp("rename");
+        let (pc, nas) = (d.join("pc"), d.join("nas"));
+        put(&pc.join(r"Apex\a.mkv"), "same");
+        put(&nas.join(r"Apex\a.mkv"), "same");
+        put(&pc.join(r"Apex\taken.mkv"), "another clip");
+        let from = pc.join(r"Apex\a.mkv").to_string_lossy().into_owned();
+        let p = rename_plan(&pc, &nas, &from, "  my: best clip ").unwrap();
+        let to: Vec<_> = p.plan.moves.iter().map(|m| m.to.clone()).collect();
+        assert_eq!(to, vec![pc.join(r"Apex\my best clip.mkv"), nas.join(r"Apex\my best clip.mkv")]);
+        assert_eq!((p.clips[0].old_rel.as_deref(), p.clips[0].new_rel.as_str()), (Some("Apex/a.mkv"), "Apex/my best clip.mkv"));
+        assert!(rename_plan(&pc, &nas, &from, "taken").err().is_some_and(|e| e.contains("already a clip called")));
+        assert!(rename_plan(&pc, &nas, &from, "a").is_err(), "same name");
+        assert!(rename_plan(&pc, &nas, &from, "A").is_ok(), "only capitals changed");
         let _ = std::fs::remove_dir_all(d);
     }
 
