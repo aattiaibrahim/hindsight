@@ -271,6 +271,13 @@ pub fn game_running() -> bool {
     last.as_ref().is_some_and(|s| still_running(s.pid))
 }
 
+/// A game is in front right now (you're playing this moment). Unlike `game_running`, a
+/// game left open behind Hindsight doesn't count: for small things done while you look
+/// at the app, like fetching a game's logo.
+pub fn playing_now() -> bool {
+    foreground_game().is_some()
+}
+
 /// Clip folder for right now: the game's name, or "Desktop".
 pub fn clip_folder() -> String {
     current_game().map(|g| folder_name(&g)).unwrap_or_else(|| DESKTOP_FOLDER.into())

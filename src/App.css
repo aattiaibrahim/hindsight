@@ -1686,14 +1686,14 @@ small, .muted, .err-text, .note, p { overflow-wrap: anywhere; }
 
 /* Studio: the clip's name, click to rename */
 .studio-title { min-width: 0; display: flex; }
-.clip-title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; padding: 4px 8px; margin-left: -8px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: text; text-align: left; }
+.clip-title { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; padding: 4px 8px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: text; text-align: left; }
 .clip-title:hover:not(:disabled) { background: var(--raised); border-color: var(--line-2); }
 .clip-title:disabled { cursor: default; }
 .clip-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .clip-title-pen { flex: none; opacity: 0; color: var(--text-2); transition: opacity var(--fast) var(--ease); }
 .clip-title:hover:not(:disabled) .clip-title-pen, .clip-title:focus-visible .clip-title-pen { opacity: 1; }
 .clip-title.editing { display: inline-flex; align-items: center; gap: 6px; min-width: 0; width: 100%; }
-.clip-title-input { flex: 1; min-width: 120px; font: inherit; color: var(--text); background: var(--raised); border: 1px solid var(--accent); border-radius: 8px; padding: 3px 8px; margin-left: -9px; outline: none; }
+.clip-title-input { flex: 1; min-width: 120px; font: inherit; color: var(--text); background: var(--raised); border: 1px solid var(--accent); border-radius: 8px; padding: 3px 8px; outline: none; }
 .clip-title-ext { flex: none; color: var(--muted); font-size: 0.8em; }
 .file-example { color: var(--text-2) !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-example b { font-weight: 600; color: var(--text); }

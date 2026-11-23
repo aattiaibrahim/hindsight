@@ -786,7 +786,7 @@ pub fn icon(game: &str, online: bool) -> Option<PathBuf> {
             return Some(fixed);
         }
         let miss = dir.join(format!("{key}.fixed-none"));
-        if !crate::games::game_running() && !tried_recently(&miss, 86_400) {
+        if !crate::games::playing_now() && !tried_recently(&miss, 86_400) {
             match download_jpeg(url, &fixed) {
                 Ok(()) => return Some(fixed),
                 Err(e) => {
@@ -803,10 +803,11 @@ pub fn icon(game: &str, online: bool) -> Option<PathBuf> {
         if steam.exists() {
             return Some(steam);
         }
-        // Never while a game is running; a miss is asked again after a week.
+        // Never while a game is in front (a game open in the background doesn't stop it:
+        // you're looking at Hindsight); a miss is asked again after a week.
         // "steam5": asked again after "Sea of Thieves: 2026 Edition" and "… Multiplayer" started to match.
         let miss = dir.join(format!("{key}.steam5-none"));
-        if !crate::games::game_running() && !tried_recently(&miss, 7 * 86_400) {
+        if !crate::games::playing_now() && !tried_recently(&miss, 7 * 86_400) {
             // "SpeciesUnknown-Win64-Shipping" is looked up as "Species Unknown".
             let title = crate::games::tidy_program_name(game).unwrap_or_else(|| game.to_string());
             match steam_icon(&title, &steam) {
@@ -849,13 +850,13 @@ pub fn icon(game: &str, online: bool) -> Option<PathBuf> {
     }
     // Not on Steam, and not installed or only with a small icon (Minecraft, Roblox, Star
     // Citizen, VALORANT…): the icon from the game's own website, found through Wikidata.
-    // A miss is asked again after a week, never while you play.
+    // A miss is asked again after a week, never while a game is in front.
     if online && !not_a_game(&key) {
         if let Some(p) = SITE_EXTS.iter().map(|e| dir.join(format!("{key}.site.{e}"))).find(|p| p.exists()) {
             return Some(p);
         }
         let miss = dir.join(format!("{key}.site2-none"));
-        if !crate::games::game_running() && !tried_recently(&miss, 7 * 86_400) {
+        if !crate::games::playing_now() && !tried_recently(&miss, 7 * 86_400) {
             let title = crate::games::tidy_program_name(game).unwrap_or_else(|| game.to_string());
             match wikidata_sites(&title).and_then(|sites| icon_from_sites(&sites, &dir, &key)) {
                 Ok(p) => return Some(p),
@@ -951,7 +952,14 @@ mod tests {
     fn live_game_icons() {
         let dir = std::env::temp_dir().join("rewind-live-icons");
         init(dir.clone());
-        for g in ["VALORANT", "League of Legends", "Fortnite", "Moon Sweepers", "Minecraft", "Roblox", "Star Citizen", "Escape From Tarkov Arena", "aim", "BenQ", "Call of Duty Ghosts Multiplayer", "Counter-strike Global Offensive", "Sea of Thieves", "Tarkov", "Payday The Heist", "Battlefield 6", "Minecraft", "Render", "Hitman 3", "Rocket League", "Apex Legends", "SpeciesUnknown-Win64-Shipping", "Species Unknown", "Escape From Tarkov", "Resident Evil 3 Remake", "Edits", "funny not cool", "VALORANT", "League of Legends", "Counter-strike 2", "Marvel Rivals", "Overwatch 2", "Tom Clancys Rainbow Six Siege", "Hunt Showdown", "Payday The Heist", "Resident Evil Requiem", "The Outlast Trials", "Empyrion - Galactic Survival", "Desktop"] {
+        // REWIND_ICON_GAMES="A|B" looks up only those.
+        if let Ok(only) = std::env::var("REWIND_ICON_GAMES") {
+            for g in only.split('|') {
+                println!("{g}: {:?} -> {:?}", find_program(g), icon(g, true));
+            }
+            return;
+        }
+        for g in ["VALORANT", "League of Legends", "Fortnite", "Moon Sweepers", "Minecraft", "Roblox", "Star Citizen", "Escape From Tarkov Arena", "aim", "BenQ", "Call of Duty Ghosts Multiplayer", "Counter-strike Global Offensive", "Sea of Thieves", "Tarkov", "Payday The Heist", "Battlefield 6", "Minecraft", "Render", "Hitman 3", "Rocket League", "Apex Legends", "SpeciesUnknown-Win64-Shipping", "Species Unknown", "Escape From Tarkov", "Resident Evil 3 Remake", "Edits", "funny not cool", "VALORANT", "League of Legends", "Counter-strike 2", "Marvel Rivals", "Overwatch 2", "Tom Clancys Rainbow Six Siege", "Hunt Showdown", "Payday The Heist", "Resident Evil Requiem", "The Outlast Trials", "Empyrion - Galactic Survival", "Deadhikers", "Call of Cthulhu", "SCP Secret Laboratory", "Desktop"] {
             println!("{g}: {:?} -> {:?}", find_program(g), icon(g, true));
         }
     }
