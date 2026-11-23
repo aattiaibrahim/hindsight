@@ -35,6 +35,22 @@ const LIST_VIEWS: ListView[] = ["clips", "local", "synced", "totrim", "damaged"]
 const isList = (v: View): v is ListView => v === "clips" || v === "local" || v === "synced" || v === "totrim" || v === "damaged";
 
 /** Files an edit made (trims, exports, repairs…), not clips waiting for one. */
+/** Replay buffer lengths (Hindsight's, and other recorders' usual ones), in seconds. */
+const BUFFER_LENGTHS = [60, 120, 180, 300, 600, 1200];
+/**
+ * Is this length a whole buffer save, not cut down yet? A save is as long as the buffer
+ * it came from (2, 3, 5 minutes…), or a few seconds less (it comes out at 176-179 s
+ * for a 3-minute buffer). Anything else was trimmed, here or in another app. 0 =
+ * length not known yet: counts as untrimmed until it is.
+ */
+export function isWholeSave(seconds: number, buffer?: number) {
+  if (seconds <= 0) return true;
+  return [...BUFFER_LENGTHS, ...(buffer ? [buffer] : [])].some((l) => seconds >= l - 6 && seconds <= l + 2);
+}
+
+/** Hindsight's recordings ("Valorant Recording 2026-…"), any length. */
+const RECORDING = /(^|\s)Recording(\s|$)/i;
+
 const MADE_BY_EDIT = /\((trim|remux|H\.264|repaired|audio|\d+ MB)( \(\d+\))?\)|\((trimmed|good part)\)/i;
 const EDIT_FOLDERS = new Set(["edits", "exports", "montages"]);
 type ToastAction = { label: string; run: () => void };
@@ -332,6 +348,20 @@ export default function App() {
     api.editedClips().then((l) => setEdited(new Set(l.map((p) => p.toLowerCase())))).catch(() => {});
   }, [clips]);
   const keepWhole = settings?.keepWhole;
+  // Each clip's length, from the cache (instant): a clip shorter than its buffer was trimmed.
+  const [lengths, setLengths] = useState<Map<string, number>>(new Map());
+  useEffect(() => {
+    if (!clips?.length) return;
+    let alive = true;
+    api
+      .knownLengths(clips)
+      .then((l) => alive && setLengths(new Map(clips.map((c, i) => [c.path, l[i] ?? 0]))))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [clips]);
+  const bufferLength = settings?.bufferSeconds;
   const trimClips = useMemo(() => {
     if (!clips) return null;
     // Matched by "<game folder>\<file>", not the whole path: a clip whose copy here
@@ -341,9 +371,16 @@ export default function App() {
     const keep = new Set((keepWhole ?? []).map(tail));
     const done = new Set([...edited].map(tail));
     return clips.filter(
-      (c) => !EDIT_FOLDERS.has(c.folder.toLowerCase()) && !MADE_BY_EDIT.test(c.name) && !done.has(tail(c.path)) && !keep.has(tail(c.path)),
+      (c) =>
+        !EDIT_FOLDERS.has(c.folder.toLowerCase()) &&
+        !MADE_BY_EDIT.test(c.name) &&
+        !done.has(tail(c.path)) &&
+        !keep.has(tail(c.path)) &&
+        // Shorter than the buffer it was saved from: already trimmed (here or in another app).
+        // A recording (started and stopped by hand) has no buffer length: it stays until trimmed.
+        (RECORDING.test(c.name) || isWholeSave(lengths.get(c.path) ?? 0, bufferLength)),
     );
-  }, [clips, edited, keepWhole]);
+  }, [clips, edited, keepWhole, lengths, bufferLength]);
   const keepClipsWhole = useCallback(
     (paths: string[]) => {
       if (!settings) return;

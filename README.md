@@ -28,7 +28,7 @@
   <tr>
     <td width="50%" valign="top">
       <img src="docs/screenshots/totrim.jpg" alt="To trim: clips not trimmed yet, by game and day" />
-      <p><b>Your clips, by game and day.</b> To trim lists every clip you haven't cut down yet and how much space trimming would free. Clips from Medal, OBS and NVIDIA sit in the same place, with official game logos.</p>
+      <p><b>Your clips, by game and day.</b> To trim lists every clip you haven't cut down yet (still as long as the buffer it was saved from, 2, 3 or 5 minutes; a recording until you trim it) and how much space trimming would free. Clips from Medal, OBS and NVIDIA sit in the same place, with official game logos.</p>
     </td>
     <td width="50%" valign="top">
       <img src="docs/screenshots/notifications.jpg" alt="The notifications page" />
