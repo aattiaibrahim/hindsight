@@ -117,6 +117,13 @@ fn parse_range(h: &str, len: u64) -> Option<(u64, u64)> {
     (start <= end && start < len).then_some((start, end))
 }
 
+/// The app's own page (built, or the dev server). Studio plays a clip through Web Audio
+/// to turn a track up past 100% while you edit, and that needs the file served with CORS.
+fn app_origin(o: &str) -> bool {
+    matches!(o, "http://tauri.localhost" | "https://tauri.localhost" | "tauri://localhost")
+        || o.strip_prefix("http://localhost:").is_some_and(|p| p.parse::<u16>().is_ok())
+}
+
 fn reply(stream: &mut TcpStream, code: &str) -> std::io::Result<()> {
     write!(stream, "HTTP/1.1 {code}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
 }
@@ -129,7 +136,7 @@ fn serve(mut stream: TcpStream, port: u16, token: &str) -> std::io::Result<()> {
     let mut parts = line.split_whitespace();
     let method = parts.next().unwrap_or("").to_string();
     let target = parts.next().unwrap_or("").to_string();
-    let (mut host, mut range) = (String::new(), None::<String>);
+    let (mut host, mut range, mut origin) = (String::new(), None::<String>, None::<String>);
     loop {
         let mut h = String::new();
         if reader.read_line(&mut h)? == 0 || h.trim().is_empty() {
@@ -139,6 +146,7 @@ fn serve(mut stream: TcpStream, port: u16, token: &str) -> std::io::Result<()> {
             match k.trim().to_ascii_lowercase().as_str() {
                 "host" => host = v.trim().to_string(),
                 "range" => range = Some(v.trim().to_string()),
+                "origin" => origin = Some(v.trim().to_string()),
                 _ => {}
             }
         }
@@ -164,7 +172,10 @@ fn serve(mut stream: TcpStream, port: u16, token: &str) -> std::io::Result<()> {
         return reply(&mut stream, "404 Not Found");
     };
     let len = file.metadata()?.len();
-    let common = format!("Content-Type: {kind}\r\nAccept-Ranges: bytes\r\nCache-Control: no-store\r\nConnection: close\r\n");
+    let mut common = format!("Content-Type: {kind}\r\nAccept-Ranges: bytes\r\nCache-Control: no-store\r\nConnection: close\r\n");
+    if let Some(o) = origin.as_deref().filter(|o| app_origin(o)) {
+        common += &format!("Access-Control-Allow-Origin: {o}\r\nVary: Origin\r\n");
+    }
     let (status, start, end) = match range.as_deref() {
         None => ("200 OK", 0, len.saturating_sub(1)),
         Some(r) => match parse_range(r, len) {
@@ -192,6 +203,14 @@ fn serve(mut stream: TcpStream, port: u16, token: &str) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn app_origins() {
+        assert!(app_origin("http://tauri.localhost"));
+        assert!(app_origin("http://localhost:1420"));
+        assert!(!app_origin("http://localhost:1420.evil.com"));
+        assert!(!app_origin("https://example.com"));
+    }
 
     #[test]
     fn ranges_and_paths() {

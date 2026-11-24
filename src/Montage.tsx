@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, ClipFile, errText, fmtDb, fmtTime, Waveform, mediaSrc } from "./api";
+import { dbToGain, mediaCors, setLevel } from "./boost";
 import { useMediaReady } from "./hooks";
 import { Pause, Play, Plus, SkipBack, SkipForward } from "lucide-react";
 import { GameIcon } from "./GameIcon";
@@ -335,25 +336,28 @@ function Editor({
       if (!src) return; // the player's address isn't known yet
       if (playingIdx.current !== at.i || !v.src.endsWith(encodeURI(src).split("/").pop() ?? "")) {
         playingIdx.current = at.i;
+        const cors = mediaCors(src);
+        if (cors && v.crossOrigin !== cors) v.crossOrigin = cors;
         v.src = src;
       }
       v.currentTime = at.local;
-      v.volume = gainOf(p);
+      setLevel(v, gainOf(p), false);
       if (play) v.play().catch(() => {});
       const a = audio.current;
       if (a && song) {
         a.currentTime = (songOffset + t) % Math.max(1, song.duration);
-        a.volume = Math.min(1, Math.pow(10, songDb / 20));
+        setLevel(a, dbToGain(songDb), false);
         if (play) a.play().catch(() => {});
         else a.pause();
       }
     },
     [locate, pieces, clipDb, song, songOffset, songDb],
   );
-  // A clip's volume in the preview: the overall clips volume plus its own.
+  // A clip's volume in the preview: the overall clips volume plus its own (above 100%
+  // too: boost.ts plays it louder, as the saved montage will be).
   function gainOf(p: Piece) {
     if (clipDb <= -60 || (p.volumeDb ?? 0) <= -60) return 0;
-    return Math.min(1, Math.pow(10, (clipDb + (p.volumeDb ?? 0)) / 20));
+    return dbToGain(clipDb + (p.volumeDb ?? 0));
   }
   const seek = (t: number) => {
     const c = Math.max(0, Math.min(length, t));
@@ -396,10 +400,10 @@ function Editor({
   useEffect(() => {
     const v = video.current;
     const at = locate(time);
-    if (v && at) v.volume = gainOf(pieces[at.i]);
+    if (v && at) setLevel(v, gainOf(pieces[at.i]), false);
   }, [clipDb, pieces]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (audio.current) audio.current.volume = Math.min(1, Math.pow(10, songDb / 20));
+    if (audio.current) setLevel(audio.current, dbToGain(songDb), false);
   }, [songDb]);
   // The start of each piece on the montage's clock, for jumping clip to clip.
   const starts = useMemo(() => {
@@ -575,7 +579,7 @@ function Editor({
           <div className="me-screen" onClick={togglePlay}>
             <video ref={video} className="me-video" onTimeUpdate={onTime} playsInline preload="auto" />
           </div>
-          {song && <audio ref={audio} src={mediaSrc(song.path)} loop preload="auto" />}
+          {song && <audio ref={audio} crossOrigin={mediaCors(mediaSrc(song.path))} src={mediaSrc(song.path)} loop preload="auto" />}
           <div className="me-transport">
             <button className="round" onClick={() => jump(-1)} aria-label="Previous clip" title="Previous clip">
               <SkipBack size={16} aria-hidden="true" />

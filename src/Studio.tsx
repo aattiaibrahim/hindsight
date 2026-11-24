@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { api, ClipFile, codecLabel, errText, fmtSize, fmtTime, Health, PreviewAudio, Probe, Settings, TrackEdit, Upload, UploadProgress, Waveform, mediaSrc } from "./api";
 import { AudioLanes, hasAudioEdits, isMutedAt } from "./AudioLanes";
+import { mediaCors, setLevel } from "./boost";
 import { useThumb } from "./hooks";
 import { SharePanel, ShareRequest } from "./Share";
 import { DiagnosticsButton } from "./About";
@@ -343,17 +344,14 @@ export function Studio({
     const v = video.current;
     const now = v?.currentTime ?? 0;
     const gain = (i: number) => Math.pow(10, (audioEdits[i]?.gainDb ?? 0) / 20);
+    // A + dB edit plays louder than 100% right away (boost.ts), not only once saved.
     if (v) {
       const first = tracks?.firstTitle ?? "Game";
-      v.volume = Math.min(1, volume * tv(first) * gain(0));
-      v.muted = allMuted || !!trackMuted[first] || isMutedAt(audioEdits[0], now);
+      setLevel(v, volume * tv(first) * gain(0), allMuted || !!trackMuted[first] || isMutedAt(audioEdits[0], now));
     }
     tracks?.extra.forEach((t) => {
       const a = extraAudio.current.get(t.index);
-      if (a) {
-        a.volume = Math.min(1, volume * tv(t.title) * gain(t.index));
-        a.muted = allMuted || !!trackMuted[t.title] || isMutedAt(audioEdits[t.index], now);
-      }
+      if (a) setLevel(a, volume * tv(t.title) * gain(t.index), allMuted || !!trackMuted[t.title] || isMutedAt(audioEdits[t.index], now));
     });
   };
   useEffect(() => applyVolumes.current());
@@ -808,6 +806,7 @@ export function Studio({
               key={`${path}#${reload}`}
               ref={video}
               poster={poster ?? undefined}
+              crossOrigin={mediaCors(mediaSrc(path))}
               // The version tag makes the player load the file fresh after an edit replaced it
               // in place (same name); otherwise WebView2 can reuse its cached copy of the old file.
               src={mediaSrc(smooth?.for === path && smooth.copy ? smooth.copy : path, `${clipModified}-${reload}`)}
@@ -1131,9 +1130,13 @@ export function Studio({
                     if (el) extraAudio.current.set(t.index, el);
                     else extraAudio.current.delete(t.index);
                   }}
+                  crossOrigin={mediaCors(mediaSrc(t.path))}
                   src={mediaSrc(t.path)}
                   preload="auto"
-                  onLoadedData={() => syncExtra(true)}
+                  onLoadedData={() => {
+                    syncExtra(true);
+                    applyVolumes.current();
+                  }}
                 />
               ))}
             </div>
