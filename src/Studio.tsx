@@ -33,7 +33,8 @@ import { StudioNas } from "./NasProgress";
 import { Slider } from "./Slider";
 import { Crop, CROP_PRESETS, CropBox, cropPixels, fitRatio, isWhole, WHOLE } from "./CropBox";
 
-type Job = { label: string; pct?: number } | null;
+/** A save in progress: which clip it is for (it carries on if you open another one). */
+type Job = { id: number; for: string | null; label: string; pct?: number } | null;
 
 function loadNumber(key: string, fallback: number) {
   try {
@@ -222,7 +223,10 @@ export function Studio({
   health,
   onRescued,
   movedFrom = null,
+  onSavedElsewhere,
 }: {
+  /** A save finished (or failed) after you moved on to another clip or page: tell you without taking you back. */
+  onSavedElsewhere?: (text: string, out: string | null, err?: boolean) => void;
   /** This clip was open from that path until its copy on this PC was freed up: keep your place. */
   movedFrom?: string | null;
   health?: Health;
@@ -384,7 +388,19 @@ export function Studio({
   const [playErrorFor, setPlayErrorFor] = useState<string | null>(null);
   const playError = !!path && playErrorFor === path;
   const retried = useRef<string | null>(null);
-  const [job, setJob] = useState<Job>(null);
+  const [jobState, setJob] = useState<Job>(null);
+  // Only the clip being saved shows its save; another clip you open is free to edit.
+  const job = jobState && jobState.for === path ? jobState : null;
+  const jobSeq = useRef(0);
+  const openPath = useRef(path);
+  openPath.current = path;
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const [result, setResult] = useState<Result>(null);
   const [targetMb, setTargetMb] = useState(10);
   // Crop: the box over the video (fractions of the frame), whether it's being
@@ -666,15 +682,24 @@ export function Studio({
   };
 
   const run = async (label: string, fn: () => Promise<string>, replaces = false) => {
-    setJob({ label });
+    const id = ++jobSeq.current;
+    const from = path;
+    setJob({ id, for: from, label });
     setResult(null);
     // How far the save has got, from ffmpeg (see edit-progress in lib.rs).
     const un = listen<{ path: string; pct: number }>("edit-progress", (e) => {
-      if (e.payload.path === path) setJob((j) => (j ? { ...j, pct: Math.max(j.pct ?? 0, e.payload.pct) } : j));
+      if (e.payload.path === from) setJob((j) => (j && j.id === id ? { ...j, pct: Math.max(j.pct ?? 0, e.payload.pct) } : j));
     });
+    // Still looking at the clip being saved? If not, it finishes in the background
+    // and you get a notice, instead of being taken back to it.
+    const stillHere = () => mounted.current && openPath.current === from;
     try {
       const out = await fn();
       onDone();
+      if (!stillHere()) {
+        onSavedElsewhere?.(replaces ? "Saved your edit over the original" : "Saved your edit", out);
+        return;
+      }
       if (replaces) {
         // The edit now lives where the original was: show it.
         video.current?.pause();
@@ -689,10 +714,11 @@ export function Studio({
       }
       setResult({ text: `Saved ${out.split("\\").pop()}`, path: out });
     } catch (e) {
-      setResult({ text: errText(e), err: true });
+      if (stillHere()) setResult({ text: errText(e), err: true });
+      else onSavedElsewhere?.(`Couldn't save your edit of ${(from ?? "").split("\\").pop()}`, null, true);
     } finally {
       un.then((f) => f());
-      setJob(null);
+      setJob((j) => (j && j.id === id ? null : j));
     }
   };
 

@@ -615,6 +615,9 @@ export default function App() {
             links={uploads.history}
             onShare={requestShare}
             health={health[studioPath ?? ""]}
+            onSavedElsewhere={(text, out, err) =>
+              toast(text, !!err, out ? out.split("\\").pop() : undefined, out ? { label: "Open", run: () => openInStudio(out) } : undefined)
+            }
             onRescued={(p) => {
               refresh();
               openInStudio(p);
