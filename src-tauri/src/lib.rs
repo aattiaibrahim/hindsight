@@ -713,7 +713,8 @@ async fn remove_old_folder(app: AppHandle, path: String) -> Result<(), String> {
     let s = settings_of(&app);
     let logs = moves_dir(&app)?;
     let (p, linked, keep) = (path.clone(), old_folder_candidates(&s), own_folders(&s));
-    blocking(move || old_folders::remove(&p, &linked, &keep, &logs)).await?;
+    let (nas_dir, server) = (s.nas_dir.clone(), s.nas_server.clone());
+    blocking(move || old_folders::remove(&p, &linked, &keep, &logs, (&nas_dir, &server))).await?;
     let mut s = settings_of(&app);
     s.linked_folders.retain(|f| !library::same_path(std::path::Path::new(f), std::path::Path::new(&path)));
     set_settings(app.clone(), s)?;

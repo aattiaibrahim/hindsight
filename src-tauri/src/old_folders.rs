@@ -154,11 +154,28 @@ pub fn find(candidates: &[String], keep: &[PathBuf], logs: &Path) -> Vec<OldFold
 }
 
 /// Check `path` again (it has to be offered right now), then send it to the Recycle Bin.
-pub fn remove(path: &str, linked: &[String], keep: &[PathBuf], logs: &Path) -> Result<(), String> {
+/// `nas`: the NAS folder and the NAS app's address, for a folder on the NAS.
+pub fn remove(path: &str, linked: &[String], keep: &[PathBuf], logs: &Path, nas: (&str, &str)) -> Result<(), String> {
     if !find(linked, keep, logs).iter().any(|f| f.path == path) {
         return Err("That folder isn't safe to remove any more (something is in it again). Nothing was deleted.".into());
     }
     let p = Path::new(path);
+    let files = walk_files(p);
+    // Nothing in it at all (only empty folders): there's nothing to keep, so it's
+    // simply removed. A folder on a network share has no Recycle Bin to go to anyway.
+    if files.is_empty() {
+        return remove_empty_dirs(p);
+    }
+    // On the NAS: its leftovers go to the NAS app's Trash (like a deleted clip), then
+    // the empty folder goes.
+    let (nas_dir, server) = nas;
+    if crate::nas::rel_on_nas(nas_dir, path).is_some() {
+        for f in &files {
+            let rel = crate::nas::rel_on_nas(nas_dir, &f.to_string_lossy()).ok_or("A file in it isn't on the NAS. Nothing more was deleted.")?;
+            crate::nas::delete_on_nas(nas_dir, server, &rel)?;
+        }
+        return remove_empty_dirs(p);
+    }
     #[cfg(test)]
     {
         fs::remove_dir_all(p).map_err(|e| e.to_string())
@@ -166,14 +183,29 @@ pub fn remove(path: &str, linked: &[String], keep: &[PathBuf], logs: &Path) -> R
     #[cfg(not(test))]
     {
         // Its leftovers are small; still, never delete for good if the Recycle Bin would.
-        for e in walk_files(p) {
-            crate::library::recycle_check(&e)?;
+        for e in &files {
+            crate::library::recycle_check(e)?;
         }
         trash::delete(p).map_err(|e| format!("Couldn't move it to the Recycle Bin: {e}"))
     }
 }
 
-#[cfg(not(test))]
+/// Remove `dir` and the empty folders inside it, deepest first. Only empty folders
+/// can go (Windows refuses a folder with anything in it), so no file is ever lost.
+fn remove_empty_dirs(dir: &Path) -> Result<(), String> {
+    let mut dirs = vec![dir.to_path_buf()];
+    let mut i = 0;
+    while i < dirs.len() {
+        let d = dirs[i].clone();
+        dirs.extend(fs::read_dir(&d).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_dir()));
+        i += 1;
+    }
+    for d in dirs.iter().rev() {
+        fs::remove_dir(d).map_err(|e| format!("Couldn't remove {}: {e}", d.display()))?;
+    }
+    Ok(())
+}
+
 fn walk_files(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
@@ -193,6 +225,33 @@ fn walk_files(dir: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_empty_folder_is_removed_without_the_recycle_bin() {
+        let d = tmp("empty").join("Recordings");
+        fs::create_dir_all(d.join("sub").join("deeper")).unwrap();
+        remove_empty_dirs(&d).unwrap();
+        assert!(!d.exists());
+        // Something in it: refused, and nothing is lost.
+        let d = tmp("full").join("Recordings");
+        fs::create_dir_all(d.join("sub")).unwrap();
+        fs::write(d.join("sub").join("keep.txt"), "x").unwrap();
+        assert!(remove_empty_dirs(&d).is_err());
+        assert!(d.join("sub").join("keep.txt").exists());
+    }
+
+    /// What's offered for removal on a real PC (read only).
+    /// HINDSIGHT_LIVE_OLD="<moves folder>|<clips folder>|<nas folder>"
+    /// cargo test live_old_folders -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_old_folders() {
+        let Ok(spec) = std::env::var("HINDSIGHT_LIVE_OLD") else { return };
+        let p: Vec<&str> = spec.split('|').collect();
+        for f in find(&[], &[PathBuf::from(p[1]), PathBuf::from(p[2])], Path::new(p[0])) {
+            println!("{} | moved {} | {} files, {} bytes", f.path, f.moved, f.files, f.bytes);
+        }
+    }
 
     fn tmp(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("hindsight-old-{name}-{}", std::process::id())).join("Recorders");
@@ -230,10 +289,10 @@ mod tests {
         assert_eq!((found[0].label.as_str(), found[0].moved, found[0].files), ("Medal", 1, 1));
         // A clip turning up again is caught at the last moment.
         fs::write(medal.join("new.mkv"), b"v").unwrap();
-        assert!(remove(&found[0].path, &linked, &keep, &logs).is_err());
+        assert!(remove(&found[0].path, &linked, &keep, &logs, ("", "")).is_err());
         assert!(medal.exists());
         fs::remove_file(medal.join("new.mkv")).unwrap();
-        remove(&found[0].path, &linked, &keep, &logs).unwrap();
+        remove(&found[0].path, &linked, &keep, &logs, ("", "")).unwrap();
         assert!(!medal.exists());
         let _ = fs::remove_dir_all(base.parent().unwrap());
     }
