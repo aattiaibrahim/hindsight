@@ -666,8 +666,9 @@ pub fn replace_on_nas(nas_dir: &str, server: &str, original: &str, edited: &str,
     {
         set_aside(nas, &r)?;
     }
-    fs::rename(edited_p, &target).map_err(|e| {
-        format!("Couldn't move the edit into place ({e}). Your edit is saved as {} and the original is in the NAS's {REPLACED} folder.", edited_p.display())
+    crate::library::rename_patiently(edited_p, &target).map_err(|e| {
+        let kept = if in_app_trash { "the original is in the NAS app's Trash".to_string() } else { format!("the original is in the NAS's {REPLACED} folder") };
+        format!("Couldn't move the edit into place ({e}). Your edit is saved as {} and {kept}.", edited_p.display())
     })?;
     Ok(target.to_string_lossy().into_owned())
 }

@@ -1399,8 +1399,28 @@ pub fn replace_original(original: &str, edited: &str, expected_secs: Option<f64>
     if target.exists() && target != orig {
         discard(&target)?;
     }
-    fs::rename(edited_p, &target).map_err(|e| format!("Couldn't move the edit into place: {e}"))?;
+    rename_patiently(edited_p, &target).map_err(|e| format!("Couldn't move the edit into place: {e}"))?;
     Ok(target.to_string_lossy().into_owned())
+}
+
+/// Rename, trying again for a few seconds while Windows says the file is busy
+/// ("Access is denied", "being used by another process"). A file just written,
+/// above all on a NAS, is often still held for a moment: by the share itself, an
+/// antivirus scan, or a player or thumbnail reading it.
+pub(crate) fn rename_patiently(from: &Path, to: &Path) -> std::io::Result<()> {
+    let mut wait = std::time::Duration::from_millis(150);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    loop {
+        match fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            // 5: access denied, 32: in use by another process, 33: part of it locked
+            Err(e) if matches!(e.raw_os_error(), Some(5 | 32 | 33)) && std::time::Instant::now() < until => {
+                std::thread::sleep(wait);
+                wait = (wait * 2).min(std::time::Duration::from_secs(1));
+            }
+            Err(e) => return Err(e),
+        }
+    }
 }
 
 /// Part of the picture to keep, as fractions of the frame (0..1), e.g. a 9:16
@@ -1665,6 +1685,30 @@ mod tests {
     /// A w × h grey picture: `lit` pixels are bright, the rest black.
     fn picture(w: usize, h: usize, lit: impl Fn(usize, usize) -> bool) -> Vec<u8> {
         (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).map(|(x, y)| if lit(x, y) { 180 } else { 5 }).collect()
+    }
+
+    /// A file held open for a moment (like a NAS or antivirus does right after it's
+    /// written): the rename waits for it instead of failing.
+    #[cfg(windows)]
+    #[test]
+    fn rename_waits_for_a_file_held_open() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let d = std::env::temp_dir().join(format!("hindsight-rename-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        let (from, to) = (d.join("clip (trim).mp4"), d.join("clip.mp4"));
+        fs::write(&from, b"edit").unwrap();
+        // No sharing at all: renaming it is refused while this is open.
+        let held = fs::OpenOptions::new().read(true).share_mode(0).open(&from).unwrap();
+        assert!(fs::rename(&from, &to).is_err(), "held open, a plain rename fails");
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(600));
+            drop(held);
+        });
+        rename_patiently(&from, &to).expect("renamed once it's let go");
+        t.join().unwrap();
+        assert_eq!(fs::read(&to).unwrap(), b"edit");
+        let _ = fs::remove_dir_all(&d);
     }
 
     #[test]
