@@ -5,6 +5,7 @@ import { api, ClipFile, codecLabel, errText, fmtDuration, fmtSize, forDesktop, G
 import { useActivity } from "./activity";
 import { RETRY_MS, useNearView, useOnScreen, useSettings, useThumb, useThumbStatus } from "./hooks";
 import { MoveToDialog } from "./MoveTo";
+import { NewGameDialog } from "./NewGame";
 import { FolderCheckDialog } from "./FolderCheck";
 import { liveLink, progressText, ShareRequest, timeLeft } from "./Share";
 import { Timeline } from "./Timeline";
@@ -689,7 +690,22 @@ function LibraryView({
     });
   }, [visible]);
 
-  const selecting = selected.size > 0;
+  // "+ New game": the game's name, while you pick the clips that go in it.
+  const [picking, setPicking] = useState<string | null>(null);
+  const [naming, setNaming] = useState(false);
+  const [pickBusy, setPickBusy] = useState(false);
+  const selecting = selected.size > 0 || !!picking;
+  const moveInto = async (name: string, paths: string[]) => {
+    if (!onMoveTo || !paths.length) return;
+    setPickBusy(true);
+    const done = await onMoveTo(paths, name);
+    setPickBusy(false);
+    if (done) {
+      setPicking(null);
+      setSelected(new Set());
+      setFolder(name); // show the new game's folder
+    }
+  };
   const [previewing, setPreviewing] = useState(false);
   const [movingTo, setMovingTo] = useState<"ask" | "busy" | null>(null);
   // Every folder in the library, one per spelling (for Move to…).
@@ -750,15 +766,16 @@ function LibraryView({
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a" && visible.length) {
         e.preventDefault();
         setSelected(new Set(visible));
-      } else if (e.key === "Escape" && selected.size) {
+      } else if (e.key === "Escape" && (selected.size || picking)) {
         setSelected(new Set());
+        setPicking(null);
       } else if (e.key === "Escape") {
         window.dispatchEvent(new Event("rewind-top"));
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, visible, deleteSelected, active]);
+  }, [selected, visible, deleteSelected, active, picking]);
 
   const openAny = async () => {
     const picked = await open({
@@ -956,6 +973,18 @@ clips === null ? null : clips.length === 0 && trimMode ? (
       {folder !== "All" && <FolderScan place="bar" folder={folder} sortList={sortList} onSortReview={onSortReview} onToast={onToast} />}
       {damagedMode && !!clips?.length && <RepairAll clips={clips} onToast={onToast} />}
       {healing && clips && health && <HealReview clips={clips} health={health} onClose={() => setHealing(false)} onToast={onToast} />}
+      {naming && (
+        <NewGameDialog
+          folders={allFolders}
+          selected={selected.size}
+          onCancel={() => setNaming(false)}
+          onPick={(name) => {
+            setNaming(false);
+            if (selected.size) moveInto(name, [...selected]);
+            else setPicking(name);
+          }}
+        />
+      )}
       {movingTo && onMoveTo && selectedClips.length > 0 && (
         <MoveToDialog
           count={selectedClips.length}
@@ -1032,7 +1061,22 @@ clips === null ? null : clips.length === 0 && trimMode ? (
         <OnThisDay clips={clips} onOpenClip={onOpen} />
       )}
 
-      {selecting ? (
+      {picking ? (
+        <div className="select-bar pick-bar" role="toolbar" aria-label={`Pick clips for ${picking}`}>
+          <GameIcon name={picking} size={20} />
+          <span className="pick-text">
+            <strong>Pick the clips for “{picking}”</strong>
+            <span className="muted"> Click them to select (Shift+click for a range).</span>
+          </span>
+          <span style={{ flex: 1 }} />
+          <button className="btn small" disabled={pickBusy} onClick={() => setPicking(null)}>
+            Cancel
+          </button>
+          <button className="btn small primary" disabled={pickBusy || !selected.size} onClick={() => moveInto(picking, [...selected])}>
+            {pickBusy ? "Moving…" : selected.size ? `Move ${selected.size} clip${selected.size === 1 ? "" : "s"} here` : "Move here"}
+          </button>
+        </div>
+      ) : selecting ? (
         <div className="select-bar" role="toolbar" aria-label="Selected clips">
           <strong style={{ fontSize: 13, padding: "0 6px" }}>
             {selected.size} selected <span className="muted">· {fmtSize(selectedBytes)}</span>
@@ -1069,9 +1113,10 @@ clips === null ? null : clips.length === 0 && trimMode ? (
           </button>
         </div>
       ) : (
-        folders.length > 1 && !atFolderRoot && (
+        (folders.length > 1 || (onMoveTo && !!clips?.length)) &&
+        !atFolderRoot && (
           <div className="row game-row">
-            <GamePicker clips={clips ?? []} folder={folder} setFolder={setFolder} />
+            <GamePicker clips={clips ?? []} folder={folder} setFolder={setFolder} onNewGame={onMoveTo ? () => setNaming(true) : undefined} />
             <span className="muted" style={{ fontSize: 12, marginLeft: "auto" }}>
               Tip: Ctrl+click or Shift+click to select several
             </span>

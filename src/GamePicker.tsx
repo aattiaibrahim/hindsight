@@ -15,7 +15,18 @@ type Game = { name: string; key: string; count: number; latest: number };
  * most recently, and "More games" for a searchable list of every game with
  * its logo and clip count. The chosen game always shows as a chip.
  */
-export function GamePicker({ clips, folder, setFolder }: { clips: ClipFile[]; folder: string; setFolder: (f: string) => void }) {
+export function GamePicker({
+  clips,
+  folder,
+  setFolder,
+  onNewGame,
+}: {
+  clips: ClipFile[];
+  folder: string;
+  setFolder: (f: string) => void;
+  /** "+ New game": make a game's folder and move clips into it */
+  onNewGame?: () => void;
+}) {
   const games = useMemo(() => {
     const by = new Map<string, Game>();
     for (const c of clips) {
@@ -54,7 +65,7 @@ export function GamePicker({ clips, folder, setFolder }: { clips: ClipFile[]; fo
     setOpen(false);
     setQ("");
   };
-  if (games.length < 2) return null;
+  if (games.length < 2 && !onNewGame) return null;
   return (
     <div className="chips game-picker">
       <SlidingPill />
@@ -88,6 +99,11 @@ export function GamePicker({ clips, folder, setFolder }: { clips: ClipFile[]; fo
             </div>
           )}
         </div>
+      )}
+      {onNewGame && (
+        <button className="chip new-game-chip" onClick={onNewGame} title="Make a folder for a game and move clips into it">
+          + New game
+        </button>
       )}
     </div>
   );

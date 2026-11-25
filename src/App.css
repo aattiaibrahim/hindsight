@@ -1723,3 +1723,13 @@ small, .muted, .err-text, .note, p { overflow-wrap: anywhere; }
 :root[data-motion="reduce"] .card.act-busy .thumb::after, :root[data-motion="reduce"] .clip-row.act-busy .clip-row-thumb::after { animation: none; background: color-mix(in srgb, var(--accent) 12%, transparent); }
 :root[data-motion="reduce"] .card.act-done .thumb, :root[data-motion="reduce"] .clip-row.act-done { animation: none; }
 :root[data-motion="reduce"] .card.act-leaving, :root[data-motion="reduce"] .clip-row.act-leaving { animation: act-leave 0.01s forwards; }
+
+/* "+ New game": a dashed chip at the end of the game chips. */
+.new-game-chip { border-style: dashed; color: var(--text-2); }
+.new-game-chip:hover { color: var(--text); border-color: var(--accent); }
+.modal.new-game { width: min(460px, 92vw); }
+.new-game-name { gap: 8px; }
+.new-game-name .text-input { flex: 1; min-width: 0; }
+/* Picking the clips for a new game. */
+.pick-bar { gap: 10px; border-color: var(--accent); }
+.pick-bar .pick-text { min-width: 0; font-size: 13px; }
