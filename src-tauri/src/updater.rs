@@ -142,3 +142,61 @@ pub fn safe_to_restart(app: &AppHandle) -> bool {
 async fn tokio_sleep(d: Duration) {
     let _ = tauri::async_runtime::spawn_blocking(move || std::thread::sleep(d)).await;
 }
+
+/// What changed in a version: its release notes on GitHub, and the day it came out.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseNotes {
+    pub version: String,
+    /// RFC 3339, e.g. "2026-11-25T08:02:02Z"
+    pub date: String,
+    pub notes: String,
+}
+
+static NOTES: Mutex<Option<ReleaseNotes>> = Mutex::new(None);
+
+/// The release notes for `version` (the one installed), read once from GitHub and kept.
+pub fn whats_new(version: &str) -> Result<ReleaseNotes, String> {
+    if let Some(n) = NOTES.lock().unwrap().as_ref().filter(|n| n.version == version) {
+        return Ok(n.clone());
+    }
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .user_agent("Hindsight")
+        .build()
+        .map_err(|e| e.to_string())?;
+    let url = format!("https://api.github.com/repos/aattiaibrahim/hindsight/releases/tags/v{version}");
+    let r = client.get(url).header("Accept", "application/vnd.github+json").send().map_err(|e| e.to_string())?;
+    if !r.status().is_success() {
+        return Err(format!("GitHub said {}", r.status()));
+    }
+    let v: serde_json::Value = r.json().map_err(|e| e.to_string())?;
+    let notes = ReleaseNotes {
+        version: version.to_string(),
+        date: v["published_at"].as_str().unwrap_or_default().to_string(),
+        notes: changes_only(v["body"].as_str().unwrap_or_default()),
+    };
+    *NOTES.lock().unwrap() = Some(notes.clone());
+    Ok(notes)
+}
+
+/// The release text up to its first heading: what changed, without the "### Install" part.
+fn changes_only(body: &str) -> String {
+    let body = body.replace("\r\n", "\n");
+    let end = body.find("\n#").unwrap_or(body.len());
+    let head = &body[..end];
+    if head.trim_start().starts_with('#') { String::new() } else { head.trim().to_string() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn release_notes_without_the_install_part() {
+        let body = "New game in Clips.\r\n\r\n### Install\r\nDownload it.";
+        assert_eq!(changes_only(body), "New game in Clips.");
+        assert_eq!(changes_only("Just this."), "Just this.");
+        assert_eq!(changes_only("### Install\nDownload it."), "");
+    }
+}

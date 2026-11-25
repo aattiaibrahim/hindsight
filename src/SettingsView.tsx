@@ -293,6 +293,31 @@ export function SettingsView({
               ))}
             </div>
           </div>
+          <div className="setting">
+            <span>
+              Sidebar
+              <small>
+                {(s.sidebar ?? "icons") === "icons"
+                  ? "Icons only: each one's name shows when you point at it."
+                  : s.sidebar === "hover"
+                    ? "Opens with the names when you move the cursor onto it, and closes when you move away."
+                    : "Always open, with the names next to the icons."}
+              </small>
+            </span>
+            <div className="seg" role="radiogroup" aria-label="Sidebar">
+              {(
+                [
+                  ["icons", "Icons only"],
+                  ["hover", "Open on hover"],
+                  ["names", "Always names"],
+                ] as const
+              ).map(([v, label]) => (
+                <button key={v} role="radio" aria-checked={(s.sidebar ?? "icons") === v} className={(s.sidebar ?? "icons") === v ? "on" : ""} onClick={() => set({ sidebar: v })}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           <label className="setting">
             <span>
               Reduce motion

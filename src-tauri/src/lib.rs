@@ -2233,6 +2233,13 @@ fn show_main_window(app: AppHandle) {
     show_main(&app);
 }
 
+/// What changed in the version you have (its release notes), for Notifications.
+#[tauri::command]
+async fn whats_new(app: AppHandle) -> Result<updater::ReleaseNotes, String> {
+    let version = app.package_info().version.to_string();
+    blocking(move || updater::whats_new(&version)).await
+}
+
 #[tauri::command]
 fn get_update_state(app: AppHandle) -> updater::UpdateState {
     updater::state(&app)
@@ -2650,6 +2657,7 @@ get_settings,
             show_main_window,
             hide_flyout,
             get_update_state,
+            whats_new,
             check_for_updates,
             install_update,
             get_nas_state,

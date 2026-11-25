@@ -523,8 +523,9 @@ export default function App() {
   }, [view, settings, studioPath]);
 
   return (
-    <div className="shell">
-      {/* A slim rail of icons; each one's name shows on hover or keyboard focus. */}
+    <div className={`shell side-${settings?.sidebar ?? "icons"}`}>
+      {/* A slim rail of icons; each one's name shows on hover or keyboard focus. Settings →
+          Appearance can open it with the names when the cursor is on it, or keep it open. */}
       <nav className="nav" aria-label="Hindsight">
         <SlidingPill selector=".nav-item.on" glideFar />
         <div className="brand" title={`Hindsight${upd?.current ? ` ${upd.current}` : ""} (beta)`}>

@@ -77,7 +77,7 @@ export function installDevMock() {
     bufferInRam: true, captureEngine: "native", monitorMode: "primary", fixedMonitor: "", fixedMonitorId: "", drawCursor: true, captureArea: new URLSearchParams(location.search).has("area") ? { x: 0, y: 0, w: 1, h: 0.952 } : null, hotkey: "Alt+F10",
     recordHotkey: "Alt+F9", bufferEnabled: true, launchOnStartup: false, autoUpdate: true, startMinimized: true,
     keepOriginalAfterRemux: true, replaceOriginalOnEdit: true, detailedLog: true, externalFiles: [], desktopAudio: true, discordTrack: true,
-    micEnabled: true, micMono: true, micDevice: "", micGainDb: 0, theme: "tinted", accent: "winblue", keepWhole: [], reduceMotion: false,
+    micEnabled: true, micMono: true, micDevice: "", micGainDb: 0, theme: "tinted", accent: "winblue", keepWhole: [], reduceMotion: false, sidebar: "icons",
     saveSound: true, fileNameTemplate: "{game} {date} {time}", fileNamePc: false, nasDir: "\\\\nas\\clips", nasLibraryId: "mock", nasServer: "", nasRemoveLocal: false, nasSyncWhileGaming: false, linkedFolders: [] as string[], benchmarkMode: false, uploadHost: "catbox", litterboxTime: "72h", autoUpload: false, postLinkToDiscord: false, streamableEmail: "", discordWebhookName: "", confirmUploads: true, healthCheck: true, prepareThumbnails: true, gameDetect: true, detectDismissed: [] as string[], notGameFolders: [] as string[],
     folderNames: {} as Record<string, string>, similarDismissed: [] as string[], cleanupKept: {} as Record<string, number>,
   };
@@ -133,6 +133,7 @@ export function installDevMock() {
     },
     get_status: () => status,
     // ?update in the URL: pretend an update is downloaded while a recording runs.
+    whats_new: () => ({ version: pkg.version, date: new Date(Date.now() - 3 * 3600_000).toISOString(), notes: "New game in Clips: a + New game chip after the game chips. Type the name (your folders and Steam games are suggested), then pick its clips and move them in." }),
     get_update_state: () =>
       pendingUpdate
         ? { current: "0.1.12", stage: "ready", version: "0.1.13", notes: "Sample release notes.", error: null }

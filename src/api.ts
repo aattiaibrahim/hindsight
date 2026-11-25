@@ -125,6 +125,8 @@ export type Settings = {
   theme: Theme;
   accent: Accent;
   reduceMotion: boolean;
+  /** "icons" (names on hover of each icon), "hover" (opens with names on hover), "names" (always open) */
+  sidebar?: "icons" | "hover" | "names";
 };
 
 export type Theme = "tinted" | "midnight" | "graphite" | "oled";
@@ -661,6 +663,8 @@ export const api = {
   showMain: () => invoke<void>("show_main_window"),
   hideFlyout: () => invoke<void>("hide_flyout"),
   getUpdateState: () => invoke<UpdateState>("get_update_state"),
+  /** The installed version's release notes and date, from GitHub. */
+  whatsNew: () => invoke<{ version: string; date: string; notes: string }>("whats_new"),
   checkForUpdates: () => invoke<string | null>("check_for_updates"),
   installUpdate: () => invoke<void>("install_update"),
   getNasState: () => invoke<NasState>("get_nas_state"),

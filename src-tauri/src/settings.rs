@@ -56,6 +56,9 @@ pub struct Settings {
     pub accent: String,
     /// Turn off fades and motion in the interface
     pub reduce_motion: bool,
+    /// The sidebar: "icons" (names on hover of each icon), "hover" (opens with names
+    /// when the cursor is on it) or "names" (always open with names)
+    pub sidebar: String,
     /// Play a short chime when a clip or recording is saved (and a low one if it fails)
     pub save_sound: bool,
     /// New clips' file names (see naming.rs): "{game} {date} {time}" by default
@@ -187,6 +190,7 @@ impl Default for Settings {
             theme: "tinted".into(),
             accent: "winblue".into(),
             reduce_motion: false,
+            sidebar: "icons".into(),
             save_sound: true,
             file_name_template: crate::naming::DEFAULT_TEMPLATE.into(),
             file_name_pc: false,
