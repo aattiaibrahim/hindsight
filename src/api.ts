@@ -28,7 +28,8 @@ export type DetectStatus = { installed: boolean; downloading: number | null; loo
 /** A clip in an unsorted folder and the game it looks like. */
 /** `sure`: ticked in the review. Otherwise a close call, with its likeliest games in `choices` (best first). */
 /** Checking a game's folder for clips of other games. lookedAt: clips with a fingerprint, of clips. */
-export type FolderCheck = { suggestions: GameSuggestion[]; lookedAt: number; clips: number };
+/** desktopLike: clips that look like the desktop or an app, not a game. notGame: OBS, Edits… (looking for clips from a game). */
+export type FolderCheck = { suggestions: GameSuggestion[]; lookedAt: number; clips: number; desktopLike: number; notGame: boolean };
 export type GameSuggestion = { path: string; name: string; folder: string; game: string; confidence: number; likeness: number; sure: boolean; choices: [string, number][] };
 /** A montage to render: clip pieces in order, an optional song. */
 export type MontagePlan = {

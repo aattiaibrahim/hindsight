@@ -1275,7 +1275,8 @@ function FolderScan({
   if (settings.gameDetect && !auto && !UNSORTED_FOLDERS.has(k))
     return place === "title" ? <CheckFolderButton folder={folder} onReviewList={onReviewList} onToast={onToast} /> : null;
   if (!settings.gameDetect || !auto) return place === "title" && !UNSORTED_FOLDERS.has(k) ? <FindGameButton folder={folder} onToast={onToast} /> : null;
-  if (place !== "bar") return null;
+  // Looked through on its own already: the same pop-up shows what it found, maybes included.
+  if (place !== "bar") return <CheckFolderButton folder={folder} onReviewList={onReviewList} onToast={onToast} always={false} />;
   const waiting = sortList.filter((s) => folderKey(s.folder) === k).length;
   return (
     <div
@@ -1285,7 +1286,12 @@ function FolderScan({
       <Icon name="game" size={16} />
       <span className="scan-text">
         Hindsight finds the game for clips in this folder on its own.
-        <span className="muted"> {waiting ? `${waiting} clip${waiting === 1 ? " is" : "s are"} ready to sort into ${waiting === 1 ? "its game's folder" : "their games' folders"}.` : "Nothing to sort right now."}</span>
+        <span className="muted">
+          {" "}
+          {waiting
+            ? `${waiting} clip${waiting === 1 ? " is" : "s are"} ready to sort into ${waiting === 1 ? "its game's folder" : "their games' folders"}.`
+            : "None it's sure about right now. Check folder… shows the maybes, and which clips look like the desktop or an app."}
+        </span>
       </span>
       {waiting > 0 && onSortReview && (
         <button className="btn small primary" onClick={onSortReview}>
@@ -1301,7 +1307,10 @@ function CheckFolderButton({
   folder,
   onReviewList,
   onToast,
+  always = true,
 }: {
+  /** Offer "Always look through it" (not for folders it already looks through) */
+  always?: boolean;
   folder: string;
   onReviewList?: (list: GameSuggestion[], heading: string) => void;
   onToast: (t: string, err?: boolean) => void;
@@ -1309,7 +1318,7 @@ function CheckFolderButton({
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button className="btn small" onClick={() => setOpen(true)} title={`Find clips in “${folder}” that look like a different game`}>
+      <button className="btn small" onClick={() => setOpen(true)} title={always ? `Find clips in “${folder}” that look like a different game` : `Find clips in “${folder}” that are from a game`}>
         Check folder…
       </button>
       {open && (
@@ -1320,13 +1329,17 @@ function CheckFolderButton({
             setOpen(false);
             onReviewList?.(list, heading);
           }}
-          onAlways={() => {
-            setOpen(false);
-            api
-              .findGameInFolder(folder)
-              .then(() => onToast(`Hindsight will look through “${folder}” on its own. Suggestions show up in Cleanup.`))
-              .catch((e) => onToast(errText(e), true));
-          }}
+          onAlways={
+            always
+              ? () => {
+                  setOpen(false);
+                  api
+                    .findGameInFolder(folder)
+                    .then(() => onToast(`Hindsight will look through “${folder}” on its own. Suggestions show up in Cleanup.`))
+                    .catch((e) => onToast(errText(e), true));
+                }
+              : undefined
+          }
         />
       )}
     </>

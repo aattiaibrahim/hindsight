@@ -248,7 +248,7 @@ export function installDevMock() {
     check_game_folder: (a) => {
       const mine = clips.filter((c) => c.folder === a.folder);
       const finds = mine.slice(0, 2).map((c, i) => ({ path: c.path, name: c.name, folder: c.folder, game: "Escape From Tarkov", confidence: 0.8, likeness: 0.93, sure: i === 0, choices: [["Escape From Tarkov", 0.8]] }));
-      return { suggestions: finds, lookedAt: Math.max(0, mine.length - 3), clips: mine.length };
+      return { suggestions: finds, lookedAt: Math.max(0, mine.length - 3), clips: mine.length, desktopLike: 1, notGame: ["OBS", "Desktop"].includes(a.folder as string) };
     },
     scan_game_folder: async (a) => {
       const mine = clips.filter((c) => c.folder === a.folder);
@@ -257,7 +257,7 @@ export function installDevMock() {
         await new Promise((r) => setTimeout(r, 500));
       }
       const finds = mine.slice(0, 3).map((c, i) => ({ path: c.path, name: c.name, folder: c.folder, game: "Escape From Tarkov", confidence: 0.8, likeness: 0.93, sure: i !== 1, choices: [["Escape From Tarkov", 0.8]] }));
-      return { suggestions: finds, lookedAt: mine.length, clips: mine.length };
+      return { suggestions: finds, lookedAt: mine.length, clips: mine.length, desktopLike: 1, notGame: ["OBS", "Desktop"].includes(a.folder as string) };
     },
     cancel_folder_scan: () => null,
     render_montage: async () => (await new Promise((r) => setTimeout(r, 1200)), "C:\\Users\\you\\Videos\\Hindsight\\Montages\\Montage 2026-11-06 12-00-00.mp4"),

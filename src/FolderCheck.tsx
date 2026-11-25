@@ -94,7 +94,9 @@ export function FolderCheckDialog({
   const left = check ? check.clips - check.lookedAt : 0;
   const found = check?.suggestions ?? [];
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
-  const heading = `In “${folder}”: ${plural(found.length, "clip")} that look${found.length === 1 ? "s" : ""} like another game`;
+  // OBS, Edits, Screen Recording…: looking for clips that are from a game, not "another" game.
+  const notGame = !!check?.notGame;
+  const heading = `In “${folder}”: ${plural(found.length, "clip")} that look${found.length === 1 ? "s" : ""} like ${notGame ? "a game" : "another game"}`;
   const pct = progress && progress[1] > 0 ? Math.round((progress[0] / progress[1]) * 100) : null;
 
   return createPortal(
@@ -108,8 +110,9 @@ export function FolderCheckDialog({
         {stage === "choose" && (
           <>
             <p className="muted" style={{ margin: 0 }}>
-              Find clips in this folder that look like a different game, like one saved while another game was in front, or moved here by
-              mistake. Nothing is changed: you see what it finds, and nothing moves until you say so.
+              {notGame
+                ? "Find clips in this folder that are from a game, to move into that game's folder. Maybes are shown too, unticked. Nothing is changed: you see what it finds, and nothing moves until you say so."
+                : "Find clips in this folder that look like a different game, like one saved while another game was in front, or moved here by mistake. Nothing is changed: you see what it finds, and nothing moves until you say so."}
             </p>
             <div className="fc-options">
               <button className="fc-option" disabled={!check} onClick={() => setStage("result")}>
@@ -169,7 +172,7 @@ export function FolderCheckDialog({
         {stage === "result" && check && (
           <>
             <div className="fc-summary">
-              <b>{found.length ? heading.replace(`In “${folder}”: `, "") : "Nothing here looks like another game"}</b>
+              <b>{found.length ? heading.replace(`In “${folder}”: `, "") : notGame ? "Nothing here looks like a game" : "Nothing here looks like another game"}</b>
               <span className="muted">
                 {scanned ? "Full scan" : "Quick look"} · {check.lookedAt} of {plural(check.clips, "clip")} looked at
               </span>
@@ -180,6 +183,12 @@ export function FolderCheckDialog({
                   <Found key={s.path} s={s} />
                 ))}
               </div>
+            )}
+            {check.desktopLike > 0 && (
+              <p className="muted small" style={{ margin: 0 }}>
+                {plural(check.desktopLike, "clip")} here look{check.desktopLike === 1 ? "s" : ""} like the desktop or an app (Discord, a browser, an
+                editor), not a game, so {check.desktopLike === 1 ? "it isn't" : "they aren't"} suggested. To move one anyway, select it and use Move to….
+              </p>
             )}
             {left > 0 && (
               <p className="muted small" style={{ margin: 0 }}>

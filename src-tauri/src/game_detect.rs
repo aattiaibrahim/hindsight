@@ -472,6 +472,10 @@ const SURE_LIKENESS: f32 = 0.9;
 /// A close call worth showing: a real lead, and like a sorted clip.
 const CLOSE_SHARE: f32 = 0.3;
 const CLOSE_LIKENESS: f32 = 0.88;
+/// Checking a folder that isn't a game's (OBS, Edits, Screen Recording) on purpose:
+/// show the maybes too (unticked, you pick). Clips that look like the desktop or an
+/// app still never count as a game.
+const LOOSE_LIKENESS: f32 = 0.82;
 
 /// Games that replaced another and look alike on screen: (old, new, the day the new
 /// one came out, in ms). A clip from before that day is the old game, from after it
@@ -528,6 +532,10 @@ pub struct FolderCheck {
     /// Clips in the folder with a fingerprint (the ones the check could judge)
     pub looked_at: usize,
     pub clips: usize,
+    /// Looked-at clips that look like the desktop or an app (Discord, a browser), not a game
+    pub desktop_like: usize,
+    /// Not a game's folder (OBS, Edits…): the check looks for clips that are from a game
+    pub not_game: bool,
 }
 
 fn in_folder(c: &crate::library::ClipFile, folder: &str) -> bool {
@@ -539,8 +547,11 @@ fn in_folder(c: &crate::library::ClipFile, folder: &str) -> bool {
 pub fn check_folder(clips: &[crate::library::ClipFile], folder: &str, dismissed: &[String], skip: &[String]) -> FolderCheck {
     let mine: Vec<&crate::library::ClipFile> = clips.iter().filter(|c| in_folder(c, folder)).collect();
     let looked_at = mine.iter().filter(|c| cached(c).is_some()).count();
-    let suggestions = rank_clips(clips, dismissed, &[], skip, |c| in_folder(c, folder), cached);
-    FolderCheck { suggestions, looked_at, clips: mine.len() }
+    let not_game = is_unsorted(folder, "") || not_a_game_folder(folder, skip);
+    let close = if not_game { LOOSE_LIKENESS } else { CLOSE_LIKENESS };
+    let mut desktop_like = 0;
+    let suggestions = rank_with(clips, dismissed, &[], skip, |c| in_folder(c, folder), cached, close, &mut desktop_like);
+    FolderCheck { suggestions, looked_at, clips: mine.len(), desktop_like, not_game }
 }
 
 /// `check_folder` after fingerprinting every clip in the folder that hasn't been
@@ -583,6 +594,22 @@ fn rank_clips(
     is_candidate: impl Fn(&crate::library::ClipFile) -> bool,
     print: impl Fn(&crate::library::ClipFile) -> Option<Vec<f32>>,
 ) -> Vec<Suggestion> {
+    rank_with(clips, dismissed, also, skip, is_candidate, print, CLOSE_LIKENESS, &mut 0)
+}
+
+/// `rank_clips` with the likeness a close call needs, counting the clips that look like
+/// the desktop or an app in `desktop_like`.
+#[allow(clippy::too_many_arguments)]
+fn rank_with(
+    clips: &[crate::library::ClipFile],
+    dismissed: &[String],
+    also: &[String],
+    skip: &[String],
+    is_candidate: impl Fn(&crate::library::ClipFile) -> bool,
+    print: impl Fn(&crate::library::ClipFile) -> Option<Vec<f32>>,
+    close_likeness: f32,
+    desktop_like: &mut usize,
+) -> Vec<Suggestion> {
     let mut examples: Vec<(String, Vec<f32>)> = Vec::new();
     for c in clips {
         let unsorted = needs_game(c, also, skip);
@@ -617,12 +644,16 @@ fn rank_clips(
         let ranked = by_date(ranked, c.modified);
         let Some((game, share)) = ranked.first().cloned() else { continue };
         let here = crate::consolidate::game_key(&c.folder);
-        if game == NOT_A_GAME || crate::consolidate::game_key(&game) == here {
+        if game == NOT_A_GAME {
+            *desktop_like += 1;
+            continue;
+        }
+        if crate::consolidate::game_key(&game) == here {
             continue;
         }
         // A game with no sorted clips yet stays below the likeness bar.
         let sure = share >= SURE_SHARE && likeness >= SURE_LIKENESS;
-        if !sure && (share < CLOSE_SHARE || likeness < CLOSE_LIKENESS) {
+        if !sure && (share < CLOSE_SHARE || likeness < close_likeness) {
             continue;
         }
         let choices: Vec<(String, f32)> = ranked
@@ -1026,6 +1057,66 @@ mod tests {
 #[cfg(test)]
 mod live_pipeline {
     use super::*;
+
+    /// Why clips in unsorted / not-a-game folders get (no) suggestions, from the app's
+    /// own fingerprints (read only, nothing written).
+    /// HINDSIGHT_LIVE_DETECT="<app data ai dir>|<clips dir>|<nas dir or empty>|<not-a-game folders, comma-separated>"
+    /// cargo test live_detect_why -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_detect_why() {
+        let Ok(spec) = std::env::var("HINDSIGHT_LIVE_DETECT") else { return };
+        let parts: Vec<&str> = spec.split('|').collect();
+        init(PathBuf::from(parts[0]));
+        let nas = parts.get(2).copied().unwrap_or("");
+        let listing = if nas.is_empty() { Vec::new() } else { crate::nas::scan_nas(Path::new(nas)) };
+        let all = crate::library::scan_all(Path::new(parts[1]), &[], &listing, &[], nas);
+        let skip: Vec<String> = parts.get(3).map(|s| s.split(',').map(|f| f.trim().to_string()).filter(|f| !f.is_empty()).collect()).unwrap_or_default();
+        let mut examples: Vec<(String, Vec<f32>)> = Vec::new();
+        for c in &all {
+            let desktop = crate::consolidate::game_key(&c.folder) == "desktop";
+            if needs_game(c, &[], &skip) && !desktop {
+                continue;
+            }
+            if let Some(p) = cached(c) {
+                examples.push((if desktop { NOT_A_GAME.to_string() } else { c.folder.clone() }, p));
+            }
+        }
+        println!("{} clips, {} examples", all.len(), examples.len());
+        // folder -> [clips, printed, desktop, own folder, too unsure, close, sure]
+        let mut per: std::collections::BTreeMap<String, [usize; 7]> = Default::default();
+        for c in all.iter().filter(|c| needs_game(c, &[], &skip)) {
+            let row = per.entry(c.folder.clone()).or_default();
+            row[0] += 1;
+            let Some(p) = cached(c) else { continue };
+            row[1] += 1;
+            let Some((ranked, likeness)) = rank_among(&p, examples.iter().filter(|(_, e)| e != &p), 5) else { continue };
+            let (game, share) = ranked[0].clone();
+            let i = if game == NOT_A_GAME {
+                2
+            } else if crate::consolidate::game_key(&game) == crate::consolidate::game_key(&c.folder) {
+                3
+            } else if share >= SURE_SHARE && likeness >= SURE_LIKENESS {
+                6
+            } else if share >= CLOSE_SHARE && likeness >= CLOSE_LIKENESS {
+                5
+            } else {
+                4
+            };
+            row[i] += 1;
+        }
+        println!("folder: clips / looked at / looks like Desktop / own folder / too unsure / close / sure");
+        for (f, r) in &per {
+            println!("  {f}: {r:?}");
+        }
+        for f in ["Edits", "OBS", "Screen Recording", "YouTube Videos", "funnysiegevideo", "Desktop", "Valorant"] {
+            let c = check_folder(&all, f, &[], &skip);
+            println!("check {f}: {} found ({} sure), {} look like desktop, {}/{} looked at, not a game folder: {}", c.suggestions.len(), c.suggestions.iter().filter(|s| s.sure).count(), c.desktop_like, c.looked_at, c.clips, c.not_game);
+            for s in c.suggestions.iter().take(12) {
+                println!("    {} -> {} ({:.2}, like {:.3}{})", s.name, s.game, s.confidence, s.likeness, if s.sure { ", sure" } else { "" });
+            }
+        }
+    }
     /// REWIND_DETECT_PACK=<folder with onnxruntime.dll and clip-vision-b32-q.onnx>
     /// cargo test live_detect_pipeline -- --ignored --nocapture
     #[test]
