@@ -1791,3 +1791,7 @@ small, .muted, .err-text, .note, p { overflow-wrap: anywhere; }
 /* The status bar's item for it. */
 .sb-job { color: var(--text); }
 .sb-job .sb-pct { color: var(--accent); font-variant-numeric: tabular-nums; }
+
+/* A clip with sound but no picture: a sound wave where its picture would be. */
+.thumb.sound-only { background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 16%, var(--raised)), var(--raised)); }
+.sound-only-art { position: absolute; inset: 0; display: grid; place-items: center; color: color-mix(in srgb, var(--accent) 70%, var(--text)); opacity: 0.85; pointer-events: none; }

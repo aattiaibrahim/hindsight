@@ -18,6 +18,7 @@ import { HealReview } from "./HealReview";
 import { NasBadge, nasStatus, useNasState } from "./NasProgress";
 import { SlidingPill } from "./SlidingPill";
 import { Icon } from "./icons";
+import { AudioLines } from "lucide-react";
 
 /** Where each list (all clips, damaged clips) was scrolled to, kept while you're in Studio (the page itself unmounts). */
 const memories: Record<string, { scroll: number; folder: string; query: string; filters?: Filters }> = {};
@@ -123,7 +124,7 @@ function ClipRow({
         <div className="card-meta">
           {clip.folder} · {time}
           {damage && (damage.state === "damaged" || damage.state === "unreadable") && <span className="src-tag bad with-icon"><Icon name="warn" size={12} />Damaged</span>}
-          {damage?.state === "novideo" && <span className="src-tag" title="This file has sound but no picture">No video</span>}
+          {damage?.state === "novideo" && <span className="src-tag" title="This file has sound but no picture">Sound only</span>}
           {clip.location === "linked" && <span className="src-tag">{clip.source}</span>}
           <NasBadge status={badgeIn(view, nasStatus(clip, nasOn, copying))} />
         </div>
@@ -231,6 +232,8 @@ function ClipCard({
   // Being saved, moved or copied to the NAS: a shimmer. Just changed: a glow. Deleted: it leaves.
   const act = useActivity(clip.path) ?? (copying === clip.path ? "busy" : null);
   const job = useJob(clip.path);
+  // Sound but no picture: its details say there's no video stream.
+  const soundOnly = !!info && info.width === 0 && info.height === 0 && info.duration > 0;
 
   return (
     <button
@@ -241,8 +244,14 @@ function ClipCard({
       title={clip.path}
       data-path={clip.path}
     >
-      <div className={`thumb ${nasState ? "has-nas" : ""} ${loading ? "loading" : ""}`}>
+      <div className={`thumb ${nasState ? "has-nas" : ""} ${loading && !soundOnly ? "loading" : ""} ${soundOnly ? "sound-only" : ""}`}>
         {thumb && <img src={thumb} alt="" decoding="async" />}
+        {/* A file with sound but no picture (an audio recording): nothing to show, so say so. */}
+        {soundOnly && !thumb && (
+          <span className="sound-only-art" aria-hidden="true">
+            <AudioLines size={34} strokeWidth={1.5} />
+          </span>
+        )}
         <span
           className={`check ${selected ? "on" : ""}`}
           role="checkbox"
@@ -324,9 +333,9 @@ function ClipCard({
         )}
         {/* Status that matters at a glance stays visible; the rest shows on hover, like Immich. */}
         <div className="card-tags">
-          {damage?.state === "novideo" && (
+          {(damage?.state === "novideo" || soundOnly) && (
             <span className="src-tag" title="This file has sound but no picture (some recorders save a clip as audio only). Nothing to repair.">
-              No video
+              Sound only
             </span>
           )}
           {damage && (damage.state === "damaged" || damage.state === "unreadable") && (

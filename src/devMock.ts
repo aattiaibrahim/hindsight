@@ -364,10 +364,15 @@ export function installDevMock() {
     search_games: (a) => ["Overwatch 2", "Overcooked! 2", "Outer Wilds", "Overload"].filter((g) => g.toLowerCase().includes(String(a.term).toLowerCase())),
     known_lengths: (a) => (a.clips as unknown[]).map(() => 45),
     // ?medal: a Medal clip, "All Audio" (the others mixed) plus Game and Mic.
-    probe_file: () => ({ duration: 45, codec: "av1", width: 1920, height: 1080, fps: 60, audioTracks: medal ? 3 : 2, container: "matroska" }),
+    // The OBS clip is sound only (no picture), like an audio recording saved as a clip.
+    probe_file: (a) =>
+      String(a.path).includes("21-14-09")
+        ? { duration: 67, codec: "", width: 0, height: 0, fps: 0, audioTracks: 1, container: "mov,mp4" }
+        : { duration: 45, codec: "av1", width: 1920, height: 1080, fps: 60, audioTracks: medal ? 3 : 2, container: "matroska" },
     // Thumbnails matched to each game (frames picked from real clips for the README screenshots).
     thumbnail: (a) => {
       const p = a.path as string;
+      if (p.includes("21-14-09")) throw "no video stream";
       const by: [string, string[]][] = [["VALORANT", ["valorant"]], ["Counter-Strike", ["cs2a", "cs2b"]], ["Overwatch", ["ow1", "ow2"]], ["Rainbow", ["r6"]], ["Marvel", ["marvel"]], ["Hunt", ["hunt"]], ["Payday", ["payday"]]];
       const list = by.find(([k]) => p.toLowerCase().includes(k.toLowerCase()))?.[1] ?? ["cs2a"];
       return `/thumb-${list[p.length % list.length]}.jpg`;
