@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ClipFile } from "./api";
 import { GameIcon } from "./GameIcon";
 import { useNearView, useThumb } from "./hooks";
@@ -100,6 +100,18 @@ export function OnThisDay({ clips, onOpenClip }: { clips: ClipFile[]; onOpenClip
   });
   const memories = useMemo(() => memoriesFor(clips), [clips]);
   const [open, setOpen] = useState<Memory | null>(null);
+  // Esc closes the day's clips (unless a dialog or a text box has it).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || document.querySelector(".modal-backdrop")) return;
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      setOpen(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
   if (hidden || memories.length === 0) return null;
   return (
     <section className="memories" aria-label="On this day">
@@ -137,10 +149,13 @@ export function OnThisDay({ clips, onOpenClip }: { clips: ClipFile[]; onOpenClip
               {open.clips.length} clip{open.clips.length === 1 ? "" : "s"}
             </small>
             <span style={{ flex: 1 }} />
-            <button className="round small-x" aria-label="Close" title="Close" onClick={() => setOpen(null)}>
-              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-                <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-              </svg>
+            <button className="memory-close" aria-label="Close" title="Close (Esc)" onClick={() => setOpen(null)}>
+              <span className="memory-close-x" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="12" height="12">
+                  <path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+                </svg>
+              </span>
+              Close
             </button>
           </div>
           <div className="memory-clips">

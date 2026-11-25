@@ -1795,3 +1795,21 @@ small, .muted, .err-text, .note, p { overflow-wrap: anywhere; }
 /* A clip with sound but no picture: a sound wave where its picture would be. */
 .thumb.sound-only { background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 16%, var(--raised)), var(--raised)); }
 .sound-only-art { position: absolute; inset: 0; display: grid; place-items: center; color: color-mix(in srgb, var(--accent) 70%, var(--text)); opacity: 0.85; pointer-events: none; }
+
+/* "Desktop": a screen on an accent tint, so it reads as its own place, not a missing logo. */
+.game-icon.none.desktop { background: color-mix(in srgb, var(--accent) 22%, var(--raised)); color: color-mix(in srgb, var(--accent) 60%, var(--text)); }
+/* On this day: closing a day's clips. A small pill with the × in a circle that turns on hover. */
+.memory-close {
+  display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px 0 5px; border-radius: 999px;
+  border: 1px solid var(--line-2); background: color-mix(in srgb, var(--text) 5%, transparent); color: var(--text-2);
+  font-size: 12.5px; font-weight: 600; cursor: pointer;
+  transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.memory-close-x {
+  width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--text) 10%, transparent); transition: transform 0.25s var(--ease), background-color var(--fast) var(--ease);
+}
+.memory-close:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.memory-close:hover .memory-close-x { background: var(--accent); color: #fff; transform: rotate(90deg); }
+.memory-close:active { transform: scale(0.97); }
+.memory-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

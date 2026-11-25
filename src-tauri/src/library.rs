@@ -642,6 +642,83 @@ fn nas_app_thumbnail(path: &str, out: &Path) -> bool {
 }
 
 pub fn thumbnail(path: &str, cache: &Path) -> Result<String, String> {
+    let made = thumbnail_with_bars(path, cache)?;
+    Ok(without_bars(Path::new(&made)).to_string_lossy().into_owned())
+}
+
+/// Black bars along the sides (a 4:3 game recorded in a 16:9 frame) or top and bottom:
+/// the thumbnail cut to the picture, so it fills its card. Made once from the cached
+/// thumbnail (nothing is read from the clip again) and kept next to it as "…-c.jpg".
+fn without_bars(thumb: &Path) -> PathBuf {
+    let stem = thumb.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let out = thumb.with_file_name(format!("{stem}-c.jpg"));
+    if out.exists() {
+        return out;
+    }
+    let crop = small_gray(thumb).and_then(|px| bars(&px, BAR_W, BAR_H));
+    let tmp = thumb.with_file_name(format!("{stem}-c.part.jpg"));
+    let done = match crop {
+        Some((x, y, w, h)) => {
+            let vf = format!("crop=iw*{w:.4}:ih*{h:.4}:iw*{x:.4}:ih*{y:.4}");
+            let mut args = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y", "-i"]);
+            args.push(thumb.into());
+            args.extend(ffmpeg::args(&["-vf", &vf, "-q:v", "4"]));
+            args.push(tmp.clone().into());
+            ffmpeg::run_limited("ffmpeg", &args, Some(std::time::Duration::from_secs(10))).is_ok() && fs::rename(&tmp, &out).is_ok()
+        }
+        // No bars: the same picture under the new name, so it isn't looked at again.
+        None => fs::copy(thumb, &tmp).is_ok() && fs::rename(&tmp, &out).is_ok(),
+    };
+    let _ = fs::remove_file(&tmp);
+    if done { out } else { thumb.to_path_buf() }
+}
+
+const BAR_W: usize = 160;
+const BAR_H: usize = 90;
+
+/// The thumbnail as BAR_W × BAR_H grey pixels, for finding bars.
+fn small_gray(thumb: &Path) -> Option<Vec<u8>> {
+    let vf = format!("scale={BAR_W}:{BAR_H},format=gray");
+    let out = ffmpeg::cmd("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "error", "-i"])
+        .arg(thumb)
+        .args(["-vf", &vf, "-frames:v", "1", "-f", "rawvideo", "-"])
+        .output()
+        .ok()?;
+    (out.status.success() && out.stdout.len() == BAR_W * BAR_H).then_some(out.stdout)
+}
+
+/// Black bars in a grey picture (`w` × `h`): the part to keep, as fractions
+/// (x, y, width, height), or None if there are none. A bar is a whole column (or row)
+/// of near-black pixels at an edge; bars come in matching pairs (both sides, or top
+/// and bottom), so a dark scene, or a dark menu down one side, isn't cut.
+fn bars(px: &[u8], w: usize, h: usize) -> Option<(f64, f64, f64, f64)> {
+    const DARK: u8 = 22;
+    // At least 5% of the picture: 4:3 in 16:9 is 12.5% a side, and a thin dark edge
+    // of a game's menu isn't a bar.
+    let min_w = w / 20;
+    let min_h = h / 20;
+    // Nearly all of it: a game's little version number or a watermark can sit in a bar.
+    let col_dark = |x: usize| (0..h).filter(|&y| px[y * w + x] > DARK).count() <= h / 30;
+    let row_dark = |y: usize| (0..w).filter(|&x| px[y * w + x] > DARK).count() <= w / 30;
+    let left = (0..w).take_while(|&x| col_dark(x)).count();
+    if left == w {
+        return None; // all black (a black frame): nothing to show either way
+    }
+    let right = (0..w).rev().take_while(|&x| col_dark(x)).count();
+    let top = (0..h).take_while(|&y| row_dark(y)).count();
+    let bottom = (0..h).rev().take_while(|&y| row_dark(y)).count();
+    let pair = |a: usize, b: usize, n: usize, min: usize| a.min(b) >= min && a.abs_diff(b) <= n / 40 + 1 && a + b <= n / 2;
+    let (l, r) = if pair(left, right, w, min_w) { (left + 1, right + 1) } else { (0, 0) };
+    let (t, b) = if pair(top, bottom, h, min_h) { (top + 1, bottom + 1) } else { (0, 0) };
+    if l + r == 0 && t + b == 0 {
+        return None;
+    }
+    let (wf, hf) = (w as f64, h as f64);
+    Some((l as f64 / wf, t as f64 / hf, (w - l - r) as f64 / wf, (h - t - b) as f64 / hf))
+}
+
+fn thumbnail_with_bars(path: &str, cache: &Path) -> Result<String, String> {
     let out = thumbnail_path(path, cache)?;
     if out.exists() {
         return Ok(out.to_string_lossy().into_owned());
@@ -1584,6 +1661,56 @@ mod tidy_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A w × h grey picture: `lit` pixels are bright, the rest black.
+    fn picture(w: usize, h: usize, lit: impl Fn(usize, usize) -> bool) -> Vec<u8> {
+        (0..h).flat_map(|y| (0..w).map(move |x| (x, y))).map(|(x, y)| if lit(x, y) { 180 } else { 5 }).collect()
+    }
+
+    #[test]
+    fn black_bars_are_cut_and_dark_scenes_are_not() {
+        // 4:3 in 16:9: 20 black columns each side of a 160-wide picture.
+        let px = picture(160, 90, |x, _| (20..140).contains(&x));
+        let (x, y, w, h) = bars(&px, 160, 90).expect("side bars");
+        assert!((x - 21.0 / 160.0).abs() < 1e-9 && y == 0.0 && (w - 118.0 / 160.0).abs() < 1e-9 && h == 1.0);
+        // Letterbox: 10 black rows top and bottom.
+        let px = picture(160, 90, |_, y| (10..80).contains(&y));
+        let (_, y, w, h) = bars(&px, 160, 90).expect("top and bottom bars");
+        assert!(w == 1.0 && (y - 11.0 / 90.0).abs() < 1e-9 && (h - 68.0 / 90.0).abs() < 1e-9);
+        // Full picture, a black frame, a dark menu down one side only: left alone.
+        assert_eq!(bars(&picture(160, 90, |_, _| true), 160, 90), None);
+        assert_eq!(bars(&picture(160, 90, |_, _| false), 160, 90), None);
+        assert_eq!(bars(&picture(160, 90, |x, _| x >= 30), 160, 90), None, "one side only: a dark UI, not bars");
+        // A little text in a bar (a version number) still counts as a bar…
+        let px = picture(160, 90, |x, y| (20..140).contains(&x) || (y == 85 && (145..158).contains(&x)));
+        assert!(bars(&px, 160, 90).is_some(), "text in the bar");
+        // …but a column with real picture down it doesn't.
+        assert_eq!(bars(&picture(160, 90, |x, y| (20..140).contains(&x) || (x < 20 && y < 30)), 160, 90), None);
+    }
+
+    /// Real thumbnails (HINDSIGHT_LIVE_THUMBS=<thumbs folder>): how many have bars.
+    /// cargo test live_thumbnail_bars -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_thumbnail_bars() {
+        crate::ffmpeg::init(None);
+        let Ok(dir) = std::env::var("HINDSIGHT_LIVE_THUMBS") else { return };
+        let (mut n, mut cut) = (0, 0);
+        for e in fs::read_dir(dir).unwrap().flatten().take(400) {
+            let p = e.path();
+            if p.to_string_lossy().ends_with("-c.jpg") {
+                continue;
+            }
+            n += 1;
+            if let Some(b) = small_gray(&p).and_then(|px| bars(&px, BAR_W, BAR_H)) {
+                cut += 1;
+                if cut <= 15 {
+                    println!("{} -> keep x {:.3} y {:.3} w {:.3} h {:.3}", p.display(), b.0, b.1, b.2, b.3);
+                }
+            }
+        }
+        println!("{cut} of {n} thumbnails have bars");
+    }
 
 
     /// A real Medal clip (REWIND_MEDAL_CLIP=path): a copy is trimmed (keyframe and

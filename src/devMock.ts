@@ -37,6 +37,7 @@ export function installDevMock() {
   clips.push(
     { path: "C:\\Users\\you\\nas\\VALORANT\\VALORANT 2026-11-02 - OTHER-PC.mkv", name: "VALORANT 2026-11-02 - OTHER-PC", folder: "VALORANT", size: 52 << 20, modified: now - 0.5 * day, external: false, location: "nas", onNas: false, source: "NAS" },
     { path: "C:\\Users\\you\\Videos\\Hindsight\\OBS\\2026-11-03 21-14-09.mkv", name: "2026-11-03 21-14-09", folder: "OBS", size: 88 << 20, modified: now - 0.7 * day, external: false, location: "local", onNas: false, source: "Hindsight" },
+    { path: "C:\\Users\\you\\Videos\\Hindsight\\Desktop\\Desktop 2026-11-02 18-30-00.mkv", name: "Desktop 2026-11-02 18-30-00", folder: "Desktop", size: 40 << 20, modified: now - 0.8 * day, external: false, location: "local", onNas: false, source: "" },
     { path: "C:\\Users\\you\\Medal\\Clips\\Valorant\\Medal clip.mp4", name: "Medal clip", folder: "Valorant", size: 30 << 20, modified: now - 0.6 * day, external: true, location: "linked", onNas: false, source: "Medal" },
   );
   // Clips from this date one and two years back, for "On this day".
