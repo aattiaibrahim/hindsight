@@ -23,6 +23,7 @@ import {
 import { api, ClipFile, codecLabel, errText, fmtSize, fmtTime, Health, PreviewAudio, Probe, Settings, TrackEdit, Upload, UploadProgress, Waveform, mediaSrc } from "./api";
 import { AudioLanes, hasAudioEdits, isMutedAt } from "./AudioLanes";
 import { mediaCors, setLevel } from "./boost";
+import { finished, started } from "./activity";
 import { useThumb } from "./hooks";
 import { SharePanel, ShareRequest } from "./Share";
 import { DiagnosticsButton } from "./About";
@@ -693,8 +694,12 @@ export function Studio({
     // Still looking at the clip being saved? If not, it finishes in the background
     // and you get a notice, instead of being taken back to it.
     const stillHere = () => mounted.current && openPath.current === from;
+    // Its card in the library shimmers while this runs, and glows once when it's done.
+    if (from) started([from]);
+    let made: string | null = null;
     try {
       const out = await fn();
+      made = out;
       onDone();
       if (!stillHere()) {
         onSavedElsewhere?.(replaces ? "Saved your edit over the original" : "Saved your edit", out);
@@ -719,6 +724,7 @@ export function Studio({
     } finally {
       un.then((f) => f());
       setJob((j) => (j && j.id === id ? null : j));
+      if (from) finished([from], made ? [made] : []);
     }
   };
 

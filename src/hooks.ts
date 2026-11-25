@@ -1,5 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { forgetGone, isLeaving, leavesDone, slide, snapshot } from "./activity";
 import { api, ClipFile, Settings, Status, UpdateState, NOT_NEEDED, markOnScreen, mediaReady, whenMediaReady, want as wantThumb } from "./api";
 
 export function useUpdate() {
@@ -50,7 +52,18 @@ export function useSettings() {
 export function useClips() {
   const [clips, setClips] = useState<ClipFile[] | null>(null);
   const refresh = useCallback(() => {
-    api.listClips().then(setClips).catch(() => setClips([]));
+    api
+      .listClips()
+      .then(async (list) => {
+        if (!isLeaving()) return setClips(list);
+        // Deleted clips: let their cards finish leaving, then slide the rest into place.
+        await leavesDone();
+        const before = snapshot();
+        flushSync(() => setClips(list));
+        slide(before);
+        forgetGone(list.map((c) => c.path));
+      })
+      .catch(() => setClips([]));
   }, []);
   useEffect(() => {
     refresh();
