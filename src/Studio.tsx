@@ -23,7 +23,7 @@ import {
 import { api, ClipFile, codecLabel, errText, fmtSize, fmtTime, Health, PreviewAudio, Probe, Settings, TrackEdit, Upload, UploadProgress, Waveform, mediaSrc } from "./api";
 import { AudioLanes, hasAudioEdits, isMutedAt } from "./AudioLanes";
 import { mediaCors, setLevel } from "./boost";
-import { finished, started } from "./activity";
+import { finished, jobLabel, progress, started } from "./activity";
 import { useThumb } from "./hooks";
 import { SharePanel, ShareRequest } from "./Share";
 import { DiagnosticsButton } from "./About";
@@ -689,13 +689,15 @@ export function Studio({
     setResult(null);
     // How far the save has got, from ffmpeg (see edit-progress in lib.rs).
     const un = listen<{ path: string; pct: number }>("edit-progress", (e) => {
-      if (e.payload.path === from) setJob((j) => (j && j.id === id ? { ...j, pct: Math.max(j.pct ?? 0, e.payload.pct) } : j));
+      if (e.payload.path !== from) return;
+      setJob((j) => (j && j.id === id ? { ...j, pct: Math.max(j.pct ?? 0, e.payload.pct) } : j));
+      progress(from, e.payload.pct);
     });
     // Still looking at the clip being saved? If not, it finishes in the background
     // and you get a notice, instead of being taken back to it.
     const stillHere = () => mounted.current && openPath.current === from;
     // Its card in the library shimmers while this runs, and glows once when it's done.
-    if (from) started([from]);
+    if (from) started([from], jobLabel(label));
     let made: string | null = null;
     try {
       const out = await fn();

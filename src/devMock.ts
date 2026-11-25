@@ -284,7 +284,13 @@ export function installDevMock() {
     rescue_clip: (a) => (a.path as string).replace(/\.(\w+)$/, " (rescued).$1"),
     heal_clip: async (a) => (await new Promise((r) => setTimeout(r, 900)), a.path as string),
     // A save that takes a few seconds, to try leaving the clip while it runs.
-    trim_clip: async (a) => (await new Promise((r) => setTimeout(r, 4000)), a.replace ? (a.path as string) : (a.path as string).replace(/\.(\w+)$/, " (edit).$1")),
+    trim_clip: async (a) => {
+      for (let pct = 0; pct <= 100; pct += 12.5) {
+        (listeners.get("edit-progress") ?? []).forEach((id) => callbacks.get(id)?.({ event: "edit-progress", id: 0, payload: { path: a.path, pct } }));
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      return a.replace ? (a.path as string) : (a.path as string).replace(/\.(\w+)$/, " (edit).$1");
+    },
     export_audio: (a) => (a.path as string).replace(/\.(\w+)$/, " (audio).mp3"),
     copy_text: () => null,
     set_secret: (a) => { secrets[a.name as string] = !!a.value; return null; },

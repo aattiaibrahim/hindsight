@@ -9,6 +9,9 @@ import { useSyncExternalStore } from "react";
 export type Activity = "busy" | "done" | "leaving" | null;
 
 const busy = new Map<string, number>(); // path -> how many jobs
+/** A named job on a clip (a Studio save): what it's doing and how far it's got. */
+export type Job = { path: string; label: string; pct: number | null };
+const jobs = new Map<string, Job>(); // path -> its job
 const done = new Map<string, number>(); // path -> timer
 const leaving = new Map<string, number>(); // path -> when it started (ms)
 const listeners = new Set<() => void>();
@@ -24,9 +27,21 @@ const changed = () => {
 export const LEAVE_MS = 260;
 const GLOW_MS = 900;
 
-/** A job on these clips started: their cards shimmer until `finished`. */
-export function started(paths: string[]) {
-  paths.forEach((p) => busy.set(norm(p), (busy.get(norm(p)) ?? 0) + 1));
+/** A job on these clips started: their cards shimmer until `finished`. `label`
+ *  ("Trimming"): shown on the card and in the status bar, with its progress. */
+export function started(paths: string[], label?: string) {
+  paths.forEach((p) => {
+    busy.set(norm(p), (busy.get(norm(p)) ?? 0) + 1);
+    if (label) jobs.set(norm(p), { path: p, label, pct: null });
+  });
+  changed();
+}
+
+/** How far a labelled job has got (0-100). */
+export function progress(path: string, pct: number) {
+  const j = jobs.get(norm(path));
+  if (!j || j.pct === pct) return;
+  jobs.set(norm(path), { ...j, pct: Math.max(j.pct ?? 0, Math.round(pct)) });
   changed();
 }
 
@@ -36,6 +51,7 @@ export function finished(paths: string[], glow: string[] = []) {
     const n = (busy.get(norm(p)) ?? 1) - 1;
     if (n > 0) busy.set(norm(p), n);
     else busy.delete(norm(p));
+    jobs.delete(norm(p));
   });
   glow.forEach((p) => {
     const k = norm(p);
@@ -99,6 +115,30 @@ export function activityOf(path: string): Activity {
 export function useActivity(path: string): Activity {
   useSyncExternalStore(subscribe, () => version);
   return activityOf(path);
+}
+
+/** This clip's named job, if it has one (re-renders as it moves on). */
+export function useJob(path: string): Job | null {
+  useSyncExternalStore(subscribe, () => version);
+  return jobs.get(norm(path)) ?? null;
+}
+
+/** Every named job running now, for the status bar. */
+export function useJobs(): Job[] {
+  useSyncExternalStore(subscribe, () => version);
+  return [...jobs.values()];
+}
+
+/** What a Studio save is doing, for its card: "Saving trim…" -> "Trimming". */
+export function jobLabel(label: string) {
+  const l = label.toLowerCase();
+  if (l.startsWith("saving trim")) return "Trimming";
+  if (l.startsWith("saving crop")) return "Cropping";
+  if (l.startsWith("saving audio")) return "Saving audio";
+  if (l.startsWith("compress")) return "Compressing";
+  if (l.startsWith("export")) return "Exporting";
+  if (l.startsWith("remux")) return "Converting";
+  return label.replace(/…$/, "");
 }
 
 // Sliding the other cards into place (FLIP): where each card was before the list

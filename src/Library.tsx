@@ -2,7 +2,7 @@ import { Select } from "./Select";
 import { open } from "@tauri-apps/plugin-dialog";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ClipFile, codecLabel, errText, fmtDuration, fmtSize, forDesktop, GameSuggestion, Health, Probe, Upload, UploadProgress, NOT_NEEDED, VIDEO_EXTENSIONS, want } from "./api";
-import { useActivity } from "./activity";
+import { useActivity, useJob } from "./activity";
 import { RETRY_MS, useNearView, useOnScreen, useSettings, useThumb, useThumbStatus } from "./hooks";
 import { MoveToDialog } from "./MoveTo";
 import { NewGameDialog } from "./NewGame";
@@ -230,6 +230,7 @@ function ClipCard({
   const nasState = badgeIn(view, nasStatus(clip, nasOn, copying));
   // Being saved, moved or copied to the NAS: a shimmer. Just changed: a glow. Deleted: it leaves.
   const act = useActivity(clip.path) ?? (copying === clip.path ? "busy" : null);
+  const job = useJob(clip.path);
 
   return (
     <button
@@ -308,6 +309,19 @@ function ClipCard({
             </span>
           )}
         </div>
+        {/* Being trimmed (or compressed…) in Studio: what, and how far, over the picture. */}
+        {job && (
+          <>
+            <span className="card-job" title={`${job.label} in Studio`}>
+              <Icon name="totrim" size={12} />
+              {job.label}
+              {job.pct != null ? ` ${job.pct}%` : "…"}
+            </span>
+            <span className="card-job-bar" aria-hidden="true">
+              <span style={{ width: `${job.pct ?? 0}%` }} className={job.pct == null ? "unknown" : ""} />
+            </span>
+          </>
+        )}
         {/* Status that matters at a glance stays visible; the rest shows on hover, like Immich. */}
         <div className="card-tags">
           {damage?.state === "novideo" && (

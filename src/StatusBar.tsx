@@ -4,6 +4,7 @@ import { audioLine, folderLine, RecordButton } from "./BufferCard";
 import { NasProgress, useNasState } from "./NasProgress";
 import { SyncStatus } from "./SyncStatus";
 import { MoveStatusItem } from "./MoveStatus";
+import { JobStatusItem } from "./JobStatus";
 
 /**
  * One thin line along the bottom of the window: the buffer, what it records,
@@ -18,7 +19,10 @@ export function StatusBar({
   customArea = false,
   onFitScreen,
   onSyncWhilePlaying,
+  onOpenClip,
 }: {
+  /** Open a clip in Studio (a trim running there, from its status) */
+  onOpenClip?: (path: string) => void;
   status: Status | null;
   hotkey: string;
   recordHotkey: string;
@@ -108,6 +112,7 @@ export function StatusBar({
         </button>
       )}
       <SyncStatus nas={nas} onSyncWhilePlaying={onSyncWhilePlaying} />
+      <JobStatusItem onOpen={onOpenClip} />
       <MoveStatusItem />
       <span style={{ flex: 1 }} />
       {err && <span className="sb-item bad">{err}</span>}

@@ -651,6 +651,7 @@ export default function App() {
         hotkey={settings?.hotkey ?? "Alt+F10"}
         recordHotkey={settings?.recordHotkey ?? "Alt+F9"}
         version={upd?.current}
+        onOpenClip={openInStudio}
         customArea={!!settings?.captureArea}
         onSyncWhilePlaying={() => update({ nasSyncWhileGaming: true }).then(() => toast("Syncing to the NAS while you play (turn it off in Settings → Library)")).catch((e) => toast(errText(e), true))}
         onFitScreen={() => update({ captureArea: null }).then(() => toast("Recording the whole screen again")).catch((e) => toast(errText(e), true))}
