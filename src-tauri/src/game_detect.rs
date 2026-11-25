@@ -476,6 +476,10 @@ const CLOSE_LIKENESS: f32 = 0.88;
 /// show the maybes too (unticked, you pick). Clips that look like the desktop or an
 /// app still never count as a game.
 const LOOSE_LIKENESS: f32 = 0.82;
+/// A clip in a folder that isn't a game's, most like your Desktop clips: suggested for
+/// Desktop (unticked) when most of its votes say so.
+const DESKTOP_SHARE: f32 = 0.5;
+const DESKTOP_LIKENESS: f32 = 0.75;
 
 /// Games that replaced another and look alike on screen: (old, new, the day the new
 /// one came out, in ms). A clip from before that day is the old game, from after it
@@ -646,6 +650,13 @@ fn rank_with(
         let here = crate::consolidate::game_key(&c.folder);
         if game == NOT_A_GAME {
             *desktop_like += 1;
+            // In OBS, Edits, Screen Recording…: offer Desktop, where footage that isn't a
+            // game goes. Never ticked: you pick (a game from `choices` instead, if it is one).
+            if here != crate::consolidate::game_key(NOT_A_GAME) && needs_game(c, also, skip) && share >= DESKTOP_SHARE && likeness >= DESKTOP_LIKENESS {
+                let choices: Vec<(String, f32)> =
+                    ranked.into_iter().filter(|(g, s)| *s >= 0.15 && crate::consolidate::game_key(g) != here).take(3).collect();
+                out.push(Suggestion { path: c.path.clone(), name: c.name.clone(), folder: c.folder.clone(), game, confidence: share, likeness, sure: false, choices });
+            }
             continue;
         }
         if crate::consolidate::game_key(&game) == here {
@@ -827,6 +838,26 @@ mod tests {
         let got = suggest_from(&all, &[], &[], &[], |c| Some(if c.folder == "OBS" { v(1.0, 0.02) } else { v(1.0, 0.01 + c.path.len() as f32 / 1000.0) }));
         assert_eq!(got.len(), 1);
         assert_eq!((got[0].path.as_str(), got[0].game.as_str()), (r"\\nas\c\OBS\new.mkv", "Apex Legends"));
+    }
+
+    #[test]
+    fn desktop_footage_in_obs_is_offered_for_desktop_unticked() {
+        let mut all: Vec<_> = (0..5).map(|i| clip(&format!(r"C:\c\Desktop\{i}.mkv"), "Desktop", "local")).collect();
+        all.extend((0..5).map(|i| clip(&format!(r"C:\c\Valorant\{i}.mkv"), "Valorant", "local")));
+        all.push(clip(r"C:\c\OBS\discord.mkv", "OBS", "local"));
+        all.push(clip(r"C:\c\Valorant\menu.mkv", "Valorant", "local"));
+        // Desktop clips point one way, Valorant's the other; "discord" and "menu" look like the desktop.
+        let print = |c: &crate::library::ClipFile| {
+            let desk = c.folder == "Desktop" || c.path.ends_with("discord.mkv") || c.path.ends_with("menu.mkv");
+            // Each clip a little different (identical prints count as the same clip).
+            let n = (c.path.bytes().map(u32::from).sum::<u32>() % 97) as f32 / 1000.0;
+            Some(if desk { v(1.0, 0.01 + n) } else { v(0.01 + n, 1.0) })
+        };
+        let got = suggest_from(&all, &[], &[], &[], print);
+        assert_eq!(got.len(), 1, "{got:?}");
+        assert_eq!((got[0].path.as_str(), got[0].game.as_str(), got[0].sure), (r"C:\c\OBS\discord.mkv", NOT_A_GAME, false));
+        // A game's folder: a clip that looks like the desktop (a menu) isn't sent to Desktop.
+        assert!(rank_clips(&all, &[], &[], &[], |c| in_folder(c, "Valorant"), print).is_empty());
     }
 
     #[test]

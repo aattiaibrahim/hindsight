@@ -1273,6 +1273,8 @@ p.small { font-size: 12px; margin: 0; }
 .sort-head { margin: 10px 8px 2px; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
 .sort-head:first-child { margin-top: 0; }
 .sort-head small { font-weight: 400; }
+.sort-head-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sort-head-row > .btn { flex-shrink: 0; }
 .sort-sub { font-size: 15px; font-weight: 500; }
 .modal.notgame-modal { width: min(460px, 94vw); max-height: calc(100vh - 32px); display: flex; flex-direction: column; gap: 10px; }
 .notgame-list { display: flex; flex-direction: column; gap: 1px; overflow: auto; min-height: 0; max-height: 52vh; }
@@ -1697,3 +1699,27 @@ small, .muted, .err-text, .note, p { overflow-wrap: anywhere; }
 .clip-title-ext { flex: none; color: var(--muted); font-size: 0.8em; }
 .file-example { color: var(--text-2) !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-example b { font-weight: 600; color: var(--text); }
+
+/* A clip being changed (a save, a compress, a move, a copy to the NAS): a light
+   sweeps across its picture, tinted with the accent, until it's done. */
+.card.act-busy .thumb, .clip-row.act-busy .clip-row-thumb { position: relative; overflow: hidden; }
+.card.act-busy .thumb::after, .clip-row.act-busy .clip-row-thumb::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 2;
+  background: linear-gradient(100deg, transparent 25%, color-mix(in srgb, var(--accent) 22%, transparent) 45%, color-mix(in srgb, #fff 18%, transparent) 50%, color-mix(in srgb, var(--accent) 22%, transparent) 55%, transparent 75%);
+  background-size: 250% 100%; animation: thumb-shimmer 1.6s ease-in-out infinite;
+}
+.card.act-busy .thumb img, .clip-row.act-busy .clip-row-thumb img { filter: saturate(0.7) brightness(0.85); transition: filter var(--fast); }
+/* Just changed: one soft glow around it. */
+.card.act-done .thumb { animation: act-done 0.9s var(--ease); }
+.clip-row.act-done { animation: act-done 0.9s var(--ease); }
+@keyframes act-done {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent); }
+  30% { box-shadow: 0 0 0 3px var(--accent), 0 0 18px 2px color-mix(in srgb, var(--accent) 45%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+/* Deleted: it shrinks a little and fades (activity.ts LEAVE_MS), then the others slide into its place. */
+.card.act-leaving, .clip-row.act-leaving { animation: act-leave 0.26s var(--ease) forwards; pointer-events: none; }
+@keyframes act-leave { to { opacity: 0; transform: scale(0.9); } }
+:root[data-motion="reduce"] .card.act-busy .thumb::after, :root[data-motion="reduce"] .clip-row.act-busy .clip-row-thumb::after { animation: none; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+:root[data-motion="reduce"] .card.act-done .thumb, :root[data-motion="reduce"] .clip-row.act-done { animation: none; }
+:root[data-motion="reduce"] .card.act-leaving, :root[data-motion="reduce"] .clip-row.act-leaving { animation: act-leave 0.01s forwards; }

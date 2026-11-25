@@ -30,6 +30,8 @@ export type DetectStatus = { installed: boolean; downloading: number | null; loo
 /** Checking a game's folder for clips of other games. lookedAt: clips with a fingerprint, of clips. */
 /** desktopLike: clips that look like the desktop or an app, not a game. notGame: OBS, Edits… (looking for clips from a game). */
 export type FolderCheck = { suggestions: GameSuggestion[]; lookedAt: number; clips: number; desktopLike: number; notGame: boolean };
+/** A suggestion to move a clip to Desktop (it looks like the desktop or an app, not a game). */
+export const forDesktop = (s: { game: string }) => s.game.toLowerCase() === "desktop";
 export type GameSuggestion = { path: string; name: string; folder: string; game: string; confidence: number; likeness: number; sure: boolean; choices: [string, number][] };
 /** A montage to render: clip pieces in order, an optional song. */
 export type MontagePlan = {

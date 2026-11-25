@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, ClipFile, errText, fmtSize, Settings, DupeSet, GameSuggestion } from "./api";
+import { api, ClipFile, errText, fmtSize, Settings, DupeSet, GameSuggestion, forDesktop } from "./api";
 import { GameIcon } from "./GameIcon";
 import { ConfirmDialog } from "./ConfirmUpdate";
 import { useThumb } from "./hooks";
@@ -418,9 +418,10 @@ function Duplicates({ clips, onDelete, onChanged, run = 0 }: { clips: ClipFile[]
  *  opens the same check-before-it-moves list as the notification. */
 function GameSorting({ list, onReview }: { list: GameSuggestion[]; onReview: () => void }) {
   if (!list.length) return null;
+  const desk = list.filter(forDesktop).length;
   const sure = list.filter((s) => s.sure).length;
-  const close = list.length - sure;
-  const games = [...new Set(list.map((s) => s.game))];
+  const close = list.length - sure - desk;
+  const games = [...new Set(list.filter((s) => !forDesktop(s)).map((s) => s.game))];
   return (
     <section className="dupes">
       <div className="dupe-summary">
@@ -430,6 +431,8 @@ function GameSorting({ list, onReview }: { list: GameSuggestion[]; onReview: () 
             {sure > 0 && `${sure} clip${sure === 1 ? "" : "s"} matched to a game`}
             {sure > 0 && close > 0 && " · "}
             {close > 0 && `${close} to check`}
+            {(sure > 0 || close > 0) && desk > 0 && " · "}
+            {desk > 0 && `${desk} that look like the desktop or an app, for Desktop`}
           </div>
           <div className="sort-games">
             {games.slice(0, 6).map((g) => (

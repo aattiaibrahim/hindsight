@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { api, errText, FolderCheck, GameSuggestion } from "./api";
+import { api, errText, FolderCheck, forDesktop, GameSuggestion } from "./api";
 import { GameIcon } from "./GameIcon";
 import { useThumb } from "./hooks";
 import { ProgressBar, useCountProgress } from "./Progress";
@@ -15,7 +15,7 @@ function Found({ s }: { s: GameSuggestion }) {
       <span className="fc-name" title={s.path}>
         {s.name}
       </span>
-      <span className="fc-game" title={s.sure ? `Looks like ${s.game}` : `Might be ${s.game}`}>
+      <span className="fc-game" title={forDesktop(s) ? "Looks like the desktop or an app, not a game" : s.sure ? `Looks like ${s.game}` : `Might be ${s.game}`}>
         <GameIcon name={s.game} size={16} />
         <span>{s.game}</span>
         {!s.sure && <small className="muted">?</small>}
@@ -96,7 +96,12 @@ export function FolderCheckDialog({
   const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
   // OBS, Edits, Screen Recording…: looking for clips that are from a game, not "another" game.
   const notGame = !!check?.notGame;
-  const heading = `In “${folder}”: ${plural(found.length, "clip")} that look${found.length === 1 ? "s" : ""} like ${notGame ? "a game" : "another game"}`;
+  const desk = found.filter(forDesktop).length;
+  const fromGame = found.length - desk;
+  const heading = notGame
+    ? `In “${folder}”: ${[fromGame ? `${plural(fromGame, "clip")} from a game` : "", desk ? `${plural(desk, "clip")} for Desktop` : ""].filter(Boolean).join(", ")}`
+    : `In “${folder}”: ${plural(found.length, "clip")} that look${found.length === 1 ? "s" : ""} like another game`;
+  const hidden = check ? check.desktopLike - desk : 0;
   const pct = progress && progress[1] > 0 ? Math.round((progress[0] / progress[1]) * 100) : null;
 
   return createPortal(
@@ -184,10 +189,16 @@ export function FolderCheckDialog({
                 ))}
               </div>
             )}
-            {check.desktopLike > 0 && (
+            {desk > 0 && (
               <p className="muted small" style={{ margin: 0 }}>
-                {plural(check.desktopLike, "clip")} here look{check.desktopLike === 1 ? "s" : ""} like the desktop or an app (Discord, a browser, an
-                editor), not a game, so {check.desktopLike === 1 ? "it isn't" : "they aren't"} suggested. To move one anyway, select it and use Move to….
+                “Desktop” ones look like the desktop or an app (Discord, a browser, an editor), not a game. They're unticked: tick the ones to move,
+                or pick a game for one instead.
+              </p>
+            )}
+            {hidden > 0 && (
+              <p className="muted small" style={{ margin: 0 }}>
+                {plural(hidden, "more clip")} look{hidden === 1 ? "s" : ""} like the desktop or an app, but not clearly enough to suggest. To move one
+                anyway, select it and use Move to….
               </p>
             )}
             {left > 0 && (

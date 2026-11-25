@@ -1,7 +1,8 @@
 import { Select } from "./Select";
 import { open } from "@tauri-apps/plugin-dialog";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { api, ClipFile, codecLabel, errText, fmtDuration, fmtSize, GameSuggestion, Health, Probe, Upload, UploadProgress, NOT_NEEDED, VIDEO_EXTENSIONS, want } from "./api";
+import { api, ClipFile, codecLabel, errText, fmtDuration, fmtSize, forDesktop, GameSuggestion, Health, Probe, Upload, UploadProgress, NOT_NEEDED, VIDEO_EXTENSIONS, want } from "./api";
+import { useActivity } from "./activity";
 import { RETRY_MS, useNearView, useOnScreen, useSettings, useThumb, useThumbStatus } from "./hooks";
 import { MoveToDialog } from "./MoveTo";
 import { FolderCheckDialog } from "./FolderCheck";
@@ -112,8 +113,9 @@ function ClipRow({
   useOnScreen(rowRef, ["t:" + clip.path + String(clip.modified), "p:" + clip.path + String(clip.modified)]);
   const { src: thumb, loading } = useThumbStatus(clip.path, clip.modified, near);
   const time = new Date(clip.modified).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const act = useActivity(clip.path) ?? (copying === clip.path ? "busy" : null);
   return (
-    <button ref={rowRef} className={`clip-row ${selected ? "selected" : ""}`} onClick={onClick} title={clip.path} data-path={clip.path}>
+    <button ref={rowRef} className={`clip-row ${selected ? "selected" : ""} ${act ? `act-${act}` : ""}`} onClick={onClick} title={clip.path} data-path={clip.path}>
       <div className={`clip-row-thumb ${loading ? "loading" : ""}`}>{thumb && <img src={thumb} alt="" decoding="async" />}</div>
       <div className="clip-row-main">
         <div className="card-title">{clip.name}</div>
@@ -225,11 +227,14 @@ function ClipCard({
 
   const time = new Date(clip.modified).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
   const nasState = badgeIn(view, nasStatus(clip, nasOn, copying));
+  // Being saved, moved or copied to the NAS: a shimmer. Just changed: a glow. Deleted: it leaves.
+  const act = useActivity(clip.path) ?? (copying === clip.path ? "busy" : null);
 
   return (
     <button
       ref={cardRef}
-      className={`card ${selected ? "selected" : ""} ${returned ? "returned" : ""}`}
+      className={`card ${selected ? "selected" : ""} ${returned ? "returned" : ""} ${act ? `act-${act}` : ""}`}
+      aria-busy={act === "busy" || undefined}
       onClick={onClick}
       title={clip.path}
       data-path={clip.path}
@@ -1277,7 +1282,9 @@ function FolderScan({
   if (!settings.gameDetect || !auto) return place === "title" && !UNSORTED_FOLDERS.has(k) ? <FindGameButton folder={folder} onToast={onToast} /> : null;
   // Looked through on its own already: the same pop-up shows what it found, maybes included.
   if (place !== "bar") return <CheckFolderButton folder={folder} onReviewList={onReviewList} onToast={onToast} always={false} />;
-  const waiting = sortList.filter((s) => folderKey(s.folder) === k).length;
+  const here = sortList.filter((s) => folderKey(s.folder) === k);
+  const desk = here.filter(forDesktop).length;
+  const waiting = here.length - desk;
   return (
     <div
       className="scan-bar"
@@ -1290,10 +1297,11 @@ function FolderScan({
           {" "}
           {waiting
             ? `${waiting} clip${waiting === 1 ? " is" : "s are"} ready to sort into ${waiting === 1 ? "its game's folder" : "their games' folders"}.`
-            : "None it's sure about right now. Check folder… shows the maybes, and which clips look like the desktop or an app."}
+            : "No game clips to sort right now."}
+          {desk > 0 && ` ${desk} look${desk === 1 ? "s" : ""} like the desktop or an app: Review offers ${desk === 1 ? "it" : "them"} for Desktop.`}
         </span>
       </span>
-      {waiting > 0 && onSortReview && (
+      {waiting + desk > 0 && onSortReview && (
         <button className="btn small primary" onClick={onSortReview}>
           Review
         </button>

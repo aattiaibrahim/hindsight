@@ -6,7 +6,8 @@ import { useHealth } from "./Health";
 import type { UploadProgress } from "./api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
-import { api, ClipFile, errText, GameSuggestion } from "./api";
+import { api, ClipFile, errText, forDesktop, GameSuggestion } from "./api";
+import { finished, leave, started, stay } from "./activity";
 import { StatusBar } from "./StatusBar";
 import { Icon, IconName } from "./icons";
 import { Cleanup } from "./Cleanup";
@@ -154,8 +155,10 @@ export default function App() {
       setStudioPath(null);
       await new Promise((r) => setTimeout(r, 200));
     }
+    leave(paths);
     try {
       const res = await api.deleteClips(paths);
+      stay(res.failed.map(([p]) => p));
       const n = res.deleted.length;
       if (n) {
         const restore = () =>
@@ -176,6 +179,7 @@ export default function App() {
       refresh();
       resolve(n > 0);
     } catch (e) {
+      stay(paths);
       toast(errText(e), true);
       resolve(false);
     } finally {
@@ -284,16 +288,18 @@ export default function App() {
       detail: "Checked byte for byte. Copies on the NAS never count.",
       actions: [{ label: "Open Cleanup", run: () => setView("cleanup"), primary: true }],
     });
-  const sureSorts = sortList.filter((s) => s.sure).length;
-  const closeSorts = sortList.length - sureSorts;
-  if (sortList.length)
+  // Clips offered for Desktop (Discord, the desktop…) are in Cleanup's list, but don't make a notice or the badge.
+  const gameSorts = sortList.filter((s) => !forDesktop(s));
+  const sureSorts = gameSorts.filter((s) => s.sure).length;
+  const closeSorts = gameSorts.length - sureSorts;
+  if (gameSorts.length)
     notices.push({
       id: `sort:${sureSorts}:${closeSorts}`,
       kind: "sort",
       title: sureSorts
         ? `Found the game for ${sureSorts} unsorted clip${sureSorts === 1 ? "" : "s"}${closeSorts ? ` (and ${closeSorts} to check)` : ""}`
         : `${closeSorts} unsorted clip${closeSorts === 1 ? "" : "s"} might be a game you play`,
-      detail: [...new Set(sortList.map((s) => s.game))].slice(0, 3).join(", ") + " and more, from what's on screen. Check them before they move.",
+      detail: [...new Set(gameSorts.map((s) => s.game))].slice(0, 3).join(", ") + " and more, from what's on screen. Check them before they move.",
       actions: [
         { label: "Review", run: () => setSortOpen(true), primary: true },
         { label: "Open Cleanup", run: () => setView("cleanup") },
@@ -396,8 +402,10 @@ export default function App() {
   // Library → select clips → Move to…: one folder, PC and NAS together, with Undo.
   const moveClipsTo = useCallback(
     async (paths: string[], folder: string) => {
+      started(paths); // their cards shimmer while they move
       try {
         const out = await api.moveToFolder(paths, folder);
+        finished(paths);
         refresh();
         const failed = out.failed.length;
         toast(
@@ -417,6 +425,7 @@ export default function App() {
         );
         return true;
       } catch (e) {
+        finished(paths);
         toast(errText(e), true);
         return false;
       }
@@ -538,9 +547,9 @@ export default function App() {
                 {trimClips.length}
               </span>
             )}
-            {id === "cleanup" && sortList.length > 0 && (
-              <span className="nav-badge quiet" title={`${sortList.length} clip${sortList.length === 1 ? "" : "s"} to sort into game folders`}>
-                {sortList.length}
+            {id === "cleanup" && gameSorts.length > 0 && (
+              <span className="nav-badge quiet" title={`${gameSorts.length} clip${gameSorts.length === 1 ? "" : "s"} to sort into game folders`}>
+                {gameSorts.length}
               </span>
             )}
             {id === "notifications" && noticeState.shown.length > 0 && (

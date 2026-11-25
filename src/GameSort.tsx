@@ -1,8 +1,9 @@
+import { finished, started } from "./activity";
 import { Select } from "./Select";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { api, ClipFile, DetectStatus, errText, GameSuggestion } from "./api";
+import { api, ClipFile, DetectStatus, errText, forDesktop, GameSuggestion } from "./api";
 import { GameIcon } from "./GameIcon";
 import { useSettings } from "./hooks";
 import { ClipPlayer, HoverPreview } from "./ClipPreview";
@@ -301,7 +302,16 @@ export function GameSortDialog({
   const options = (game: string) =>
     [...new Set([game, ...added, ...known])].filter((g) => key(g) !== key(NOT_A_GAME)).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
   const sure = list.filter((s) => s.sure);
-  const close = list.filter((s) => !s.sure);
+  // Offered for Desktop: footage of the desktop or an app, in OBS, Edits, Screen Recording…
+  const desk = list.filter((s) => !s.sure && forDesktop(s));
+  const close = list.filter((s) => !s.sure && !forDesktop(s));
+  const allDeskOn = desk.length > 0 && desk.every((s) => on.has(s.path));
+  const tickDesk = () =>
+    setOn((o) => {
+      const n = new Set(o);
+      desk.forEach((s) => (allDeskOn ? n.delete(s.path) : n.add(s.path)));
+      return n;
+    });
   const gameOf = (s: GameSuggestion) => games[s.path] ?? s.game;
   const chosen = list.filter((s) => on.has(s.path));
   // "Not a game" for a clip already in Desktop: nothing to move, just stop suggesting it.
@@ -312,7 +322,11 @@ export function GameSortDialog({
     setBusy(true);
     setErr(null);
     try {
-      const out = toMove.length ? await api.applyGameSort(toMove.map((s) => [s.path, gameOf(s)])) : { moved: 0, failed: [] };
+      const moving = toMove.map((s) => s.path);
+      started(moving); // their cards shimmer while they move
+      const out = toMove.length
+        ? await api.applyGameSort(toMove.map((s) => [s.path, gameOf(s)])).finally(() => finished(moving))
+        : { moved: 0, failed: [] };
       const done = [...turnedDown, ...chosen.filter(stays).map((s) => s.path)];
       if (done.length) await api.dismissGameSuggestions(done);
       onDone(out.moved, out.failed.length);
@@ -354,7 +368,12 @@ export function GameSortDialog({
     <div className="modal-backdrop" onClick={() => !busy && !folderPick && onClose()}>
       <div className="modal sort-modal" role="dialog" aria-modal="true" aria-label="Sort clips by game" onClick={(e) => e.stopPropagation()}>
         <h2>
-          {heading ?? (sure.length ? `Found the game for ${sure.length} clip${sure.length === 1 ? "" : "s"}` : "Clips that might be a game you play")}
+          {heading ??
+            (sure.length
+              ? `Found the game for ${sure.length} clip${sure.length === 1 ? "" : "s"}`
+              : close.length
+                ? "Clips that might be a game you play"
+                : "Clips that look like the desktop or an app")}
           {sure.length > 0 && close.length > 0 && <span className="muted sort-sub"> · {close.length} to check</span>}
         </h2>
         <p className="muted" style={{ margin: 0 }}>
@@ -363,7 +382,7 @@ export function GameSortDialog({
           later.
         </p>
         <div className="sort-list">
-          {sure.length > 0 && close.length > 0 && <h3 className="sort-head">Sure</h3>}
+          {sure.length > 0 && close.length + desk.length > 0 && <h3 className="sort-head">Sure</h3>}
           {sure.map(row)}
           {close.length > 0 && (
             <h3 className="sort-head">
@@ -371,6 +390,17 @@ export function GameSortDialog({
             </h3>
           )}
           {close.map(row)}
+          {desk.length > 0 && (
+            <h3 className="sort-head sort-head-row">
+              <span>
+                The desktop or an app, not a game: move to Desktop? <small className="muted">(or pick a game for one)</small>
+              </span>
+              <button type="button" className="btn small" onClick={tickDesk} disabled={busy}>
+                {allDeskOn ? "Untick all" : `Tick all ${desk.length}`}
+              </button>
+            </h3>
+          )}
+          {desk.map(row)}
           {!list.length && <p className="muted">Nothing left to sort.</p>}
         </div>
         {err && <small className="err-text">{err}</small>}
