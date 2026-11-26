@@ -523,8 +523,11 @@ export default function App() {
   // Turning Benchmark mode off while on its page, or the open clip going away
   // (deleted): go back to the clips.
   useEffect(() => {
-    if ((view === "performance" && settings && !settings.benchmarkMode) || (view === "studio" && !studioPath)) setView("clips");
-  }, [view, settings, studioPath]);
+    if (view === "performance" && settings && !settings.benchmarkMode) setView("clips");
+    // The clip open in Studio was deleted: back to the list you opened it from (NAS
+    // clips, To trim, a folder…), not always Clips.
+    else if (view === "studio" && !studioPath) setView(listView);
+  }, [view, settings, studioPath, listView]);
 
   // "Open on hover": the sidebar widens over a fixed column while the page slides
   // right by the same amount, both in one CSS transition (App.css). The page keeps its
