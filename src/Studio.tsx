@@ -593,6 +593,22 @@ export function Studio({
   );
   const toggleTheater = useCallback(() => setTheater((t: boolean) => !t), []);
 
+  // Clicking the video (or Space) plays or pauses, and the new state's icon flashes
+  // once in the middle, then goes: nothing stays over the picture while it plays.
+  const [flash, setFlash] = useState<{ play: boolean; k: number } | null>(null);
+  const tapTimer = useRef<number | undefined>(undefined);
+  const tapToggle = useCallback(() => {
+    const v = video.current;
+    if (!v) return;
+    setFlash({ play: v.paused, k: Date.now() });
+    window.clearTimeout(tapTimer.current);
+    tapTimer.current = window.setTimeout(() => setFlash(null), 650);
+    toggle();
+  }, [toggle]);
+  useEffect(() => () => window.clearTimeout(tapTimer.current), []);
+  // Fullscreen timeline: where the mouse is over it (0–1), for the time bubble.
+  const [seekHover, setSeekHover] = useState<number | null>(null);
+
   // Minimized, hidden to the tray, or covered: pause right where it is.
   useEffect(() => {
     const pause = () => video.current?.pause();
@@ -619,7 +635,7 @@ export function Studio({
       if (!v) return;
       if (e.code === "Space") {
         e.preventDefault();
-        toggle();
+        tapToggle();
       } else if (e.key === "i" || e.key === "I") setRange(([, b]) => [Math.min(v.currentTime, b - 0.1), b]);
       else if (e.key === "o" || e.key === "O") setRange(([a]) => [a, Math.max(v.currentTime, a + 0.1)]);
       else if (e.key === "ArrowLeft") seek(v.currentTime - (e.shiftKey ? 1 / 60 : 5));
@@ -643,7 +659,7 @@ export function Studio({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [path, toggle, seek, nudgeVolume, toggleMute, toggleFullscreen, toggleTheater, fullscreen, onBack, cropping]);
+  }, [path, tapToggle, seek, nudgeVolume, toggleMute, toggleFullscreen, toggleTheater, fullscreen, onBack, cropping]);
 
   // Dragging on the timeline: handles move in/out, anywhere else scrubs.
   const drag = (kind: "in" | "out" | "seek") => (e: React.PointerEvent) => {
@@ -968,40 +984,82 @@ export function Studio({
             {!playError && !cropping && (
               <div
                 className={`vid-overlay ${playing ? "playing" : "paused"}`}
-                onClick={(e) => e.target === e.currentTarget && toggle()}
+                onClick={(e) => e.target === e.currentTarget && tapToggle()}
                 onDoubleClick={(e) => e.target === e.currentTarget && toggleFullscreen()}
               >
-                <button
-                  className="vid-center"
-                  aria-label={playing ? "Pause" : "Play"}
-                  onClick={toggle}
-                  onDoubleClick={(e) => e.stopPropagation()}
-                >
-                  {playing ? Icon.pause : Icon.play}
-                </button>
+                {/* Only while paused: playing, nothing sits over the picture. */}
+                {!playing && !flash && (
+                  <button className="vid-center" aria-label="Play" onClick={tapToggle} onDoubleClick={(e) => e.stopPropagation()}>
+                    {Icon.play}
+                  </button>
+                )}
+                {flash && (
+                  <div key={flash.k} className="vid-flash" aria-hidden="true">
+                    {flash.play ? Icon.play : Icon.pause}
+                  </div>
+                )}
                 <div className="vid-bar">
                   {fullscreen && (
                     <>
-                      <button className="vid-btn" aria-label={playing ? "Pause" : "Play"} onClick={toggle}>
-                        {playing ? Icon.pause : Icon.play}
-                      </button>
-                      <span className="mono vid-time">
-                        {fmtTime(time)} / {fmtTime(duration)}
-                      </span>
-                      <div className="vid-progress" onPointerDown={scrubProgress}>
-                        <div style={{ width: duration ? `${(time / duration) * 100}%` : 0 }} />
+                      {/* A tall strip the whole width: easy to hit, with a handle and the time under the mouse. */}
+                      <div
+                        className="fs-seek"
+                        role="slider"
+                        aria-label="Position"
+                        aria-valuemin={0}
+                        aria-valuemax={Math.round(duration)}
+                        aria-valuenow={Math.round(time)}
+                        onPointerDown={(e) => {
+                          const r = e.currentTarget.getBoundingClientRect();
+                          setSeekHover(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)));
+                          scrubProgress(e);
+                        }}
+                        onPointerMove={(e) => {
+                          const r = e.currentTarget.getBoundingClientRect();
+                          setSeekHover(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)));
+                        }}
+                        onPointerLeave={() => setSeekHover(null)}
+                      >
+                        <div className="fs-track">
+                          {seekHover != null && <div className="fs-ahead" style={{ width: `${seekHover * 100}%` }} />}
+                          <div className="fs-fill" style={{ width: duration ? `${(time / duration) * 100}%` : 0 }} />
+                        </div>
+                        <div className="fs-knob" style={{ left: duration ? `${(time / duration) * 100}%` : 0 }} />
+                        {seekHover != null && duration > 0 && (
+                          <div className="fs-tip mono" style={{ left: `${seekHover * 100}%` }}>
+                            {fmtTime(seekHover * duration)}
+                          </div>
+                        )}
                       </div>
-                      <button className="vid-btn" aria-label={muted ? "Unmute (M)" : "Mute (M)"} title={muted ? "Unmute (M)" : "Mute (M)"} onClick={toggleMute}>
-                        <SpeakerIcon level={muted ? 0 : volume} />
-                      </button>
-                      <Slider
-                        className="vid-volume"
-                        aria-label="Volume"
-                        title="Volume (scroll the wheel over the video, or ↑ ↓)"
-                        value={muted ? 0 : Math.round(volume * 100)}
-                        onValue={(v) => setVolume(v / 100)}
-                        style={{ width: 110 }}
-                      />
+                      <div className="fs-row">
+                        <button className="vid-btn" aria-label={playing ? "Pause" : "Play"} title="Play / pause (Space)" onClick={tapToggle}>
+                          {playing ? Icon.pause : Icon.play}
+                        </button>
+                        <button className="vid-btn" aria-label="Back 5 seconds" title="Back 5 s (←)" onClick={() => seek(time - 5)}>
+                          {Icon.back5}
+                        </button>
+                        <button className="vid-btn" aria-label="Forward 5 seconds" title="Forward 5 s (→)" onClick={() => seek(time + 5)}>
+                          {Icon.fwd5}
+                        </button>
+                        <button className="vid-btn" aria-label={muted ? "Unmute (M)" : "Mute (M)"} title={muted ? "Unmute (M)" : "Mute (M)"} onClick={toggleMute}>
+                          <SpeakerIcon level={muted ? 0 : volume} />
+                        </button>
+                        <Slider
+                          className="vid-volume"
+                          aria-label="Volume"
+                          title="Volume (scroll the wheel over the video, or ↑ ↓)"
+                          value={muted ? 0 : Math.round(volume * 100)}
+                          onValue={(v) => setVolume(v / 100)}
+                          style={{ width: 120 }}
+                        />
+                        <span className="mono vid-time">
+                          {fmtTime(time)} / {fmtTime(duration)}
+                        </span>
+                        <span style={{ flex: 1 }} />
+                        <button className="vid-btn" aria-label="Exit fullscreen" title="Exit fullscreen (F or Esc)" onClick={toggleFullscreen}>
+                          {Icon.exitFullscreen}
+                        </button>
+                      </div>
                     </>
                   )}
                   {!fullscreen && <span style={{ flex: 1 }} />}
@@ -1015,14 +1073,11 @@ export function Studio({
                       {theater ? Icon.theaterOff : Icon.theater}
                     </button>
                   )}
-                  <button
-                    className="vid-btn"
-                    aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"}
-                    title={fullscreen ? "Exit fullscreen (F or Esc)" : "Fullscreen (F)"}
-                    onClick={toggleFullscreen}
-                  >
-                    {fullscreen ? Icon.exitFullscreen : Icon.fullscreen}
-                  </button>
+                  {!fullscreen && (
+                    <button className="vid-btn" aria-label="Fullscreen" title="Fullscreen (F)" onClick={toggleFullscreen}>
+                      {Icon.fullscreen}
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -1068,11 +1123,8 @@ export function Studio({
               <button className="round icon" aria-label="Forward 5 seconds" title="Forward 5 s (→)" onClick={() => seek(time + 5)}>
                 {Icon.fwd5}
               </button>
-            </span>
-            <span className="mono time-readout">
-              {fmtTime(time)} <span className="muted">/ {fmtTime(duration)}</span>
-            </span>
-            <div className="volume" role="group" aria-label="Volume">
+              <span className="pill-divider" aria-hidden="true" />
+              <span className="volume" role="group" aria-label="Volume">
               <button
                 className="round"
                 aria-label={muted || volume === 0 ? "Unmute" : "Mute"}
@@ -1089,10 +1141,14 @@ export function Studio({
                 onValue={(v) => setVolume(v / 100)}
                 style={{ width: 96 }}
               />
-              <span className="mono" style={{ width: 38, textAlign: "right" }}>
+              <span className="mono vol-readout">
                 {muted ? "Muted" : `${Math.round(volume * 100)}%`}
               </span>
-            </div>
+              </span>
+            </span>
+            <span className="mono time-readout">
+              {fmtTime(time)} <span className="muted">/ {fmtTime(duration)}</span>
+            </span>
             <span style={{ flex: 1 }} />
             {cropping ? (
               <span className="transport-pill crop-tools" role="group" aria-label="Crop shape">

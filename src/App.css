@@ -218,8 +218,16 @@ h1 { margin: 0; font-family: var(--display); font-size: 28px; font-weight: 600; 
   transition: opacity 0.18s ease, transform 0.18s ease, background 0.18s ease;
 }
 .vid-center svg { width: 32px; height: 32px; }
-.vid-overlay.playing .vid-center svg { width: 30px; height: 30px; }
-.video-wrap.ui .vid-center { opacity: 0.42; transform: scale(1); }
+/* Paused: the play button shows (it isn't drawn while playing). */
+.vid-overlay.paused .vid-center { opacity: 0.8; transform: scale(1); }
+/* A click on the video: the new state's icon flashes once and goes. */
+.vid-flash {
+  position: absolute; left: 50%; top: 50%; width: 76px; height: 76px; margin: -38px 0 0 -38px; border-radius: 50%;
+  display: grid; place-items: center; background: rgba(0, 0, 0, 0.5); color: #fff; pointer-events: none;
+  animation: vid-flash 0.6s ease-out forwards;
+}
+.vid-flash svg { width: 32px; height: 32px; }
+@keyframes vid-flash { from { opacity: 0.9; transform: scale(0.9); } to { opacity: 0; transform: scale(1.25); } }
 .video-wrap .vid-center:hover, .video-wrap .vid-center:focus-visible { opacity: 0.95; background: rgba(0, 0, 0, 0.6); transform: scale(1.05); }
 .vid-bar {
   position: absolute; left: 0; right: 0; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 28px 12px 12px;
@@ -235,7 +243,22 @@ h1 { margin: 0; font-family: var(--display); font-size: 28px; font-weight: 600; 
 .vid-time { color: #fff; font-size: 13px; white-space: nowrap; }
 .vid-progress { flex: 1; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.25); cursor: pointer; overflow: hidden; }
 .vid-progress > div { height: 100%; background: var(--accent); }
-.video-wrap.fs .vid-bar { padding: 40px 24px 20px; gap: 14px; }
+/* Fullscreen: a tall, full-width timeline on its own line, bigger buttons under it. */
+.video-wrap.fs .vid-bar { flex-direction: column; align-items: stretch; gap: 6px; padding: 56px 28px 18px; background: linear-gradient(transparent, rgba(0, 0, 0, 0.7)); }
+.video-wrap.fs .vid-btn { width: 42px; height: 42px; border-radius: 10px; background: transparent; }
+.video-wrap.fs .vid-btn:hover { background: rgba(255, 255, 255, 0.16); }
+.video-wrap.fs .vid-btn svg { width: 22px; height: 22px; }
+.video-wrap.fs .vid-time { font-size: 14px; margin-left: 6px; }
+.fs-row { display: flex; align-items: center; gap: 6px; }
+.fs-seek { position: relative; height: 26px; display: flex; align-items: center; cursor: pointer; touch-action: none; }
+.fs-track { position: relative; flex: 1; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.25); overflow: hidden; transition: height 0.12s ease; }
+.fs-seek:hover .fs-track { height: 8px; }
+.fs-fill, .fs-ahead { position: absolute; left: 0; top: 0; bottom: 0; }
+.fs-fill { background: var(--accent); }
+.fs-ahead { background: rgba(255, 255, 255, 0.25); }
+.fs-knob { position: absolute; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5); transform: scale(0.75); transition: transform 0.12s ease; pointer-events: none; }
+.fs-seek:hover .fs-knob { transform: scale(1); }
+.fs-tip { position: absolute; bottom: 30px; transform: translateX(-50%); padding: 3px 8px; border-radius: 6px; background: rgba(0, 0, 0, 0.85); color: #fff; font-size: 12px; pointer-events: none; white-space: nowrap; }
 
 /* Studio: thumbnails of recent clips under the timeline. */
 .strip { display: flex; gap: 10px; overflow-x: auto; flex-shrink: 0; padding: 2px 2px 6px; }
@@ -264,6 +287,11 @@ h1 { margin: 0; font-family: var(--display); font-size: 28px; font-weight: 600; 
 .round.small-round[aria-pressed="true"] { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, transparent); }
 input[type="range"].track { width: auto; }
 .volume .round { display: inline-flex; align-items: center; justify-content: center; }
+/* Volume inside the play pill: a thin divider, then speaker, slider and level. */
+.pill-divider { width: 1px; height: 22px; background: var(--line-2); margin: 0 4px; }
+.transport-pill .volume { gap: 6px; padding-right: 10px; }
+.transport-pill .volume .round { border: 0; }
+.vol-readout { width: 42px; text-align: right; font-size: 12px; color: var(--muted); }
 .volume .round[aria-pressed="true"] { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 50%, transparent); }
 .timeline { position: relative; height: 56px; border-radius: 8px; background: var(--panel); border: 1px solid var(--border); cursor: pointer; touch-action: none; }
 .tl-range { position: absolute; top: 0; bottom: 0; border: 2px solid var(--accent); border-radius: 8px; background: color-mix(in srgb, var(--accent) 9%, transparent); }
