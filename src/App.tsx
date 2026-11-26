@@ -5,7 +5,6 @@ import { ShareConfirm, ShareRequest, useUploads } from "./Share";
 import { useHealth } from "./Health";
 import type { UploadProgress } from "./api";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import "./App.css";
 import { api, ClipFile, errText, forDesktop, GameSuggestion } from "./api";
 import { finished, leave, started, stay } from "./activity";
@@ -73,12 +72,8 @@ export default function App() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   // Sidebar "Open on hover": open or not, and what's animating it.
   const [navOpen, setNavOpen] = useState(false);
-  const navOpenRef = useRef(false);
   const navTimer = useRef<number | undefined>(undefined);
-  const navAnims = useRef<Animation[]>([]);
-  const navClose = useRef<number | undefined>(undefined);
   const navRef = useRef<HTMLElement>(null);
-  const mainRef = useRef<HTMLElement>(null);
   const nextId = useRef(1);
   const status = useStatus();
   const [settings, update] = useSettings();
@@ -531,54 +526,14 @@ export default function App() {
     if ((view === "performance" && settings && !settings.benchmarkMode) || (view === "studio" && !studioPath)) setView("clips");
   }, [view, settings, studioPath]);
 
-  // "Open on hover": the page is laid out again once, not on every frame. Opening
-  // widens the sidebar's column straight away, then the page slides from where it
-  // was to its new place and the sidebar unrolls (both moved by the GPU). Closing
-  // slides back first, then narrows the column. A short wait first, so passing
-  // over the sidebar on the way somewhere doesn't open it.
+  // "Open on hover": the sidebar widens over a fixed column while the page slides
+  // right by the same amount, both in one CSS transition (App.css). The page keeps its
+  // size, so nothing is laid out again: its right edge passes the window's edge while
+  // the sidebar is open. A short wait first, so passing over the sidebar doesn't open it.
   const hoverNav = (open: boolean, now = false) => {
     if (settings?.sidebar !== "hover") return;
     window.clearTimeout(navTimer.current);
-    navTimer.current = window.setTimeout(() => moveNav(open), now ? 0 : open ? 90 : 140);
-  };
-  const moveNav = (open: boolean) => {
-    const main = mainRef.current;
-    const nav = navRef.current;
-    if (open === navOpenRef.current) return;
-    navAnims.current.forEach((a) => a.cancel());
-    navAnims.current = [];
-    const m = document.documentElement.dataset.motion;
-    const still = m === "reduce" || (m !== "on" && matchMedia("(prefers-reduced-motion: reduce)").matches);
-    const D = 124; // 184 - 60: how much wider it gets
-    const opts: KeyframeAnimationOptions = { duration: 190, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" };
-    // The page's own colour carried along its right edge, so no gap shows while it slides.
-    const fill = getComputedStyle(main ?? document.body).backgroundColor;
-    if (open) {
-      navOpenRef.current = true;
-      flushSync(() => setNavOpen(true));
-      if (still || !main || !nav) return;
-      navAnims.current = [
-        main.animate([{ transform: `translateX(-${D}px)`, boxShadow: `${D}px 0 0 0 ${fill}` }, { transform: "none", boxShadow: `${D}px 0 0 0 ${fill}` }], opts),
-        nav.animate([{ clipPath: `inset(0 ${D}px 0 0)` }, { clipPath: "inset(0 0 0 0)" }], opts),
-      ];
-    } else {
-      navOpenRef.current = false;
-      if (still || !main || !nav) {
-        setNavOpen(false);
-        return;
-      }
-      const a = main.animate([{ transform: "none", boxShadow: `${D}px 0 0 0 ${fill}` }, { transform: `translateX(-${D}px)`, boxShadow: `${D}px 0 0 0 ${fill}` }], { ...opts, fill: "forwards" });
-      const b = nav.animate([{ clipPath: "inset(0 0 0 0)" }, { clipPath: `inset(0 ${D}px 0 0)` }], { ...opts, fill: "forwards" });
-      navAnims.current = [a, b];
-      // On a timer, not the animation's own finish: that waits on frames being drawn.
-      window.clearTimeout(navClose.current);
-      navClose.current = window.setTimeout(() => {
-        if (navOpenRef.current) return; // opened again meanwhile
-        flushSync(() => setNavOpen(false));
-        a.cancel();
-        b.cancel();
-      }, 200);
-    }
+    navTimer.current = window.setTimeout(() => setNavOpen(open), now ? 0 : open ? 90 : 140);
   };
 
   return (
@@ -633,7 +588,7 @@ export default function App() {
           </button>
         ))}
       </nav>
-      <main className="main" ref={mainRef}>
+      <main className="main">
         {/* Every clip list you've opened stays loaded (hidden) behind the others,
             Studio and Settings, so switching back to it is instant. */}
         {LIST_VIEWS.filter((v) => v === listView || openedLists.has(v)).map((v) => (

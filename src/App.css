@@ -1739,8 +1739,14 @@ small, .muted, .err-text, .note, p { overflow-wrap: anywhere; }
    slides over and narrows to make room. In both, each item is laid out the same open or
    closed (icon on the left, name after it), so nothing moves or grows when you point at
    it: the name only fades in. */
-.shell.side-names,
-.shell.side-hover.side-open { grid-template-columns: 184px minmax(0, 1fr); }
+.shell.side-names { grid-template-columns: 184px minmax(0, 1fr); }
+/* Open on hover: the column stays 60 px. The sidebar widens past it and the page
+   slides right by the same 124 px, together (one transition, the same timing), and
+   the page keeps its size: only the small sidebar is laid out again, never the clips. */
+.shell.side-hover .nav { width: 60px; transition: width 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.shell.side-hover .main { transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.shell.side-hover.side-open .nav { width: 184px; }
+.shell.side-hover.side-open .main { transform: translateX(124px); }
 .shell.side-names .nav, .shell.side-hover .nav { align-items: stretch; overflow: hidden; }
 .shell.side-names .nav .brand, .shell.side-hover .nav .brand { place-items: start; padding-left: 8px; }
 .shell.side-names .nav-item, .shell.side-hover .nav-item {
