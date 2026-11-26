@@ -105,7 +105,7 @@ function subscribe(f: () => void) {
 
 export function activityOf(path: string): Activity {
   const k = norm(path);
-  if (leaving.has(k)) return "leaving";
+  if (leaving.has(k) || ghosts.has(k)) return "leaving";
   if (busy.has(k)) return "busy";
   if (done.has(k)) return "done";
   return null;
@@ -146,6 +146,20 @@ export function jobLabel(label: string) {
 // Sliding the other cards into place (FLIP): where each card was before the list
 // changed, then each one moves from there to where it is now.
 type Rects = Map<string, DOMRect>;
+
+/** Cards drawn a moment longer after their clip left a list, so they can fade out
+ *  (Library's ghosts). Look like "leaving", but nothing waits on them. */
+const ghosts = new Set<string>();
+export function ghost(paths: string[], on: boolean) {
+  paths.forEach((p) => (on ? ghosts.add(norm(p)) : ghosts.delete(norm(p))));
+  changed();
+}
+
+/** Animations are on (Settings → Appearance → Animations, or Windows when it follows Windows). */
+export function moving() {
+  const m = document.documentElement.dataset.motion;
+  return !(m === "reduce" || (m !== "on" && matchMedia("(prefers-reduced-motion: reduce)").matches));
+}
 
 /** Where the cards on screen are now (only ones near the window: cheap). */
 export function snapshot(): Rects {

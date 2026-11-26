@@ -2,7 +2,8 @@ import { Select } from "./Select";
 import { open } from "@tauri-apps/plugin-dialog";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ClipFile, codecLabel, errText, fmtDuration, fmtSize, forDesktop, GameSuggestion, Health, Probe, Upload, UploadProgress, NOT_NEEDED, VIDEO_EXTENSIONS, want } from "./api";
-import { useActivity, useJob } from "./activity";
+import { activityOf, ghost, LEAVE_MS, moving, slide, snapshot, useActivity, useJob } from "./activity";
+import { flushSync } from "react-dom";
 import { RETRY_MS, useNearView, useOnScreen, useSettings, useThumb, useThumbStatus } from "./hooks";
 import { MoveToDialog } from "./MoveTo";
 import { NewGameDialog } from "./NewGame";
@@ -491,9 +492,46 @@ function LibraryView({
   }, [clips]);
 
   /** Search and filters (not the game chip: Folders view groups by game itself). */
+  // A clip that leaves this list (saved over in To trim, moved out of Edits, synced
+  // away…) stays drawn for a moment as a "ghost" that shrinks and fades, then the rest
+  // slide into its place, instead of everything jumping at once. Only for a few at a
+  // time: switching folders, searching or filtering doesn't go through here.
+  const [ghosts, setGhosts] = useState<{ c: ClipFile; at: number }[]>([]);
+  const prevClips = useRef<ClipFile[] | null>(null);
+  useLayoutEffect(() => {
+    const prev = prevClips.current;
+    prevClips.current = clips;
+    if (!clips) return;
+    const now = new Set(clips.map((c) => c.path));
+    // One that came back (an undo) isn't a ghost any more.
+    setGhosts((g) => (g.some((x) => now.has(x.c.path)) ? g.filter((x) => !now.has(x.c.path)) : g));
+    if (!prev || !active || !moving()) return;
+    // Deleted ones animate already (App's delete); these are the others. The list can
+    // change again a moment later (a setting saved, then read back): a ghost carries
+    // on through that, on its own timer.
+    const gone = prev.flatMap((c, at) => (!now.has(c.path) && activityOf(c.path) !== "leaving" ? [{ c, at }] : []));
+    if (!gone.length || gone.length > 12) return;
+    const paths = gone.map((g) => g.c.path);
+    ghost(paths, true);
+    setGhosts((g) => [...g, ...gone]);
+    window.setTimeout(() => {
+      const before = snapshot();
+      flushSync(() => setGhosts((g) => g.filter((x) => !paths.includes(x.c.path))));
+      slide(before);
+      ghost(paths, false);
+    }, LEAVE_MS);
+  }, [clips]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** The list with any leaving clips still in their places. */
+  const shownClips = useMemo(() => {
+    if (!clips || !ghosts.length) return clips;
+    const out = [...clips];
+    for (const g of ghosts) if (!out.some((c) => c.path === g.c.path)) out.splice(Math.min(g.at, out.length), 0, g.c);
+    return out;
+  }, [clips, ghosts]);
+
   const matching = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const list = (clips ?? []).filter((c) => {
+    const list = (shownClips ?? []).filter((c) => {
       if (q && !`${c.name} ${c.folder} ${c.source}`.toLowerCase().includes(q)) return false;
       if (filters.where === "pc" && c.location === "nas") return false;
       if (filters.where === "nas" && !(c.onNas || c.location === "nas")) return false;
@@ -507,7 +545,7 @@ function LibraryView({
     if (sort === "old") list.reverse();
     if (sort === "big") list.sort((a, b) => b.size - a.size);
     return list;
-  }, [clips, query, filters, sort]);
+  }, [shownClips, query, filters, sort]);
 
   const groups = useMemo(() => {
     const want = gameKey(folder);
