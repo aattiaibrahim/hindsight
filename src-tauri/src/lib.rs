@@ -1398,6 +1398,40 @@ async fn trim_clip(
     }
 }
 
+/// Cut parts out of a clip: `pieces` are the parts kept (seconds of the original).
+/// `join`: one clip of them all (it can replace the original, like a trim); else
+/// each piece is saved as a clip of its own ("… (part 1)"), next to the original.
+/// Returns the clip(s) made.
+#[tauri::command]
+async fn cut_clip(
+    app: AppHandle,
+    path: String,
+    pieces: Vec<(f64, f64)>,
+    join: bool,
+    replace: bool,
+    audio: Option<audio_edit::AudioEdit>,
+    crop: Option<library::Crop>,
+) -> Result<Vec<String>, String> {
+    let audio = audio.unwrap_or_default();
+    let total: f64 = pieces.iter().map(|(a, b)| (b - a).max(0.0)).sum();
+    if join {
+        let out = edit(app, path, replace, Some(total), move |p| library::cut_joined(p, &pieces, &audio, crop)).await?;
+        return Ok(vec![out]);
+    }
+    // Several new clips: made in one go (progress covers them all), each keeping the clip's date.
+    let dates = library::dates_of(std::path::Path::new(&path));
+    let report = progress_to(&app, &path, Some(total));
+    let p = path.clone();
+    let made = blocking(move || ffmpeg::with_progress(report, || library::cut_separately(&p, &pieces, &audio, crop))).await?;
+    for m in &made {
+        if let Some(d) = dates {
+            library::set_dates(std::path::Path::new(m), d);
+        }
+        remember_edited(&app, m);
+    }
+    Ok(made)
+}
+
 /// Loudness over time for each audio track, for Studio's audio lanes.
 #[tauri::command]
 async fn clip_waveforms(app: AppHandle, path: String) -> Result<Vec<audio_edit::Waveform>, String> {
@@ -2619,6 +2653,7 @@ get_settings,
             preview_audio,
             remux_mp4,
             trim_clip,
+            cut_clip,
             clip_waveforms,
             export_h264,
             export_audio,

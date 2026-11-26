@@ -610,6 +610,9 @@ export const api = {
   remuxMp4: (path: string) => invoke<string>("remux_mp4", { path }),
   trim: (path: string, start: number, end: number, exact: boolean, replace = false, audio?: TrackEdit[], crop?: CropRect) =>
     invoke<string>("trim_clip", { path, start, end, exact, replace, audio: audio ?? null, crop: crop ?? null }),
+  /** Cut parts out: `pieces` are the parts kept. `join`: one clip; else each piece on its own. */
+  cutClip: (path: string, pieces: [number, number][], join: boolean, replace = false, audio?: TrackEdit[], crop?: CropRect) =>
+    invoke<string[]>("cut_clip", { path, pieces, join, replace, audio: audio ?? null, crop: crop ?? null }),
   clipWaveforms: (path: string) => invoke<Waveform[]>("clip_waveforms", { path }),
   exportH264: (path: string, replace = false, audio?: TrackEdit[], crop?: CropRect) =>
     invoke<string>("export_h264", { path, replace, audio: audio ?? null, crop: crop ?? null }),

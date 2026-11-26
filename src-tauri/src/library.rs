@@ -1492,6 +1492,111 @@ pub fn trim_cropped(path: &str, start: f64, end: f64, audio: &AudioEdit, crop: C
 }
 
 /// An H.264 + AAC MP4 that plays everywhere (audio tracks mixed into one).
+/// One kept piece of a clip, cut exactly (as Save trim does), with the audio edits
+/// and crop. Written next to the clip as "… (trim).ext".
+fn cut_piece(path: &str, start: f64, end: f64, audio: &AudioEdit, crop: Option<Crop>) -> Result<String, String> {
+    let out = match crop.filter(|c| !c.is_whole()) {
+        Some(c) => trim_cropped(path, start, end, audio, c)?,
+        None => trim(path, start, end, true, audio)?,
+    };
+    if !audio.is_empty() {
+        refresh_mix_track(&out)?;
+    }
+    Ok(out)
+}
+
+/// The pieces of a clip that are kept (seconds of the original, in order), joined
+/// into one clip: "… (cut).ext". Each piece is cut exactly; they're then joined
+/// without re-encoding when they line up (the usual case: same clip, same settings),
+/// else re-encoded together.
+pub fn cut_joined(path: &str, pieces: &[(f64, f64)], audio: &AudioEdit, crop: Option<Crop>) -> Result<String, String> {
+    let pieces = check_pieces(path, pieces)?;
+    if pieces.len() == 1 {
+        return cut_piece(path, pieces[0].0, pieces[0].1, audio, crop);
+    }
+    let src = Path::new(path);
+    let mut parts: Vec<String> = Vec::new();
+    let joined = (|| {
+        for &(a, b) in &pieces {
+            parts.push(cut_piece(path, a, b, audio, crop)?);
+        }
+        let ext = ext_of(Path::new(&parts[0]));
+        let out = unique(src, " (cut)", &ext);
+        let total: f64 = pieces.iter().map(|(a, b)| b - a).sum();
+        join_files(&parts, &out, total)
+    })();
+    for p in &parts {
+        let _ = fs::remove_file(p);
+    }
+    joined
+}
+
+/// Each kept piece as a clip of its own: "… (part 1).ext", "… (part 2).ext"…
+pub fn cut_separately(path: &str, pieces: &[(f64, f64)], audio: &AudioEdit, crop: Option<Crop>) -> Result<Vec<String>, String> {
+    let pieces = check_pieces(path, pieces)?;
+    let src = Path::new(path);
+    let mut out = Vec::new();
+    for (i, &(a, b)) in pieces.iter().enumerate() {
+        let made = cut_piece(path, a, b, audio, crop)?;
+        let to = unique(src, &format!(" (part {})", i + 1), &ext_of(Path::new(&made)));
+        rename_patiently(Path::new(&made), &to).map_err(|e| format!("Couldn't name piece {}: {e}", i + 1))?;
+        out.push(to.to_string_lossy().into_owned());
+    }
+    Ok(out)
+}
+
+/// Pieces in order, inside the clip, at least a tenth of a second long, not overlapping.
+fn check_pieces(path: &str, pieces: &[(f64, f64)]) -> Result<Vec<(f64, f64)>, String> {
+    let len = probe(path).map(|p| p.duration).unwrap_or(f64::MAX);
+    let mut v: Vec<(f64, f64)> = pieces.iter().map(|&(a, b)| (a.max(0.0), b.min(len))).filter(|(a, b)| b - a >= 0.1).collect();
+    v.sort_by(|x, y| x.0.total_cmp(&y.0));
+    if v.is_empty() {
+        return Err("Nothing is kept: every part is cut out.".into());
+    }
+    if v.windows(2).any(|w| w[1].0 < w[0].1 - 0.001) {
+        return Err("Two of the kept parts overlap.".into());
+    }
+    Ok(v)
+}
+
+/// Join video files one after another into `out`: copied when they line up, else
+/// re-encoded. Checked to be about `total` seconds long before it's kept.
+fn join_files(parts: &[String], out: &Path, total: f64) -> Result<String, String> {
+    let list = std::env::temp_dir().join(format!("hindsight-join-{}-{}.txt", std::process::id(), parts.len()));
+    let text: String = parts.iter().map(|p| format!("file '{}'\n", p.replace('\'', r"'\''"))).collect();
+    fs::write(&list, text).map_err(|e| e.to_string())?;
+    let part = part_of(out);
+    let run = |copy: bool| -> Result<(), String> {
+        let mut args = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i"]);
+        args.push(list.clone().into());
+        if copy {
+            args.extend(ffmpeg::args(&["-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero"]));
+        } else {
+            let codec = probe(&parts[0]).map(|p| p.codec).unwrap_or_else(|_| "h264".into());
+            let codec = if ["h264", "hevc", "av1"].contains(&codec.as_str()) { codec } else { "h264".into() };
+            args.extend(ffmpeg::args(&["-map", "0:v:0", "-map", "0:a?"]));
+            args.extend(venc(&codec, crate::encoders::Rate::Quality(21), &["-preset", "p5", "-cq", "21", "-b:v", "0"]));
+            args.extend(ffmpeg::args(&["-c:a", "aac", "-b:a", "192k"]));
+        }
+        args.push(part.clone().into());
+        ffmpeg::run("ffmpeg", &args).map(|_| ())?;
+        verify_output(&part, Some(total))
+    };
+    let made = run(true).or_else(|e| {
+        crate::log!("[rewind] joining by copy didn't work ({e}); re-encoding the pieces together");
+        let _ = fs::remove_file(&part);
+        run(false)
+    });
+    let _ = fs::remove_file(&list);
+    match made {
+        Ok(()) => publish(&part, out),
+        Err(e) => {
+            let _ = fs::remove_file(&part);
+            Err(format!("Couldn't join the pieces: {e}"))
+        }
+    }
+}
+
 pub fn export_h264(path: &str, audio: &AudioEdit, crop: Option<Crop>) -> Result<String, String> {
     export_h264_vf(path, unique(Path::new(path), " (H.264)", "mp4"), audio, crop)
 }
@@ -2047,6 +2152,75 @@ mod tests {
         assert!((p.duration - 3.0).abs() < 0.1, "{}", p.duration);
         assert_eq!(p.audio_tracks, 2);
         let _ = fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn cutting_parts_out_joins_or_splits_the_kept_pieces() {
+        crate::ffmpeg::init(None);
+        if crate::ffmpeg::skip_media_tests() {
+            return;
+        }
+        let d = tmp("cut");
+        for (codec, name) in [("av1_nvenc", "a.mkv"), ("h264_nvenc", "x.mp4")] {
+            let src = rewind_like(&d, name, codec);
+            let len = probe(&src).unwrap().duration;
+            // Keep 0.5-2.0 and 3.0-end: a 1 s middle part is cut out.
+            let pieces = [(0.5, 2.0), (3.0, len)];
+            let want = 1.5 + (len - 3.0);
+            let joined = cut_joined(&src, &pieces, &AudioEdit::default(), None).unwrap();
+            let p = probe(&joined).unwrap();
+            println!("{codec}: joined {:.3} s (want {want:.3}), {} audio tracks", p.duration, p.audio_tracks);
+            assert!((p.duration - want).abs() < 0.15, "{codec}: joined length");
+            assert_eq!(p.audio_tracks, 2, "every track kept");
+            assert!(joined.contains(" (cut)"));
+            // Plays all the way through without a decode error at the join.
+            let mut a = ffmpeg::args(&["-v", "error", "-i"]);
+            a.push(joined.clone().into());
+            a.extend(ffmpeg::args(&["-f", "null", "-"]));
+            let errs = ffmpeg::cmd("ffmpeg").args(&a).output().unwrap();
+            assert!(errs.status.success() && String::from_utf8_lossy(&errs.stderr).trim().is_empty(), "{codec}: {}", String::from_utf8_lossy(&errs.stderr));
+            // No leftover pieces next to the clip.
+            let leftovers: Vec<_> = fs::read_dir(&d).unwrap().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).filter(|n| n.contains("(trim)")).collect();
+            assert!(leftovers.is_empty(), "{leftovers:?}");
+            let parts = cut_separately(&src, &pieces, &AudioEdit::default(), None).unwrap();
+            assert_eq!(parts.len(), 2);
+            assert!(parts[0].contains(" (part 1)") && parts[1].contains(" (part 2)"), "{parts:?}");
+            assert!((probe(&parts[0]).unwrap().duration - 1.5).abs() < 0.1);
+        }
+        assert!(check_pieces(&rewind_like(&d, "c.mkv", "av1_nvenc"), &[(1.0, 1.02)]).is_err(), "nothing kept");
+        let _ = fs::remove_dir_all(d);
+    }
+
+    /// Real clips (HINDSIGHT_LIVE_CUT=<clip>;<clip>…, copies: pieces are written next to them).
+    /// cargo test live_cut -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn live_cut() {
+        crate::ffmpeg::init(None);
+        let Ok(list) = std::env::var("HINDSIGHT_LIVE_CUT") else { return };
+        for src in list.split(';') {
+            let p = probe(src).unwrap();
+            let len = p.duration;
+            let pieces = [(len * 0.1, len * 0.4), (len * 0.6, len * 0.9)];
+            let t = std::time::Instant::now();
+            let out = cut_joined(src, &pieces, &AudioEdit::default(), None).unwrap();
+            let q = probe(&out).unwrap();
+            let mut a = ffmpeg::args(&["-v", "error", "-i"]);
+            a.push(out.clone().into());
+            a.extend(ffmpeg::args(&["-f", "null", "-"]));
+            let errs = ffmpeg::cmd("ffmpeg").args(&a).output().unwrap();
+            println!(
+                "{src}: {:.2} s -> {:.2} s (want {:.2}), tracks {} -> {}, {} in {:?}, decode errors: {}",
+                len,
+                q.duration,
+                len * 0.6,
+                p.audio_tracks,
+                q.audio_tracks,
+                q.codec,
+                t.elapsed(),
+                String::from_utf8_lossy(&errs.stderr).lines().count()
+            );
+        }
     }
 
     #[test]

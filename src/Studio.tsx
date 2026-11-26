@@ -15,6 +15,7 @@ import {
   RectangleHorizontal,
   RotateCcw,
   RotateCw,
+  Scissors,
   Undo2,
   Volume1,
   Volume2,
@@ -409,6 +410,12 @@ export function Studio({
   const [crop, setCrop] = useState<Crop | null>(null);
   const [cropping, setCropping] = useState(false);
   const [cropRatio, setCropRatio] = useState<number | null>(null);
+  // Cutting parts out: where the clip is split (seconds), which parts are cut out
+  // (by index, 0 = before the first split), and the steps back for Undo.
+  const [splits, setSplits] = useState<number[]>([]);
+  const [cutOut, setCutOut] = useState<number[]>([]);
+  const cutHistory = useRef<[number[], number[]][]>([]);
+  const [saveApart, setSaveApart] = useState(false);
 
   // Where you were in the clip, for when it carries on from its NAS copy.
   const snap = useRef<{ path: string | null; time: number; playing: boolean; range: [number, number]; edits: TrackEdit[]; crop: Crop | null } | null>(null);
@@ -446,6 +453,9 @@ export function Studio({
     setResult(null);
     setTime(was?.time ?? 0);
     setRange(was?.range ?? [0, 0]);
+    setSplits([]);
+    setCutOut([]);
+    cutHistory.current = [];
     setDuration(0);
     setTracks(null);
     setAudioEdits(was?.edits ?? []);
@@ -595,6 +605,11 @@ export function Studio({
     };
   }, []);
 
+  // The cut actions as they are this render, for the keys (S, Delete, Ctrl+Z).
+  const cutKeys = useRef({ split: (_t: number) => {}, toggle: () => {}, undo: () => {} });
+  // A cut-out part the playhead is in, while playing: where to carry on from.
+  const cutRef = useRef<{ s: number; e: number }[]>([]);
+  const cutPartAt = (t: number) => cutRef.current.find((p) => t >= p.s && t < p.e - 0.02)?.e ?? null;
   // Keyboard: Space play, I / O set points, arrows step.
   useEffect(() => {
     if (!path) return;
@@ -622,6 +637,9 @@ export function Studio({
       else if (e.key === "Escape" && !document.querySelector(".modal-backdrop")) onBack();
       else if ((e.key === "t" || e.key === "T") && !e.ctrlKey && !e.altKey && !fullscreen) toggleTheater();
       else if ((e.key === "c" || e.key === "C") && !e.ctrlKey && !e.altKey && !fullscreen) setCropping((v) => !v);
+      else if ((e.key === "s" || e.key === "S") && !e.ctrlKey && !e.altKey && !e.metaKey) cutKeys.current.split(v.currentTime);
+      else if ((e.key === "Delete" || e.key === "Backspace") && !document.querySelector(".modal-backdrop")) cutKeys.current.toggle();
+      else if ((e.key === "z" || e.key === "Z") && (e.ctrlKey || e.metaKey) && !e.shiftKey) cutKeys.current.undo();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -758,6 +776,49 @@ export function Studio({
   const pct = (t: number) => (duration ? `${Math.min(100, Math.max(0, (t / duration) * 100))}%` : "0%");
   const busy = !!job;
   const wholeFile = a <= 0.01 && duration - b <= 0.05;
+  // The parts the splits make, which are cut out, and what's kept inside Start..End.
+  const bounds = [0, ...splits, duration || 0];
+  const parts = bounds.slice(0, -1).map((s, i) => ({ i, s, e: bounds[i + 1], cut: cutOut.includes(i) }));
+  const partIndexAt = (t: number) => Math.max(0, parts.findIndex((p) => t >= p.s && t < p.e) === -1 ? parts.length - 1 : parts.findIndex((p) => t >= p.s && t < p.e));
+  const keptPieces: [number, number][] = parts
+    .filter((p) => !p.cut)
+    .map((p): [number, number] => [Math.max(p.s, a), Math.min(p.e, b)])
+    .filter(([x, y]) => y - x >= 0.1);
+  const cutting = parts.some((p) => p.cut && p.e > a + 0.01 && p.s < b - 0.01);
+  const keptLength = keptPieces.reduce((n, [x, y]) => n + (y - x), 0);
+  const currentPart = parts[partIndexAt(time)];
+  cutRef.current = parts.filter((p) => p.cut);
+  const remember = () => {
+    cutHistory.current.push([splits, cutOut]);
+    if (cutHistory.current.length > 50) cutHistory.current.shift();
+  };
+  const splitAt = (t: number) => {
+    if (!duration || t < 0.1 || t > duration - 0.1 || splits.some((s) => Math.abs(s - t) < 0.1)) return;
+    remember();
+    const at = partIndexAt(t);
+    setSplits([...splits, t].sort((x, y) => x - y));
+    // The part split in two: both halves keep whether it was cut out; later parts move up one.
+    setCutOut(cutOut.flatMap((i) => (i < at ? [i] : i === at ? [i, i + 1] : [i + 1])));
+  };
+  const toggleCut = () => {
+    if (!splits.length) return;
+    remember();
+    const i = partIndexAt(time);
+    setCutOut(cutOut.includes(i) ? cutOut.filter((x) => x !== i) : [...cutOut, i]);
+  };
+  const undoCut = () => {
+    const last = cutHistory.current.pop();
+    if (!last) return;
+    setSplits(last[0]);
+    setCutOut(last[1]);
+  };
+  const clearCuts = () => {
+    if (!splits.length) return;
+    remember();
+    setSplits([]);
+    setCutOut([]);
+  };
+  cutKeys.current = { split: splitAt, toggle: toggleCut, undo: undoCut };
   const cropped = !isWhole(crop);
   const cropForSave = cropped ? crop! : undefined;
   const pickRatio = (r: number | null) => {
@@ -805,15 +866,23 @@ export function Studio({
         <button
           className={`btn primary ${job ? "saving" : ""}`}
           style={job?.pct != null ? ({ "--pct": `${job.pct}%` } as React.CSSProperties) : undefined}
-          disabled={busy || (wholeFile && !audioEdited && !cropped)}
+          disabled={busy || (wholeFile && !audioEdited && !cropped && !cutting) || (cutting && keptPieces.length === 0)}
           title="Cuts exactly at your start and end frames, with your audio changes. Only the moment before the first keyframe is re-encoded (under a second for Hindsight's clips); the rest of the video is copied untouched, so it's quick and keeps full quality."
           onClick={() =>
-            run(wholeFile ? (cropped ? "Saving crop…" : "Saving audio changes…") : "Saving trim…", () => api.trim(path, a, b, true, replace, editsForSave, cropForSave), replace)
+            cutting
+              ? saveApart
+                ? run("Saving parts…", () => api.cutClip(path, keptPieces, false, false, editsForSave, cropForSave).then((made) => made[0]))
+                : run("Cutting…", () => api.cutClip(path, keptPieces, true, replace, editsForSave, cropForSave).then((made) => made[0]), replace)
+              : run(wholeFile ? (cropped ? "Saving crop…" : "Saving audio changes…") : "Saving trim…", () => api.trim(path, a, b, true, replace, editsForSave, cropForSave), replace)
           }
         >
           {job
             ? `${job.label.replace("…", "")}${job.pct != null ? ` ${job.pct}%` : "…"}`
-            : wholeFile && cropped ? "Save crop" : wholeFile && audioEdited ? "Save audio changes" : "Save trim"}
+            : cutting
+              ? saveApart
+                ? `Save ${keptPieces.length} part${keptPieces.length === 1 ? "" : "s"}`
+                : "Save cut"
+              : wholeFile && cropped ? "Save crop" : wholeFile && audioEdited ? "Save audio changes" : "Save trim"}
         </button>
       </div>
       <div className={`studio-body ${theater ? "theater" : ""} ${narrow ? "narrow" : ""}`}>
@@ -868,6 +937,9 @@ export function Studio({
                 if (scrubbing.current || pendingSeek.current != null) return;
                 setTime(v.currentTime);
                 if (!v.paused && v.currentTime >= range[1]) v.pause();
+                // A part that's cut out: jump to where the clip carries on.
+                const skip = cutPartAt(v.currentTime);
+                if (!v.paused && skip != null) v.currentTime = Math.min(skip, range[1]);
                 syncExtra();
               }}
               onPlay={() => {
@@ -1052,6 +1124,26 @@ export function Studio({
               </button>
             )}
             <span className="transport-pill">
+              <button className="btn pill" title="Split the clip at the playhead, to cut a part out (S)" onClick={() => splitAt(time)} disabled={!duration}>
+                <Scissors size={15} strokeWidth={2} aria-hidden="true" />
+                Split
+              </button>
+              {splits.length > 0 && (
+                <button
+                  className={`btn pill ${currentPart?.cut ? "on" : ""}`}
+                  title={currentPart?.cut ? "Keep this part after all (Delete)" : "Cut out the part the playhead is in (Delete)"}
+                  onClick={toggleCut}
+                >
+                  {currentPart?.cut ? "Keep part" : "Cut out part"}
+                </button>
+              )}
+              {cutHistory.current.length > 0 && (
+                <button className="round icon" aria-label="Undo cut" title="Undo the last split or cut (Ctrl+Z)" onClick={undoCut}>
+                  <Undo2 size={15} strokeWidth={2} aria-hidden="true" />
+                </button>
+              )}
+            </span>
+            <span className="transport-pill">
               <button className="btn pill" title="Start the trim here (I)" onClick={() => setRange(([, y]) => [Math.min(time, y - 0.1), y])}>
                 {Icon.markIn}
                 Start
@@ -1070,8 +1162,43 @@ export function Studio({
               <div className="tl-handle in" onPointerDown={drag("in")} />
               <div className="tl-handle out" onPointerDown={drag("out")} />
             </div>
+            {parts.length > 1 &&
+              parts.map((p) =>
+                p.cut ? <div key={`c${p.i}`} className="tl-cut" style={{ left: pct(p.s), width: `calc(${pct(p.e)} - ${pct(p.s)})` }} title="Cut out" /> : null,
+              )}
+            {parts.length > 1 && currentPart && (
+              <div className="tl-part-on" style={{ left: pct(currentPart.s), width: `calc(${pct(currentPart.e)} - ${pct(currentPart.s)})` }} />
+            )}
+            {splits.map((s) => (
+              <div key={s} className="tl-split" style={{ left: pct(s) }} />
+            ))}
             <div className="tl-head" style={{ left: pct(time) }} />
           </div>
+          {splits.length > 0 && (
+            <div className="cut-bar">
+              <span className="cut-chip">
+                {keptPieces.length} part{keptPieces.length === 1 ? "" : "s"} kept
+              </span>
+              {cutting && <span className="cut-chip out">{parts.filter((p) => p.cut).length} cut out</span>}
+              <span className="muted">
+                New length <b>{fmtTime(keptLength)}</b> of {fmtTime(Math.max(0, b - a))}
+              </span>
+              <span style={{ flex: 1 }} />
+              {cutting && keptPieces.length > 1 && (
+                <span className="seg" role="radiogroup" aria-label="Save as">
+                  <button role="radio" aria-checked={!saveApart} className={!saveApart ? "on" : ""} onClick={() => setSaveApart(false)} title="The kept parts joined into one clip">
+                    One clip
+                  </button>
+                  <button role="radio" aria-checked={saveApart} className={saveApart ? "on" : ""} onClick={() => setSaveApart(true)} title="Each kept part saved as a clip of its own">
+                    Each part on its own
+                  </button>
+                </span>
+              )}
+              <button className="btn small" onClick={clearCuts} title="Remove every split and cut">
+                Clear cuts
+              </button>
+            </div>
+          )}
           <Ruler duration={duration} onPointerDown={drag("seek")} />
           {trackTitles.length > 0 && (
             <AudioLanes
@@ -1090,7 +1217,7 @@ export function Studio({
             <span className="mono">
               Start {fmtTime(a)} · End {fmtTime(b)} · Length {fmtTime(Math.max(0, b - a))}
             </span>
-            <span>Space play · I / O set points · ← → 5 s · Shift+← → one frame · ↑ ↓ volume · M mute · C crop · T hide or show tools · F fullscreen</span>
+            <span>Space play · I / O set points · S split · Del cut out part · ← → 5 s · Shift+← → one frame · ↑ ↓ volume · M mute · C crop · T hide or show tools · F fullscreen</span>
           </div>
           {!theater && <ClipStrip clips={(clips ?? []).slice(0, 30)} current={path} onOpen={onOpen} />}
         </div>

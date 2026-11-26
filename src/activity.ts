@@ -133,6 +133,8 @@ export function useJobs(): Job[] {
 export function jobLabel(label: string) {
   const l = label.toLowerCase();
   if (l.startsWith("saving trim")) return "Trimming";
+  if (l.startsWith("cutting")) return "Cutting";
+  if (l.startsWith("saving parts")) return "Splitting";
   if (l.startsWith("saving crop")) return "Cropping";
   if (l.startsWith("saving audio")) return "Saving audio";
   if (l.startsWith("compress")) return "Compressing";
