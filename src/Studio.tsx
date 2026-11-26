@@ -289,10 +289,17 @@ export function Studio({
   const [hover, setHover] = useState(false);
   const [active, setActive] = useState(false);
   const idle = useRef<number | undefined>(undefined);
+  // While the pointer rests on the controls they stay up: hiding them under a still
+  // mouse made the next click land on the video (pause) instead of the timeline.
+  const onBar = useRef(false);
   const poke = useCallback(() => {
     setActive(true);
     window.clearTimeout(idle.current);
-    idle.current = window.setTimeout(() => setActive(false), 2200);
+    const hide = () => {
+      if (onBar.current) idle.current = window.setTimeout(hide, 2200);
+      else setActive(false);
+    };
+    idle.current = window.setTimeout(hide, 2200);
   }, []);
   useEffect(() => () => window.clearTimeout(idle.current), []);
   const [info, setInfo] = useState<Probe | null>(null);
@@ -998,7 +1005,11 @@ export function Studio({
                     {flash.play ? Icon.play : Icon.pause}
                   </div>
                 )}
-                <div className="vid-bar">
+                <div
+                  className="vid-bar"
+                  onPointerEnter={() => (onBar.current = true)}
+                  onPointerLeave={() => (onBar.current = false)}
+                >
                   {fullscreen && (
                     <>
                       {/* A tall strip the whole width: easy to hit, with a handle and the time under the mouse. */}

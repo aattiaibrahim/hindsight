@@ -234,6 +234,8 @@ h1 { margin: 0; font-family: var(--display); font-size: 28px; font-weight: 600; 
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.55)); opacity: 0; pointer-events: none; transition: opacity 0.18s ease;
 }
 .video-wrap.ui .vid-bar, .vid-bar:focus-within { opacity: 1; pointer-events: auto; }
+/* Fullscreen: the bottom strip is always the controls, so a click there never pauses by surprise. */
+.video-wrap.fs .vid-bar { pointer-events: auto; }
 .vid-btn {
   width: 34px; height: 34px; border-radius: 8px; border: 0; padding: 0; display: grid; place-items: center;
   background: rgba(0, 0, 0, 0.35); color: #fff; cursor: pointer;
@@ -250,15 +252,16 @@ h1 { margin: 0; font-family: var(--display); font-size: 28px; font-weight: 600; 
 .video-wrap.fs .vid-btn svg { width: 22px; height: 22px; }
 .video-wrap.fs .vid-time { font-size: 14px; margin-left: 6px; }
 .fs-row { display: flex; align-items: center; gap: 6px; }
-.fs-seek { position: relative; height: 26px; display: flex; align-items: center; cursor: pointer; touch-action: none; }
-.fs-track { position: relative; flex: 1; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.25); overflow: hidden; transition: height 0.12s ease; }
-.fs-seek:hover .fs-track { height: 8px; }
+/* 44px to grab, overlapping the space around it: the track itself stays thin. */
+.fs-seek { position: relative; height: 44px; margin: -12px 0 -10px; display: flex; align-items: center; cursor: pointer; touch-action: none; }
+.fs-track { position: relative; flex: 1; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.25); overflow: hidden; transition: height 0.12s ease; }
+.fs-seek:hover .fs-track { height: 10px; }
 .fs-fill, .fs-ahead { position: absolute; left: 0; top: 0; bottom: 0; }
 .fs-fill { background: var(--accent); }
 .fs-ahead { background: rgba(255, 255, 255, 0.25); }
-.fs-knob { position: absolute; top: 50%; width: 16px; height: 16px; margin: -8px 0 0 -8px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5); transform: scale(0.75); transition: transform 0.12s ease; pointer-events: none; }
+.fs-knob { position: absolute; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5); transform: scale(0.75); transition: transform 0.12s ease; pointer-events: none; }
 .fs-seek:hover .fs-knob { transform: scale(1); }
-.fs-tip { position: absolute; bottom: 30px; transform: translateX(-50%); padding: 3px 8px; border-radius: 6px; background: rgba(0, 0, 0, 0.85); color: #fff; font-size: 12px; pointer-events: none; white-space: nowrap; }
+.fs-tip { position: absolute; bottom: 36px; transform: translateX(-50%); padding: 3px 8px; border-radius: 6px; background: rgba(0, 0, 0, 0.85); color: #fff; font-size: 12px; pointer-events: none; white-space: nowrap; }
 
 /* Studio: thumbnails of recent clips under the timeline. */
 .strip { display: flex; gap: 10px; overflow-x: auto; flex-shrink: 0; padding: 2px 2px 6px; }
