@@ -3336,7 +3336,7 @@ dependencies = [
 
 [[package]]
 name = "rewind"
-version = "0.1.101"
+version = "0.1.102"
 dependencies = [
  "chrono",
  "cpal",
