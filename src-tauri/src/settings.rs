@@ -287,10 +287,15 @@ impl Settings {
         if self.theme == "light" {
             self.theme = "midnight".into();
         }
-        if !["tinted", "midnight", "graphite", "oled"].contains(&self.theme.as_str()) {
+        if ![
+            "tinted", "midnight", "graphite", "oled",
+            "darkmodern", "dracula", "onedark", "monokai", "nord", "tokyonight", "catppuccin", "githubdark", "solarized", "gruvbox",
+        ]
+        .contains(&self.theme.as_str())
+        {
             self.theme = d.theme.clone();
         }
-        if !["winblue", "system", "cyan", "rose", "lime", "amber", "violet", "emerald", "gold", "pink", "teal", "mono", "green"].contains(&self.accent.as_str()) {
+        if !["winblue", "system", "theme", "cyan", "rose", "lime", "amber", "violet", "emerald", "gold", "pink", "teal", "mono", "green"].contains(&self.accent.as_str()) {
             self.accent = d.accent.clone();
         }
         self

@@ -131,8 +131,8 @@ export type Settings = {
   sidebar?: "icons" | "hover" | "names";
 };
 
-export type Theme = "tinted" | "midnight" | "graphite" | "oled";
-export type Accent = "winblue" | "system" | "cyan" | "rose" | "lime" | "amber" | "violet" | "emerald" | "gold" | "pink" | "teal" | "mono" | "green";
+export type Theme = "tinted" | "midnight" | "graphite" | "oled" | "darkmodern" | "dracula" | "onedark" | "monokai" | "nord" | "tokyonight" | "catppuccin" | "githubdark" | "solarized" | "gruvbox";
+export type Accent = "winblue" | "system" | "theme" | "cyan" | "rose" | "lime" | "amber" | "violet" | "emerald" | "gold" | "pink" | "teal" | "mono" | "green";
 
 export type Status = {
   enabled: boolean;

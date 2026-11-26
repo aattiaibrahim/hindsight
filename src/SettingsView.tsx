@@ -30,13 +30,25 @@ function hotkeyFrom(e: React.KeyboardEvent): string | null {
   return [...mods, key].join("+");
 }
 
-// Preview colours for each theme card (bg, panel, line).
-const THEMES: { id: Theme; label: string; c: [string, string, string] }[] = [
+// Preview colours for each theme card (bg, panel, line), and an editor theme's own accent.
+const THEMES: { id: Theme; label: string; c: [string, string, string]; accent?: string }[] = [
   { id: "tinted", label: "Tinted", c: ["#000000", "#1a1d21", "#2a2e33"] },
   { id: "midnight", label: "Midnight", c: ["#000000", "#181818", "#2a2a2a"] },
   { id: "graphite", label: "Graphite", c: ["#0e0e0e", "#1f1f1f", "#313131"] },
   { id: "oled", label: "OLED black", c: ["#000000", "#0a0a0a", "#1c1c1c"] },
+  { id: "darkmodern", label: "Dark Modern", c: ["#181818", "#262626", "#3c3c3c"], accent: "#0078d4" },
+  { id: "dracula", label: "Dracula", c: ["#191a21", "#2f3241", "#44475a"], accent: "#bd93f9" },
+  { id: "onedark", label: "One Dark Pro", c: ["#21252b", "#2e333c", "#3e4451"], accent: "#61afef" },
+  { id: "monokai", label: "Monokai", c: ["#1e1f1c", "#2f302a", "#49483e"], accent: "#a6e22e" },
+  { id: "nord", label: "Nord", c: ["#2e3440", "#3b4252", "#4c566a"], accent: "#88c0d0" },
+  { id: "tokyonight", label: "Tokyo Night", c: ["#16161e", "#1f2335", "#2f344d"], accent: "#7aa2f7" },
+  { id: "catppuccin", label: "Catppuccin Mocha", c: ["#11111b", "#262637", "#45475a"], accent: "#cba6f7" },
+  { id: "githubdark", label: "GitHub Dark", c: ["#010409", "#161b22", "#30363d"], accent: "#58a6ff" },
+  { id: "solarized", label: "Solarized Dark", c: ["#00212b", "#073642", "#124d5c"], accent: "#268bd2" },
+  { id: "gruvbox", label: "Gruvbox Dark", c: ["#1d2021", "#32302f", "#504945"], accent: "#fabd2f" },
 ];
+const HINDSIGHT_THEMES = THEMES.filter((t) => !t.accent);
+const EDITOR_THEMES = THEMES.filter((t) => t.accent);
 
 const ACCENTS: { id: Accent; label: string; c: string }[] = [
   { id: "winblue", label: "Windows blue", c: "#4cc2ff" },
@@ -184,6 +196,7 @@ export function SettingsView({
 
   const set = (p: Partial<Settings>) => update(p).catch((e) => onError(String(e)));
   const s = settings;
+  const themeNow = THEMES.find((t) => t.id === s.theme);
   // The chosen screen: by hardware id (survives Windows renumbering DISPLAY1/2), else by number.
   const fixedScreen =
     (s.fixedMonitorId && monitors.find((m) => m.id && m.id.toLowerCase() === s.fixedMonitorId.toLowerCase())) ||
@@ -250,36 +263,45 @@ export function SettingsView({
         </section>
         <section className="group" hidden={tab !== "appearance"}>
           <h2>Appearance</h2>
-          <div className="themes" role="radiogroup" aria-label="Theme">
-            {THEMES.map((t) => (
-              <button
-                key={t.id}
-                role="radio"
-                aria-checked={s.theme === t.id}
-                className={`theme-card ${s.theme === t.id ? "on" : ""}`}
-                onClick={() => set({ theme: t.id })}
-              >
-                <div
-                  className="theme-preview"
-                  style={{ "--p-bg": t.c[0], "--p-panel": t.c[1], "--p-line": t.c[2] } as React.CSSProperties}
-                >
-                  <i />
-                  <i />
-                </div>
-                {t.label}
-              </button>
-            ))}
-          </div>
+          {[HINDSIGHT_THEMES, EDITOR_THEMES].map((list, i) => (
+            <div key={i}>
+              {i === 1 && <div className="themes-head">From code editors</div>}
+              <div className="themes" role="radiogroup" aria-label={i ? "Editor themes" : "Theme"}>
+                {list.map((t) => (
+                  <button
+                    key={t.id}
+                    role="radio"
+                    aria-checked={s.theme === t.id}
+                    className={`theme-card ${s.theme === t.id ? "on" : ""}`}
+                    // An editor theme brings its own accent (changeable after); back on
+                    // Hindsight's themes, "the theme's own" becomes Windows blue.
+                    onClick={() =>
+                      set(t.accent ? { theme: t.id, accent: "theme" } : { theme: t.id, ...(s.accent === "theme" ? { accent: "winblue" as Accent } : {}) })
+                    }
+                  >
+                    <div
+                      className="theme-preview"
+                      style={{ "--p-bg": t.c[0], "--p-panel": t.c[1], "--p-line": t.c[2], ...(t.accent ? { "--p-acc": t.accent } : {}) } as React.CSSProperties}
+                    >
+                      <i />
+                      <i />
+                    </div>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
           <div className="setting">
             <span>
               Accent colour
               <small>
-                {ACCENTS.find((a) => a.id === s.accent)?.label ?? "Windows blue"}
+                {s.accent === "theme" ? `${themeNow?.label ?? "The theme"}'s own` : ACCENTS.find((a) => a.id === s.accent)?.label ?? "Windows blue"}
                 {s.accent === "system" ? ": changes when you change your accent colour in Windows" : ""}
               </small>
             </span>
             <div className="swatches" role="radiogroup" aria-label="Accent colour">
-              {ACCENTS.map((a) => (
+              {(themeNow?.accent ? [{ id: "theme" as Accent, label: `${themeNow.label}'s own`, c: themeNow.accent }, ...ACCENTS] : ACCENTS).map((a) => (
                 <button
                   key={a.id}
                   role="radio"
