@@ -9,7 +9,7 @@ export const REPO = "https://github.com/aattiaibrahim/hindsight";
  * Early users and beta testers, thanked on the About page. Add a name here
  * (as the person likes to be called) and it shows in the next release.
  */
-export const BETA_TESTERS: string[] = ["KronorK"];
+export const BETA_TESTERS: string[] = ["KronorK", "Ldaawg"];
 
 /** "Run diagnostics": a report to send when something looks wrong. */
 export function DiagnosticsButton({ clip, label = "Run diagnostics" }: { clip?: string; label?: string }) {

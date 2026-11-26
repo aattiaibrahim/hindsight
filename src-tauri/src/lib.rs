@@ -1346,6 +1346,11 @@ async fn edit(
         remember_edited(&app, &out);
         return Ok(out);
     }
+    // The edit gets the clip's dates before it goes in place, so even if that fails
+    // (left as "… (trim)"), it stays where the clip was in the library, not under today.
+    if let Some(d) = dates {
+        library::set_dates(std::path::Path::new(&out), d);
+    }
     let o = original.clone();
     let final_path = if on_nas {
         blocking(move || nas::replace_on_nas(&nas_dir, &nas_server, &o, &out, expected_secs)).await?

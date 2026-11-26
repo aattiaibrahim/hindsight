@@ -666,7 +666,8 @@ pub fn replace_on_nas(nas_dir: &str, server: &str, original: &str, edited: &str,
     {
         set_aside(nas, &r)?;
     }
-    crate::library::rename_patiently(edited_p, &target).map_err(|e| {
+    // The NAS app may still be looking at the new file (it scans whatever appears): give it a minute.
+    crate::library::rename_patiently_for(edited_p, &target, std::time::Duration::from_secs(60)).map_err(|e| {
         let kept = if in_app_trash { "the original is in the NAS app's Trash".to_string() } else { format!("the original is in the NAS's {REPLACED} folder") };
         format!("Couldn't move the edit into place ({e}). Your edit is saved as {} and {kept}.", edited_p.display())
     })?;

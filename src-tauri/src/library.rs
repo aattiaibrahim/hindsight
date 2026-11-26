@@ -1408,8 +1408,14 @@ pub fn replace_original(original: &str, edited: &str, expected_secs: Option<f64>
 /// above all on a NAS, is often still held for a moment: by the share itself, an
 /// antivirus scan, or a player or thumbnail reading it.
 pub(crate) fn rename_patiently(from: &Path, to: &Path) -> std::io::Result<()> {
+    rename_patiently_for(from, to, std::time::Duration::from_secs(8))
+}
+
+/// `rename_patiently`, waiting up to `patience`. On the NAS the NAS app looks at
+/// every new file as it appears (probe, thumbnail), which can hold it for longer.
+pub(crate) fn rename_patiently_for(from: &Path, to: &Path, patience: std::time::Duration) -> std::io::Result<()> {
     let mut wait = std::time::Duration::from_millis(150);
-    let until = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    let until = std::time::Instant::now() + patience;
     loop {
         match fs::rename(from, to) {
             Ok(()) => return Ok(()),
