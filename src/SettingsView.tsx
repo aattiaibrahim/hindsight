@@ -318,13 +318,37 @@ export function SettingsView({
               ))}
             </div>
           </div>
-          <label className="setting">
+          <div className="setting">
             <span>
-              Reduce motion
-              <small>Turns off fades and hover effects. They're already light: they only run while the window is open.</small>
+              Animations
+              <small>
+                {(() => {
+                  const m = s.animations || (s.reduceMotion ? "off" : "system");
+                  return m === "on"
+                    ? "Always on, even when Windows has its animation effects turned off."
+                    : m === "off"
+                      ? "Off: no fades, slides or hover effects."
+                      : "Follows Windows' Animation effects setting. Pick On to have them in Hindsight anyway.";
+                })()}
+              </small>
             </span>
-            <Toggle label="Reduce motion" checked={s.reduceMotion} onChange={(v) => set({ reduceMotion: v })} />
-          </label>
+            <div className="seg" role="radiogroup" aria-label="Animations">
+              {(
+                [
+                  ["system", "Follow Windows"],
+                  ["on", "On"],
+                  ["off", "Off"],
+                ] as const
+              ).map(([v, label]) => {
+                const m = s.animations || (s.reduceMotion ? "off" : "system");
+                return (
+                  <button key={v} role="radio" aria-checked={m === v} className={m === v ? "on" : ""} onClick={() => set({ animations: v, reduceMotion: v === "off" })}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </section>
 
         <section className="group" hidden={tab !== "general"}>

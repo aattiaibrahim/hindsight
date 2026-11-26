@@ -160,7 +160,8 @@ export function snapshot(): Rects {
 
 /** Move cards from where `before` had them to where they are now. */
 export function slide(before: Rects) {
-  const still = document.documentElement.dataset.motion === "reduce" || matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const m = document.documentElement.dataset.motion;
+  const still = m === "reduce" || (m !== "on" && matchMedia("(prefers-reduced-motion: reduce)").matches);
   if (!before.size || still) return;
   document.querySelectorAll<HTMLElement>(".card[data-path], .clip-row[data-path]").forEach((el) => {
     const was = before.get(el.dataset.path ?? "");

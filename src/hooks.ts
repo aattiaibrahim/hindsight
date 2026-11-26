@@ -194,14 +194,16 @@ export function useThumbStatus(path: string, key: string | number = "", want = t
 export function useAppearance(settings: Settings | null) {
   useEffect(() => {
     if (!settings) return;
-    const look = { theme: settings.theme ?? "tinted", accent: settings.accent ?? "winblue", motion: settings.reduceMotion ? "reduce" : "full" };
+    // "reduce": off. "on": on even when Windows has its animations off. "full": as Windows says.
+    const mode = settings.animations || (settings.reduceMotion ? "off" : "system");
+    const look = { theme: settings.theme ?? "tinted", accent: settings.accent ?? "winblue", motion: mode === "off" ? "reduce" : mode === "on" ? "on" : "full" };
     applyAppearance(look);
     try {
       localStorage.setItem("rewind.appearance", JSON.stringify(look));
     } catch {
       /* only a start-up nicety */
     }
-  }, [settings?.theme, settings?.accent, settings?.reduceMotion]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [settings?.theme, settings?.accent, settings?.reduceMotion, settings?.animations]); // eslint-disable-line react-hooks/exhaustive-deps
   // "Follow Windows": Windows' accent, checked again whenever Hindsight comes back to the front.
   useEffect(() => {
     if (settings?.accent !== "system") return;

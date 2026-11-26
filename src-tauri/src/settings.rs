@@ -56,6 +56,9 @@ pub struct Settings {
     pub accent: String,
     /// Turn off fades and motion in the interface
     pub reduce_motion: bool,
+    /// Animations: "system" (follow Windows' Animation effects), "on" (always, even
+    /// when Windows has them off) or "off". Empty: from `reduce_motion` (older settings).
+    pub animations: String,
     /// The sidebar: "icons" (names on hover of each icon), "hover" (opens with names
     /// when the cursor is on it) or "names" (always open with names)
     pub sidebar: String,
@@ -190,6 +193,7 @@ impl Default for Settings {
             theme: "tinted".into(),
             accent: "winblue".into(),
             reduce_motion: false,
+            animations: String::new(),
             sidebar: "icons".into(),
             save_sound: true,
             file_name_template: crate::naming::DEFAULT_TEMPLATE.into(),

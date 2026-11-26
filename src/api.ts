@@ -125,6 +125,8 @@ export type Settings = {
   theme: Theme;
   accent: Accent;
   reduceMotion: boolean;
+  /** "system" (follow Windows), "on" (always, even if Windows has them off), "off". Empty: from reduceMotion. */
+  animations?: "" | "system" | "on" | "off";
   /** "icons" (names on hover of each icon), "hover" (opens with names on hover), "names" (always open) */
   sidebar?: "icons" | "hover" | "names";
 };
