@@ -1739,10 +1739,8 @@ small, .muted, .err-text, .note, p { overflow-wrap: anywhere; }
    slides over and narrows to make room. In both, each item is laid out the same open or
    closed (icon on the left, name after it), so nothing moves or grows when you point at
    it: the name only fades in. */
-.shell { transition: grid-template-columns 0.2s var(--ease); }
 .shell.side-names,
-.shell.side-hover:has(> .nav:hover),
-.shell.side-hover:has(> .nav :focus-visible) { grid-template-columns: 184px minmax(0, 1fr); }
+.shell.side-hover.side-open { grid-template-columns: 184px minmax(0, 1fr); }
 .shell.side-names .nav, .shell.side-hover .nav { align-items: stretch; overflow: hidden; }
 .shell.side-names .nav .brand, .shell.side-hover .nav .brand { place-items: start; padding-left: 8px; }
 .shell.side-names .nav-item, .shell.side-hover .nav-item {
@@ -1762,12 +1760,10 @@ small, .muted, .err-text, .note, p { overflow-wrap: anywhere; }
 /* Closed (hover mode, cursor elsewhere): only the icons. */
 .shell.side-hover .nav-item .nav-label { opacity: 0; }
 .shell.side-names .nav-item .nav-label,
-.shell.side-hover:has(> .nav:hover) .nav-item .nav-label,
-.shell.side-hover:has(> .nav :focus-visible) .nav-item .nav-label { opacity: 1; }
+.shell.side-hover.side-open .nav-item .nav-label { opacity: 1; }
 /* Counts: on the icon's corner while closed, at the end of the row while open. */
 .shell.side-names .nav .nav-badge,
-.shell.side-hover:has(> .nav:hover) .nav .nav-badge,
-.shell.side-hover:has(> .nav :focus-visible) .nav .nav-badge { position: static; margin-left: auto; flex-shrink: 0; }
+.shell.side-hover.side-open .nav .nav-badge { position: static; margin-left: auto; flex-shrink: 0; }
 
 /* Notifications: when each one came, and what's new in the version you have. */
 .notif-time { display: block; margin-top: 3px; font-size: 11.5px; font-weight: 400; color: var(--muted); }
