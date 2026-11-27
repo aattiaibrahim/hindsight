@@ -20,6 +20,7 @@ import {
   Volume1,
   Volume2,
   VolumeX,
+  FastForward,
 } from "lucide-react";
 import { api, ClipFile, codecLabel, errText, fmtSize, fmtTime, Health, PreviewAudio, Probe, Settings, TrackEdit, Upload, UploadProgress, Waveform, mediaSrc } from "./api";
 import { AudioLanes, hasAudioEdits, isMutedAt } from "./AudioLanes";
@@ -100,6 +101,7 @@ const Icon = {
   theaterOff: <PanelRight {...ic} />,
   back5: <RotateCcw {...ic} />,
   fwd5: <RotateCw {...ic} />,
+  faster: <FastForward {...ic} fill="currentColor" />,
   markIn: <ArrowRightFromLine {...ic} />,
   markOut: <ArrowLeftFromLine {...ic} />,
   reset: <Undo2 {...ic} />,
@@ -613,6 +615,63 @@ export function Studio({
     toggle();
   }, [toggle]);
   useEffect(() => () => window.clearTimeout(tapTimer.current), []);
+
+  // The picture: a click plays or pauses; holding the button down plays at 2× until
+  // let go (then back as it was); two clicks only count as a double click (fullscreen)
+  // when they're quick (under 250 ms) and in the same spot, so a fast pause-play doesn't.
+  const [fast, setFast] = useState(false);
+  const press = useRef<{ held: boolean; wasPaused: boolean; rate: number; timer: number } | null>(null);
+  const lastTap = useRef<{ t: number; x: number; y: number } | null>(null);
+  const pictureDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.target !== e.currentTarget || e.button !== 0) return;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId); // let go outside the picture still ends the hold
+    } catch {
+      /* not a live pointer */
+    }
+    const v = video.current;
+    const p = { held: false, wasPaused: !!v?.paused, rate: v?.playbackRate ?? 1, timer: 0 };
+    p.timer = window.setTimeout(() => {
+      const v = video.current;
+      if (!v || press.current !== p) return;
+      p.held = true;
+      v.playbackRate = 2;
+      if (v.paused) v.play().catch(() => {});
+      syncExtra();
+      setFast(true);
+    }, 350);
+    press.current = p;
+  };
+  const pictureUp = (e: React.PointerEvent<HTMLDivElement>, cancelled = false) => {
+    const p = press.current;
+    if (!p) return;
+    press.current = null;
+    window.clearTimeout(p.timer);
+    if (p.held) {
+      const v = video.current;
+      if (v) {
+        v.playbackRate = p.rate;
+        if (p.wasPaused) v.pause();
+        syncExtra();
+      }
+      setFast(false);
+      lastTap.current = null;
+      return;
+    }
+    if (cancelled) return;
+    const now = Date.now();
+    const l = lastTap.current;
+    if (l && now - l.t < 250 && Math.hypot(e.clientX - l.x, e.clientY - l.y) < 12) {
+      // The first click already played or paused: undo that, then fullscreen.
+      lastTap.current = null;
+      tapToggle();
+      toggleFullscreen();
+      return;
+    }
+    lastTap.current = { t: now, x: e.clientX, y: e.clientY };
+    tapToggle();
+  };
+  useEffect(() => () => window.clearTimeout(press.current?.timer), []);
   // Fullscreen timeline: where the mouse is over it (0–1), for the time bubble.
   const [seekHover, setSeekHover] = useState<number | null>(null);
 
@@ -991,9 +1050,15 @@ export function Studio({
             {!playError && !cropping && (
               <div
                 className={`vid-overlay ${playing ? "playing" : "paused"}`}
-                onClick={(e) => e.target === e.currentTarget && tapToggle()}
-                onDoubleClick={(e) => e.target === e.currentTarget && toggleFullscreen()}
+                onPointerDown={pictureDown}
+                onPointerUp={(e) => pictureUp(e)}
+                onPointerCancel={(e) => pictureUp(e, true)}
               >
+                {fast && (
+                  <div className="vid-fast" aria-live="polite">
+                    2× {Icon.faster}
+                  </div>
+                )}
                 {/* Only while paused: playing, nothing sits over the picture. */}
                 {!playing && !flash && (
                   <button className="vid-center" aria-label="Play" onClick={tapToggle} onDoubleClick={(e) => e.stopPropagation()}>

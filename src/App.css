@@ -300,6 +300,12 @@ h1 { margin: 0; font-family: var(--display); font-size: 28px; font-weight: 600; 
   animation: vid-flash 0.6s ease-out forwards;
 }
 .vid-flash svg { width: 32px; height: 32px; }
+/* Holding the picture: 2× playback, shown at the top while held. */
+.vid-fast {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: 999px; background: rgba(0, 0, 0, 0.6); color: #fff; font-size: 13px; font-weight: 600; pointer-events: none;
+}
+.vid-fast svg { width: 16px; height: 16px; }
 @keyframes vid-flash { from { opacity: 0.9; transform: scale(0.9); } to { opacity: 0; transform: scale(1.25); } }
 .video-wrap .vid-center:hover, .video-wrap .vid-center:focus-visible { opacity: 0.95; background: rgba(0, 0, 0, 0.6); transform: scale(1.05); }
 .vid-bar {
