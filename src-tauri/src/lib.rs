@@ -21,6 +21,7 @@ mod session_end;
 mod prepare;
 mod game_icons;
 mod duplicates;
+mod trim_match;
 mod montage;
 mod game_detect;
 #[macro_use]
@@ -1571,6 +1572,60 @@ fn lighten_for_dark(r: f32, g: f32, b: f32) -> String {
     format!("#{:02x}{:02x}{:02x}", mix(r, t).round() as u8, mix(g, t).round() as u8, mix(b, t).round() as u8)
 }
 
+/// Originals already found trimmed into a separate file (original → the cut), from
+/// the last checks: instant, nothing is read.
+#[tauri::command]
+fn known_trim_matches(app: AppHandle) -> std::collections::HashMap<String, String> {
+    data_file(&app, "trim-matches.json").map(|f| trim_match::known(&f)).unwrap_or_default()
+}
+
+static MATCHING_TRIMS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Which To trim clips were already trimmed into one of their candidates (a shorter
+/// copy saved by another app, or as a new file), by their pictures. Reads the
+/// originals, so never while a game runs ("game": try later); stops if one starts.
+/// "trim-match-progress" (done, total) and "trim-matched" { original, into } as it goes.
+#[tauri::command]
+async fn match_trims(app: AppHandle, list: Vec<trim_match::Candidate>) -> Result<std::collections::HashMap<String, String>, String> {
+    use std::sync::atomic::Ordering;
+    if games::game_running() {
+        return Err("game".into());
+    }
+    if MATCHING_TRIMS.swap(true, Ordering::SeqCst) {
+        return Err("busy".into());
+    }
+    let file = data_file(&app, "trim-matches.json");
+    let r = match file {
+        Ok(file) => {
+            let a = app.clone();
+            blocking(move || {
+                let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
+                let b = a.clone();
+                Ok(trim_match::check(
+                    &file,
+                    &list,
+                    &mut |done, total| {
+                        if done == total || last.elapsed() >= std::time::Duration::from_millis(250) {
+                            last = std::time::Instant::now();
+                            let _ = a.emit("trim-match-progress", (done, total));
+                        }
+                    },
+                    &mut |original, into| {
+                        let _ = b.emit("trim-matched", serde_json::json!({ "original": original, "into": into }));
+                    },
+                    &games::game_running,
+                ))
+            })
+            .await
+            // Stopped because a game started: the app asks again later, from where it got to.
+            .and_then(|m| if games::game_running() { Err("game".into()) } else { Ok(m) })
+        }
+        Err(e) => Err(e),
+    };
+    MATCHING_TRIMS.store(false, Ordering::SeqCst);
+    r
+}
+
 #[tauri::command]
 fn edited_clips(app: AppHandle) -> Vec<String> {
     data_file(&app, "edited.json")
@@ -2748,6 +2803,8 @@ get_settings,
             render_montage,
             cancel_montage,
             edited_clips,
+            known_trim_matches,
+            match_trims,
             system_accent,
             compress_clip,
             reveal_file,

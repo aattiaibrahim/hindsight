@@ -49,10 +49,13 @@ export function isWholeSave(seconds: number, buffer?: number) {
   return [...BUFFER_LENGTHS, ...(buffer ? [buffer] : [])].some((l) => seconds >= l - 6 && seconds <= l + 2);
 }
 
-/** Hindsight's recordings ("Valorant Recording 2026-…"), any length. */
-const RECORDING = /(^|\s)Recording(\s|$)/i;
+/** Hindsight's recordings ("Valorant Recording 2026-…"), any length. Not another app's
+ *  "Screen Recording 2025-…" clips: those are judged by their length like any other. */
+const RECORDING = /(^|\s)(?<!screen\s)Recording(\s|$)/i;
 
-const MADE_BY_EDIT = /\((trim|remux|H\.264|repaired|audio|\d+ MB)( \(\d+\))?\)|\((trimmed|good part)\)/i;
+const MADE_BY_EDIT = /\((trim|remux|H\.264|repaired|smoothed|audio|\d+ MB)( \(\d+\))?\)|\((trimmed|good part)\)/i;
+/** Two weeks: how long after a clip a shorter one of the same game may have been cut from it. */
+const CUT_WINDOW = 14 * 86_400_000;
 const EDIT_FOLDERS = new Set(["edits", "exports", "montages"]);
 type ToastAction = { label: string; run: () => void };
 type Toast = { id: number; text: string; sub?: string; err?: boolean; action?: ToastAction };
@@ -372,7 +375,22 @@ export default function App() {
     };
   }, [clips]);
   const bufferLength = settings?.bufferSeconds;
-  const trimClips = useMemo(() => {
+  // Originals already trimmed into a separate file (another app's "Edits", or a trim saved
+  // as a new file): found by their pictures (trim_match.rs), remembered across restarts.
+  const [trimmedInto, setTrimmedInto] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    api
+      .knownTrimMatches()
+      .then((m) => setTrimmedInto((cur) => new Map([...Object.entries(m), ...cur])))
+      .catch(() => {});
+    const un = listen<{ original: string; into: string }>("trim-matched", (e) =>
+      setTrimmedInto((m) => new Map(m).set(e.payload.original, e.payload.into)),
+    );
+    return () => {
+      un.then((f) => f());
+    };
+  }, []);
+  const byLength = useMemo(() => {
     if (!clips) return null;
     // Matched by "<game folder>\<file>", not the whole path: a clip whose copy here
     // was freed up (it's only on the NAS now) is still the same clip, so it stays on
@@ -391,6 +409,65 @@ export default function App() {
         (RECORDING.test(c.name) || isWholeSave(lengths.get(c.path) ?? 0, bufferLength)),
     );
   }, [clips, edited, keepWhole, lengths, bufferLength]);
+  // Same "<game folder>\<file>" matching as above. Both the original and the cut leave
+  // To trim: a cut of 55 seconds would otherwise pass for a whole 1-minute save.
+  const tailOf = (p: string) => p.replace(/\//g, "\\").toLowerCase().split("\\").slice(-2).join("\\");
+  const matchedTails = useMemo(() => new Set([...trimmedInto].flatMap(([o, i]) => [tailOf(o), tailOf(i)])), [trimmedInto]);
+  const trimClips = useMemo(() => byLength && byLength.filter((c) => !matchedTails.has(tailOf(c.path))), [byLength, matchedTails]);
+  // What each untrimmed clip may have been cut into: shorter clips of the same game saved
+  // from a minute before to two weeks after it, nearest first. Checked by their pictures.
+  const trimCandidates = useMemo(() => {
+    if (!byLength || !clips || !lengths.size) return null;
+    const byFolder = new Map<string, ClipFile[]>();
+    for (const c of clips) {
+      const f = c.folder.toLowerCase();
+      (byFolder.get(f) ?? byFolder.set(f, []).get(f)!).push(c);
+    }
+    const out: { original: string; edits: string[] }[] = [];
+    for (const o of byLength) {
+      const ol = lengths.get(o.path) ?? 0;
+      const shorter = (c: ClipFile) => {
+        const l = lengths.get(c.path) ?? 0;
+        return l > 0 && ol > 0 ? l < ol - 5 : c.size < o.size * 0.9;
+      };
+      const edits = (byFolder.get(o.folder.toLowerCase()) ?? [])
+        .filter((c) => c.path !== o.path && c.modified >= o.modified - 60_000 && c.modified <= o.modified + CUT_WINDOW && shorter(c))
+        .sort((a, b) => a.modified - b.modified)
+        .slice(0, 15)
+        .map((c) => c.path);
+      if (edits.length) out.push({ original: o.path, edits });
+    }
+    return out;
+  }, [byLength, clips, lengths]);
+  const candidatesKey = useMemo(() => JSON.stringify(trimCandidates ?? []), [trimCandidates]);
+  useEffect(() => {
+    if (!trimCandidates?.length) return;
+    let alive = true;
+    let t = 0;
+    // It reads the originals: a little after start-up, and again later if a game is
+    // running (or a check is already going), picking up where it left off.
+    const run = () =>
+      api
+        .matchTrims(trimCandidates)
+        .then((m) => alive && setTrimmedInto((cur) => new Map([...cur, ...Object.entries(m)])))
+        .catch((e) => {
+          if (alive && (String(e) === "game" || String(e) === "busy")) t = window.setTimeout(run, 60_000);
+        });
+    t = window.setTimeout(run, 8_000);
+    return () => {
+      alive = false;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidatesKey]);
+  // For Cleanup: full-length originals that have their cut in the library too.
+  const alreadyTrimmed = useMemo(() => {
+    if (!clips) return [];
+    const byTail = new Map(clips.map((c) => [tailOf(c.path), c]));
+    return [...trimmedInto]
+      .map(([o, i]) => ({ original: byTail.get(tailOf(o)), into: byTail.get(tailOf(i)) }))
+      .filter((p): p is { original: ClipFile; into: ClipFile } => !!p.original && !!p.into && p.original.path !== p.into.path);
+  }, [clips, trimmedInto]);
   const keepClipsWhole = useCallback(
     (paths: string[]) => {
       if (!settings) return;
@@ -631,6 +708,7 @@ export default function App() {
             onChanged={refresh}
             sortList={sortList}
             onSortReview={() => setSortOpen(true)}
+            alreadyTrimmed={alreadyTrimmed}
           />
         )}
         {view === "montage" && <MontageView clips={clips} untrimmed={trimClips} onOpen={openInStudio} />}

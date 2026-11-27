@@ -414,6 +414,80 @@ function Duplicates({ clips, onDelete, onChanged, run = 0 }: { clips: ClipFile[]
   );
 }
 
+/** Full-length originals you already trimmed into a separate, shorter file (another
+ *  app's "Edits", or a trim saved as a new file), checked by their pictures. Removing
+ *  them keeps the cut; each can be kept instead. Nothing goes until Remove is pressed
+ *  (and confirmed), and then only to the Recycle Bin or the NAS app's 30-day Trash. */
+function AlreadyTrimmed({
+  pairs,
+  kept,
+  onKeep,
+  onOpen,
+  onDelete,
+  onChanged,
+}: {
+  pairs: { original: ClipFile; into: ClipFile }[];
+  kept: Record<string, number>;
+  onKeep: (c: ClipFile) => void;
+  onOpen: (path: string) => void;
+  onDelete: (paths: string[]) => Promise<boolean>;
+  onChanged: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const list = pairs.filter((p) => kept[p.original.path] !== p.original.size);
+  if (!list.length) return null;
+  const total = list.reduce((n, p) => n + p.original.size, 0);
+  return (
+    <section className="dupes">
+      <div className="dupe-summary">
+        <div>
+          <h2>Already trimmed</h2>
+          <div className="dupe-total">
+            {list.length} full-length clip{list.length === 1 ? "" : "s"} you already trimmed into a shorter copy · {fmtSize(total)}
+          </div>
+          <p className="muted">
+            The trimmed copy is kept. The full-length originals go to the Recycle Bin, or the NAS app's Trash for 30 days if they're on the NAS.
+          </p>
+        </div>
+        <div className="row dupe-actions">
+          <button className="btn" onClick={() => setOpen((o) => !o)}>
+            {open ? "Hide list" : "See the list"}
+          </button>
+          <button
+            className="btn primary"
+            onClick={async () => {
+              if (await onDelete(list.map((p) => p.original.path))) onChanged();
+            }}
+          >
+            Remove {list.length} original{list.length === 1 ? "" : "s"}
+          </button>
+        </div>
+      </div>
+      {open && (
+        <div className="dupe-groups">
+          {list.map((p) => (
+            <div key={p.original.path} className="dupe-row">
+              <span className="dupe-row-name" title={p.original.path}>
+                <button className="link" onClick={() => onOpen(p.original.path)}>
+                  {p.original.name}
+                </button>
+                <span className="muted"> → trimmed into </span>
+                <button className="link" title={p.into.path} onClick={() => onOpen(p.into.path)}>
+                  {p.into.name}
+                </button>
+              </span>
+              <span className="muted dupe-size">{fmtSize(p.original.size)}</span>
+              <button className="btn small" onClick={() => onKeep(p.original)} title="Keep the full-length original too (until the next cleanup check)">
+                Keep it
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 /** Unsorted clips the game finder matched to a game: a summary with Review, which
  *  opens the same check-before-it-moves list as the notification. */
 function GameSorting({ list, onReview }: { list: GameSuggestion[]; onReview: () => void }) {
@@ -470,8 +544,11 @@ export function Cleanup({
   onChanged,
   sortList = [],
   onSortReview,
+  alreadyTrimmed = [],
 }: {
   clips: ClipFile[] | null;
+  /** Full-length originals and the shorter file each was trimmed into */
+  alreadyTrimmed?: { original: ClipFile; into: ClipFile }[];
   sortList?: GameSuggestion[];
   onSortReview?: () => void;
   settings: Settings;
@@ -521,6 +598,14 @@ export function Cleanup({
         {keptCount > 0 && ` ${keptCount} kept since the last check.`}
       </p>
       {onSortReview && <GameSorting list={sortList} onReview={onSortReview} />}
+      <AlreadyTrimmed
+        pairs={alreadyTrimmed}
+        kept={kept}
+        onKeep={(c) => update({ cleanupKept: { ...kept, [c.path]: c.size } })}
+        onOpen={onOpen}
+        onDelete={onDelete}
+        onChanged={onChanged}
+      />
       <Duplicates clips={all} onDelete={onDelete} onChanged={onChanged} run={checkRun} />
       {biggest.length > 0 && <h2 style={{ marginBottom: 0 }}>Biggest clips</h2>}
       <div className="clean-list">

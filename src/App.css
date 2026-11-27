@@ -1214,6 +1214,8 @@ button.sb-item:hover { background: var(--bg); color: var(--text); }
 .dupe-row.off { opacity: 0.55; }
 .dupe-row .dupe-size { text-align: right; }
 .dupe-row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dupe-row-name button.link { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; }
+.dupe-row-name button.link:hover { color: var(--accent); text-decoration: underline; }
 .dupe-tags { display: flex; gap: 4px; }
 .dupe-tag { all: unset; cursor: pointer; padding: 2px 9px; border-radius: 999px; font-size: 12px; color: var(--muted); border: 1px solid var(--line-2); }
 .dupe-tag.on { color: var(--accent); border-color: var(--accent); }

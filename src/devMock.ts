@@ -208,6 +208,9 @@ export function installDevMock() {
           ]
         : [],
     edited_clips: () => [],
+    // ?trimmed: the first clip was already trimmed into the second (To trim and Cleanup).
+    known_trim_matches: () => (new URLSearchParams(location.search).has("trimmed") && clips.length > 1 ? { [clips[0].path]: clips[1].path } : {}),
+    match_trims: () => ({}),
     system_accent: () => "#4cc2ff",
     hotkey_problems: () => ({ save: new URLSearchParams(location.search).has("taken") ? "Alt+F10 is already used by another app (often NVIDIA's overlay, Medal or another recorder). Pick a different one, or turn it off in that app." : null, record: null }),
     media_base: () => "", // no media server in the browser preview
@@ -373,7 +376,8 @@ export function installDevMock() {
     screen_preview: () => fetch("/thumb-cs2a.jpg").then((r) => r.arrayBuffer()),
     list_audio_inputs: () => [],
     search_games: (a) => ["Overwatch 2", "Overcooked! 2", "Outer Wilds", "Overload"].filter((g) => g.toLowerCase().includes(String(a.term).toLowerCase())),
-    known_lengths: (a) => (a.clips as unknown[]).map(() => 45),
+    // ?trimmed: the first three are whole 2-minute saves (To trim), the first of them already trimmed.
+    known_lengths: (a) => (a.clips as [string, number, number][]).map(([p]) => (new URLSearchParams(location.search).has("trimmed") && clips.slice(0, 3).some((x) => x.path === p) ? 120 : 45)),
     // ?medal: a Medal clip, "All Audio" (the others mixed) plus Game and Mic.
     // The OBS clip is sound only (no picture), like an audio recording saved as a clip.
     probe_file: (a) =>

@@ -1,5 +1,6 @@
 import { Select } from "./Select";
 import { open } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ClipFile, codecLabel, errText, fmtDuration, fmtSize, forDesktop, GameSuggestion, Health, Probe, Upload, UploadProgress, NOT_NEEDED, VIDEO_EXTENSIONS, want } from "./api";
 import { activityOf, ghost, LEAVE_MS, moving, slide, snapshot, useActivity, useJob } from "./activity";
@@ -1204,6 +1205,14 @@ const lenKey = (c: ClipFile) => `${c.path}|${c.modified}`;
  */
 function TrimStatus({ clips }: { clips: ClipFile[] }) {
   const [, setTick] = useState(0);
+  // Looking for clips already trimmed into a separate file (another app's "Edits"…).
+  const [matching, setMatching] = useState<[number, number] | null>(null);
+  useEffect(() => {
+    const un = listen<[number, number]>("trim-match-progress", (e) => setMatching(e.payload[0] < e.payload[1] ? e.payload : null));
+    return () => {
+      un.then((f) => f());
+    };
+  }, []);
   // Hidden until the number of clips to trim changes.
   const [hiddenAt, setHiddenAt] = useState(() => {
     try {
@@ -1285,6 +1294,11 @@ function TrimStatus({ clips }: { clips: ClipFile[] }) {
           : `Trimming each to its best 30 seconds would free about ${fmtSize(freed * (clips.length / known))}${known < clips.length ? " (estimate so far)" : ""}.`}{" "}
         Open one to trim it, or choose “Keep whole” on clips that are fine as they are.
       </span>
+      {matching && (
+        <span className="muted">
+          Looking for clips you already trimmed into a separate file… {matching[0]} of {matching[1]} checked. They leave this list as they're found.
+        </span>
+      )}
     </div>
   );
 }

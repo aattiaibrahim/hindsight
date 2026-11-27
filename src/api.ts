@@ -652,6 +652,10 @@ export const api = {
   cancelMontage: () => invoke<void>("cancel_montage"),
   /** Clips changed in the app (trimmed, healed, exported) */
   editedClips: () => invoke<string[]>("edited_clips"),
+  /** Originals already found trimmed into another file: original path → the cut's path. */
+  knownTrimMatches: () => invoke<Record<string, string>>("known_trim_matches"),
+  /** Check which originals were cut into one of their candidates (reads them; "game" / "busy": try later). */
+  matchTrims: (list: { original: string; edits: string[] }[]) => invoke<Record<string, string>>("match_trims", { list }),
   /** Windows' accent colour ("#rrggbb"), for "Follow Windows" */
   systemAccent: () => invoke<string | null>("system_accent"),
   /** A picture as a game's logo (null: back to the automatic one) */
