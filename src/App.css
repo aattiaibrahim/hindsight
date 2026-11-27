@@ -394,6 +394,9 @@ input[type="range"].track { width: auto; }
 .setting:first-of-type { border-top: 0; }
 .setting > span { font-size: 13px; color: var(--text-2); display: flex; flex-direction: column; gap: 2px; }
 .setting small { font-size: 11px; color: var(--muted); }
+.setting small.hotkey-problem { display: block; margin-top: 4px; color: var(--danger); }
+.setting > span.hotkey-field { flex: none; flex-direction: row; align-items: center; gap: 8px; }
+.hotkey-field .text-input { width: 140px; }
 /* The text wraps; the control beside it (button, dropdown, switch) keeps its full size. */
 .setting > span { flex: 1 1 auto; }
 .setting > .btn, .setting > button, .setting > .select, .setting > .dd, .setting > .switch, .setting > input, .setting > .seg { flex: none; }

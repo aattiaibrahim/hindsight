@@ -25,7 +25,8 @@ export function StatusBar({
   onOpenClip?: (path: string) => void;
   status: Status | null;
   hotkey: string;
-  recordHotkey: string;
+  /** null: recordings are off */
+  recordHotkey: string | null;
   version?: string;
   /** Only part of the screen is being recorded (Settings → Recording area) */
   customArea?: boolean;
@@ -118,8 +119,8 @@ export function StatusBar({
       {err && <span className="sb-item bad">{err}</span>}
       {version && <span className="sb-item quiet sb-version">v{version} beta</span>}
       <RecordButton status={status} hotkey={recordHotkey} className="small" />
-      <button className="btn small primary" disabled={!bufferOn || busy} onClick={save} title={`Save the last ${status ? fmtDuration(status.bufferSeconds) : "moments"} (${hotkey})`}>
-        {busy ? "Saving…" : `Save clip · ${hotkey}`}
+      <button className="btn small primary" disabled={!bufferOn || busy} onClick={save} title={`Save the last ${status ? fmtDuration(status.bufferSeconds) : "moments"}${hotkey ? ` (${hotkey})` : ""}`}>
+        {busy ? "Saving…" : hotkey ? `Save clip · ${hotkey}` : "Save clip"}
       </button>
     </footer>
   );

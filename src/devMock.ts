@@ -76,7 +76,7 @@ export function installDevMock() {
   const settings = {
     clipsDir: "C:\\Users\\you\\Videos\\Hindsight", encoder: "auto", quality: 24, fps: 60, bufferSeconds: 120,
     bufferInRam: true, captureEngine: "native", monitorMode: "primary", fixedMonitor: "", fixedMonitorId: "", drawCursor: true, captureArea: new URLSearchParams(location.search).has("area") ? { x: 0, y: 0, w: 1, h: 0.952 } : null, hotkey: "Alt+F10",
-    recordHotkey: "Alt+F9", bufferEnabled: true, launchOnStartup: false, autoUpdate: true, startMinimized: true,
+    recordHotkey: "Alt+F9", recordingEnabled: true, bufferEnabled: true, launchOnStartup: false, autoUpdate: true, startMinimized: true,
     keepOriginalAfterRemux: true, replaceOriginalOnEdit: true, detailedLog: true, externalFiles: [], desktopAudio: true, discordTrack: true,
     micEnabled: true, micMono: true, micDevice: "", micGainDb: 0, theme: "tinted", accent: "winblue", keepWhole: [], reduceMotion: false, sidebar: "icons",
     saveSound: true, fileNameTemplate: "{game} {date} {time}", fileNamePc: false, nasDir: "\\\\nas\\clips", nasLibraryId: "mock", nasServer: "", nasRemoveLocal: false, nasSyncWhileGaming: false, linkedFolders: [] as string[], benchmarkMode: false, uploadHost: "catbox", litterboxTime: "72h", autoUpload: false, postLinkToDiscord: false, streamableEmail: "", discordWebhookName: "", confirmUploads: true, healthCheck: true, prepareThumbnails: true, gameDetect: true, detectDismissed: [] as string[], notGameFolders: [] as string[],
@@ -209,6 +209,7 @@ export function installDevMock() {
         : [],
     edited_clips: () => [],
     system_accent: () => "#4cc2ff",
+    hotkey_problems: () => ({ save: new URLSearchParams(location.search).has("taken") ? "Alt+F10 is already used by another app (often NVIDIA's overlay, Medal or another recorder). Pick a different one, or turn it off in that app." : null, record: null }),
     media_base: () => "", // no media server in the browser preview
     old_folders: () => [{ path: "C:\\Medal", label: "Medal", moved: 42, files: 3, bytes: 18_400_000 }],
     remove_old_folder: () => null,

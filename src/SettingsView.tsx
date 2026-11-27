@@ -1,5 +1,6 @@
 import { Select } from "./Select";
 import { open } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
 import { RecordingArea } from "./RecordingArea";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useState } from "react";
@@ -73,19 +74,38 @@ const QUALITY_PRESETS: [string, number][] = [
   ["Max", 18],
 ];
 
-function HotkeyInput({ value, label, onPick }: { value: string; label: string; onPick: (hk: string) => void }) {
+function HotkeyInput({
+  value,
+  label,
+  onPick,
+  problem,
+}: {
+  value: string;
+  label: string;
+  /** "" = no hotkey */
+  onPick: (hk: string) => void;
+  /** Why it can't be used (another app has it) */
+  problem?: string | null;
+}) {
   const [listening, setListening] = useState(false);
   return (
     <div className="setting">
       <span>
         {label}
-        <small>{listening ? "Press the keys now… (Esc to cancel)" : "Click, then press a combo"}</small>
+        <small>{listening ? "Press the keys now… (Esc to cancel)" : value ? "Click, then press a combo" : "No hotkey: click to set one"}</small>
+        {problem && value && !listening &&<small className="err-text hotkey-problem">{problem}</small>}
       </span>
+      <span className="hotkey-field">
+      {value && !listening && (
+        <button className="btn small" onClick={() => onPick("")} title="Use no hotkey for this">
+          No hotkey
+        </button>
+      )}
       <input
         className="text-input"
         aria-label={label}
         readOnly
-        value={listening ? "…" : value}
+        value={listening ? "…" : value || "None"}
         onFocus={() => setListening(true)}
         onBlur={() => setListening(false)}
         onKeyDown={(e) => {
@@ -98,8 +118,23 @@ function HotkeyInput({ value, label, onPick }: { value: string; label: string; o
           }
         }}
       />
+      </span>
     </div>
   );
+}
+
+/** Which hotkeys another app has taken, kept up to date as they're changed. */
+function useHotkeyProblems() {
+  const [p, setP] = useState<{ save: string | null; record: string | null }>({ save: null, record: null });
+  useEffect(() => {
+    const load = () => api.hotkeyProblems().then(setP).catch(() => {});
+    load();
+    const un = listen("hotkeys-changed", load);
+    return () => {
+      un.then((f) => f());
+    };
+  }, []);
+  return p;
 }
 
 /** What each "Which monitor" choice does when screens change (checked every second). */
@@ -197,6 +232,7 @@ export function SettingsView({
   const set = (p: Partial<Settings>) => update(p).catch((e) => onError(String(e)));
   const s = settings;
   const themeNow = THEMES.find((t) => t.id === s.theme);
+  const hotkeyProblems = useHotkeyProblems();
   // The chosen screen: by hardware id (survives Windows renumbering DISPLAY1/2), else by number.
   const fixedScreen =
     (s.fixedMonitorId && monitors.find((m) => m.id && m.id.toLowerCase() === s.fixedMonitorId.toLowerCase())) ||
@@ -401,8 +437,25 @@ export function SettingsView({
             <Toggle label="Save sound" checked={s.saveSound} onChange={(v) => set({ saveSound: v })} />
           </label>
           <FileNameSetting s={s} set={set} />
-          <HotkeyInput label="Save clip hotkey" value={s.hotkey} onPick={(hk) => set({ hotkey: hk })} />
-          <HotkeyInput label="Start / stop recording hotkey" value={s.recordHotkey} onPick={(hk) => set({ recordHotkey: hk })} />
+          <HotkeyInput label="Save clip hotkey" value={s.hotkey} onPick={(hk) => set({ hotkey: hk })} problem={hotkeyProblems.save} />
+          <label className="setting">
+            <span>
+              Full recordings
+              <small>
+                A Record button (and hotkey) that records until you stop it, for whole matches. Off: no Record button,
+                and its hotkey is left free for other apps.
+              </small>
+            </span>
+            <Toggle label="Full recordings" checked={s.recordingEnabled} onChange={(v) => set({ recordingEnabled: v })} />
+          </label>
+          {s.recordingEnabled && (
+            <HotkeyInput
+              label="Start / stop recording hotkey"
+              value={s.recordHotkey}
+              onPick={(hk) => set({ recordHotkey: hk })}
+              problem={hotkeyProblems.record}
+            />
+          )}
         </section>
 
         <section className="group" hidden={tab !== "general"}>
@@ -605,7 +658,8 @@ export function SettingsView({
             <span>
               Without the plugin
               <small>
-                Stream Deck "Hotkey" action: {s.hotkey} saves a clip, {s.recordHotkey} records. Or run{" "}
+                {s.hotkey && <>Stream Deck "Hotkey" action: {s.hotkey} saves a clip{s.recordingEnabled && s.recordHotkey ? `, ${s.recordHotkey} records` : ""}. </>}
+                Run{" "}
                 <code>Rewind.exe --save-clip</code>, <code>--toggle-record</code> or <code>--toggle-buffer</code>.
               </small>
             </span>

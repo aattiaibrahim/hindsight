@@ -160,6 +160,9 @@ fn save_now(app: &AppHandle, seconds: Option<u32>) -> Result<String, String> {
 /// Start or stop a recording. Returns the saved file when stopping.
 fn toggle_record_now(app: &AppHandle) -> Result<Option<String>, String> {
     let st = app.state::<AppState>();
+    if !st.engine.is_recording() && !settings_of(app).recording_enabled {
+        return Err("Recordings are off. Turn them on in Settings, General.".into());
+    }
     if st.engine.is_recording() {
         let stopped = st.engine.stop_recording();
         if settings_of(app).save_sound {
@@ -189,16 +192,65 @@ fn in_background(app: &AppHandle, job: fn(&AppHandle) -> Result<(), String>) {
     });
 }
 
-/// Register both hotkeys; on failure the previous ones are restored.
-fn apply_hotkeys(app: &AppHandle, save: &str, record: &str) -> Result<(), String> {
-    if Shortcut::from_str(save).ok() == Shortcut::from_str(record).ok() {
-        return Err("The clip and record hotkeys can't be the same.".into());
+/// Why each hotkey couldn't be used (None = working, or none set), for Settings.
+#[derive(serde::Serialize, Clone, Default, PartialEq, Debug)]
+pub struct HotkeyProblems {
+    save: Option<String>,
+    record: Option<String>,
+}
+static HOTKEY_PROBLEMS: Mutex<HotkeyProblems> = Mutex::new(HotkeyProblems { save: None, record: None });
+
+fn hotkey_problem(key: &str, e: impl std::fmt::Display) -> String {
+    let e = e.to_string();
+    if e.contains("already registered") {
+        format!("{key} is already used by another app (often NVIDIA's overlay, Medal or another recorder). Pick a different one, or turn it off in that app.")
+    } else {
+        format!("Couldn't use {key}: {e}")
     }
+}
+
+/// Register each hotkey on its own, so one another app has taken doesn't stop the
+/// other (or the rest of Settings) from working. The record hotkey only while
+/// recordings are on. Problems are kept for Settings to show under each hotkey.
+fn apply_hotkeys(app: &AppHandle, s: &Settings) {
     let gs = app.global_shortcut();
     let _ = gs.unregister_all();
-    gs.register(save).map_err(|e| format!("Couldn't use hotkey \"{save}\": {e}"))?;
-    gs.register(record).map_err(|e| format!("Couldn't use hotkey \"{record}\": {e}"))?;
-    Ok(())
+    let mut p = HotkeyProblems::default();
+    if !s.hotkey.is_empty() {
+        if let Err(e) = gs.register(s.hotkey.as_str()) {
+            p.save = Some(hotkey_problem(&s.hotkey, e));
+        }
+    }
+    if s.recording_enabled && !s.record_hotkey.is_empty() {
+        if let Err(e) = gs.register(s.record_hotkey.as_str()) {
+            p.record = Some(hotkey_problem(&s.record_hotkey, e));
+        }
+    }
+    for e in [&p.save, &p.record].into_iter().flatten() {
+        crate::log!("{e}");
+    }
+    *HOTKEY_PROBLEMS.lock().unwrap() = p;
+    let _ = app.emit("hotkeys-changed", ());
+}
+
+#[tauri::command]
+fn hotkey_problems() -> HotkeyProblems {
+    HOTKEY_PROBLEMS.lock().unwrap().clone()
+}
+
+/// The tray's "Start / stop recording" item, shown only while recordings are on.
+struct TrayRecord {
+    menu: Menu<tauri::Wry>,
+    item: MenuItem<tauri::Wry>,
+}
+
+fn show_tray_record(app: &AppHandle, on: bool) {
+    if let Some(t) = app.try_state::<TrayRecord>() {
+        let _ = t.menu.remove(&t.item);
+        if on {
+            let _ = t.menu.insert(&t.item, 1);
+        }
+    }
 }
 
 /// The app icon, with a red "live" dot in the corner while capturing (like OBS).
@@ -319,11 +371,19 @@ fn set_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
     let st = app.state::<AppState>();
     let old = st.settings.lock().unwrap().clone();
     pin_monitor(&mut settings, Some(&old));
-    if old.hotkey != settings.hotkey || old.record_hotkey != settings.record_hotkey {
-        if let Err(e) = apply_hotkeys(&app, &settings.hotkey, &settings.record_hotkey) {
-            let _ = apply_hotkeys(&app, &old.hotkey, &old.record_hotkey);
-            return Err(e);
-        }
+    let recording_counts = settings.recording_enabled && !settings.record_hotkey.is_empty();
+    if !settings.hotkey.is_empty()
+        && recording_counts
+        && Shortcut::from_str(&settings.hotkey).ok() == Shortcut::from_str(&settings.record_hotkey).ok()
+    {
+        return Err("The clip and record hotkeys can't be the same.".into());
+    }
+    if old.hotkey != settings.hotkey || old.record_hotkey != settings.record_hotkey || old.recording_enabled != settings.recording_enabled {
+        // A hotkey another app has taken is shown under it in Settings; the rest still saves.
+        apply_hotkeys(&app, &settings);
+    }
+    if old.recording_enabled != settings.recording_enabled {
+        show_tray_record(&app, settings.recording_enabled);
     }
     if old.clips_dir != settings.clips_dir {
         std::fs::create_dir_all(&settings.clips_dir)
@@ -2370,7 +2430,7 @@ pub fn run() {
                         return;
                     }
                     let s = settings_of(app);
-                    if Shortcut::from_str(&s.record_hotkey).ok().as_ref() == Some(shortcut) {
+                    if s.recording_enabled && Shortcut::from_str(&s.record_hotkey).ok().as_ref() == Some(shortcut) {
                         in_background(app, |a| toggle_record_now(a).map(|_| ()));
                     } else {
                         in_background(app, |a| save_now(a, None).map(|_| ()));
@@ -2510,9 +2570,7 @@ pub fn run() {
             media_server::start();
             session_end::start(handle.clone());
 
-            if let Err(e) = apply_hotkeys(&handle, &s.hotkey, &s.record_hotkey) {
-                crate::log!("{e}");
-            }
+            apply_hotkeys(&handle, &s);
             apply_autostart(&handle, s.launch_on_startup);
 
             // Tray icon: left click opens the flyout, right click shows the menu.
@@ -2524,6 +2582,8 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "Quit Hindsight", true, None::<&str>)?;
             let sep = PredefinedMenuItem::separator(app)?;
             let menu = Menu::with_items(app, &[&save, &record, &open, &toggle, &sep, &updates, &quit])?;
+            app.manage(TrayRecord { menu: menu.clone(), item: record.clone() });
+            show_tray_record(&handle, s.recording_enabled);
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().cloned().expect("app icon"))
                 .tooltip("Hindsight")
@@ -2650,6 +2710,7 @@ get_settings,
             list_audio_inputs,
             save_clip,
             toggle_recording,
+            hotkey_problems,
             list_clips,
             probe_file,
             known_lengths,

@@ -27,9 +27,15 @@ pub struct Settings {
     pub draw_cursor: bool,
     /// Part of the screen to record, as fractions of the monitor; None = all of it.
     pub capture_area: Option<Area>,
+    /// "" = no hotkey (save from the app, tray or Stream Deck only).
     pub hotkey: String,
     /// Start / stop a full recording
+    /// "" = no hotkey.
     pub record_hotkey: String,
+    /// Full recordings (the Record button, tray item and hotkey). Off for new
+    /// installs; a settings file from before this option keeps it on.
+    #[serde(default = "recording_was_on")]
+    pub recording_enabled: bool,
     pub buffer_enabled: bool,
     pub launch_on_startup: bool,
     /// Download updates in the background and install them when safe
@@ -159,6 +165,10 @@ impl Area {
     }
 }
 
+fn recording_was_on() -> bool {
+    true
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Settings {
@@ -177,6 +187,7 @@ impl Default for Settings {
             capture_area: None,
             hotkey: "Alt+F10".into(),
             record_hotkey: "Alt+F9".into(),
+            recording_enabled: false,
             buffer_enabled: true,
             launch_on_startup: false,
             auto_update: true,
@@ -252,12 +263,9 @@ impl Settings {
         if self.file_name_template.trim().is_empty() || self.file_name_template.chars().count() > 120 {
             self.file_name_template = d.file_name_template.clone();
         }
-        if self.hotkey.trim().is_empty() {
-            self.hotkey = d.hotkey;
-        }
-        if self.record_hotkey.trim().is_empty() {
-            self.record_hotkey = d.record_hotkey;
-        }
+        // An empty hotkey is a choice now: no hotkey.
+        self.hotkey = self.hotkey.trim().to_string();
+        self.record_hotkey = self.record_hotkey.trim().to_string();
         self.external_files.dedup();
         self.nas_dir = self.nas_dir.trim().trim_end_matches(['\\', '/']).to_string();
         if self.nas_dir.is_empty() {
@@ -335,7 +343,17 @@ mod tests {
             .sanitized();
         assert_eq!((s.fps, s.quality, s.buffer_seconds), (240, 10, 5));
         assert_eq!(s.encoder, "auto");
-        assert_eq!(s.hotkey, "Alt+F10");
+        // A blank hotkey means "no hotkey" now.
+        assert_eq!(s.hotkey, "");
+    }
+
+    #[test]
+    fn recordings_off_for_new_installs_on_for_old_settings() {
+        assert!(!Settings::default().recording_enabled);
+        let old: Settings = serde_json::from_str(r#"{"hotkey":"Alt+F10"}"#).unwrap();
+        assert!(old.recording_enabled);
+        let off: Settings = serde_json::from_str(r#"{"recordingEnabled":false}"#).unwrap();
+        assert!(!off.recording_enabled);
     }
 
     #[test]

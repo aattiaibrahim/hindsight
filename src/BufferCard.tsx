@@ -18,7 +18,8 @@ export function folderLine(s: Status | null) {
   return `Clips go to: ${s?.game ?? "Desktop"}`;
 }
 
-export function RecordButton({ status, hotkey, className = "" }: { status: Status | null; hotkey: string; className?: string }) {
+/** `hotkey` null: recordings are off in Settings, so no button (unless one is still running). */
+export function RecordButton({ status, hotkey, className = "" }: { status: Status | null; hotkey: string | null; className?: string }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const rec = !!status?.recording;
@@ -33,23 +34,24 @@ export function RecordButton({ status, hotkey, className = "" }: { status: Statu
       setBusy(false);
     }
   };
+  if (hotkey === null && !rec) return null;
   return (
     <>
       <button
         className={`btn ${rec ? "rec-on" : ""} ${className}`}
         disabled={busy || (!rec && !status)}
         onClick={toggle}
-        title={`Start or stop a full recording (${hotkey})`}
+        title={`Start or stop a full recording${hotkey ? ` (${hotkey})` : ""}`}
       >
         <span className={`rec-dot ${rec ? "on" : ""}`} aria-hidden="true" />
-        {busy ? (rec ? "Saving…" : "Starting…") : rec ? `Stop · ${fmtDuration(status!.recordingSeconds)}` : `Record · ${hotkey}`}
+        {busy ? (rec ? "Saving…" : "Starting…") : rec ? `Stop · ${fmtDuration(status!.recordingSeconds)}` : hotkey ? `Record · ${hotkey}` : "Record"}
       </button>
       {err && <div className="err-text">{err}</div>}
     </>
   );
 }
 
-export function BufferCard({ status, hotkey, recordHotkey }: { status: Status | null; hotkey: string; recordHotkey: string }) {
+export function BufferCard({ status, hotkey, recordHotkey }: { status: Status | null; hotkey: string; recordHotkey: string | null }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const nas = useNasState();
@@ -100,7 +102,7 @@ export function BufferCard({ status, hotkey, recordHotkey }: { status: Status | 
       {on && status?.audioError && <div className="err-text">{status.audioError}</div>}
       {err && <div className="err-text">{err}</div>}
       <button className="btn primary" disabled={!bufferOn || busy} onClick={save}>
-        {busy ? "Saving…" : `Save clip · ${hotkey}`}
+        {busy ? "Saving…" : hotkey ? `Save clip · ${hotkey}` : "Save clip"}
       </button>
       <RecordButton status={status} hotkey={recordHotkey} />
     </div>

@@ -65,7 +65,10 @@ export type Settings = {
   /** Part of the screen to record (fractions); null = all of it. */
   captureArea: CropRect | null;
   hotkey: string;
+  /** "" = no hotkey (also for `hotkey`) */
   recordHotkey: string;
+  /** Full recordings: the Record button, tray item and hotkey */
+  recordingEnabled: boolean;
   bufferEnabled: boolean;
   launchOnStartup: boolean;
   autoUpdate: boolean;
@@ -574,6 +577,8 @@ export const api = {
   screenPreview: () => invoke<ArrayBuffer>("screen_preview"),
   saveClip: (seconds?: number) => invoke<string>("save_clip", { seconds: seconds ?? null }),
   toggleRecording: () => invoke<string | null>("toggle_recording"),
+  /** Why a hotkey couldn't be used (another app has it), per hotkey; null = fine */
+  hotkeyProblems: () => invoke<{ save: string | null; record: string | null }>("hotkey_problems"),
   listClips: () => invoke<ClipFile[]>("list_clips"),
   /** `tracked`: the caller registers with `want` (cards); anyone else always gets an answer. */
   /** Lengths already known for these clips (0 = not yet), in one call that reads no files. */

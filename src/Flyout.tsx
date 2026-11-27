@@ -92,7 +92,7 @@ export function Flyout() {
             </button>
           ))}
         </div>
-        <RecordButton status={status} hotkey={settings?.recordHotkey ?? "Alt+F9"} />
+        <RecordButton status={status} hotkey={settings?.recordingEnabled ? settings.recordHotkey : null} />
         {msg && <div className={msg.err ? "err-text" : "buffer-meta"}>{msg.text}</div>}
       </div>
 
@@ -117,7 +117,7 @@ export function Flyout() {
         {(clips ?? []).filter((c) => !c.external).slice(0, 3).map((c) => (
           <MiniClip key={c.path} clip={c} />
         ))}
-        {clips && clips.length === 0 && <span className="muted" style={{ fontSize: 12 }}>No clips yet. Press {settings?.hotkey}.</span>}
+        {clips && clips.length === 0 && <span className="muted" style={{ fontSize: 12 }}>No clips yet. {settings?.hotkey ? `Press ${settings.hotkey}.` : "Save one above."}</span>}
       </div>
     </div>
   );

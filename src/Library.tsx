@@ -874,7 +874,7 @@ clips === null ? null : clips.length === 0 && trimMode ? (
         <div className="empty">
           <strong>No clips yet</strong>
           <span>
-            Play something and press <span className="kbd">{hotkey}</span> to save the last moments. Or open a video from
+            Play something and {hotkey ? <>press <span className="kbd">{hotkey}</span></> : <>click Save clip at the bottom</>} to save the last moments. Or open a video from
             anywhere on your PC to edit it.
           </span>
           <button className="btn" onClick={openAny}>

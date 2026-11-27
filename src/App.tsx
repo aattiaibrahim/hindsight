@@ -674,7 +674,7 @@ export default function App() {
       <StatusBar
         status={status}
         hotkey={settings?.hotkey ?? "Alt+F10"}
-        recordHotkey={settings?.recordHotkey ?? "Alt+F9"}
+        recordHotkey={settings?.recordingEnabled ? settings.recordHotkey : null}
         version={upd?.current}
         onOpenClip={openInStudio}
         customArea={!!settings?.captureArea}
