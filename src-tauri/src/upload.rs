@@ -470,7 +470,8 @@ mod tests {
 
     #[test]
     fn spoilers_upload_under_a_spoiler_name() {
-        let p = Path::new(r"C:\Clips\Valorant\Ace.mp4");
+        // Forward slashes: a path every system splits the same way.
+        let p = Path::new("Clips/Valorant/Ace.mp4");
         assert_eq!(upload_name(p, true), "SPOILER_Ace.mp4");
         assert_eq!(upload_name(p, false), "Ace.mp4");
     }
