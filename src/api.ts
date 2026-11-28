@@ -115,6 +115,8 @@ export type Settings = {
   notGameFolders?: string[];
   /** Clips taken off "To trim" */
   keepWhole: string[];
+  /** Clips marked as a spoiler, by file name in lower case (see spoiler.ts) */
+  spoilers: string[];
   /** Game logos from Steam (only the game's name is sent) */
   onlineGameLogos: boolean;
   startMinimized: boolean;

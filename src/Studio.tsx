@@ -1,4 +1,5 @@
 import { Select } from "./Select";
+import { useSpoiler } from "./spoiler";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -22,6 +23,7 @@ import {
   VolumeX,
   FastForward,
   Eraser,
+  EyeOff,
 } from "lucide-react";
 import { api, ClipFile, codecLabel, errText, fmtSize, fmtTime, Health, PreviewAudio, Probe, Settings, TrackEdit, Upload, UploadProgress, Waveform, mediaSrc } from "./api";
 import { AudioLanes, hasAudioEdits, isMutedAt } from "./AudioLanes";
@@ -254,7 +256,10 @@ export function Studio({
   onRescued,
   movedFrom = null,
   onSavedElsewhere,
+  onSpoiler,
 }: {
+  /** Mark (true) or unmark clips as spoilers */
+  onSpoiler?: (paths: string[], on: boolean) => void;
   /** A save finished (or failed) after you moved on to another clip or page: tell you without taking you back. */
   onSavedElsewhere?: (text: string, out: string | null, err?: boolean) => void;
   /** This clip was open from that path until its copy on this PC was freed up: keep your place. */
@@ -440,6 +445,16 @@ export function Studio({
     const i = SPEEDS.indexOf(speedRef.current);
     setSpeed(SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, (i < 0 ? 2 : i) + dir))]);
   }, [setSpeed]);
+  // Marked as a spoiler: covered (and kept from playing) until clicked.
+  const spoiler = useSpoiler(path ?? "");
+  useEffect(() => {
+    const v = video.current;
+    if (!spoiler.hidden || !v) return;
+    v.pause();
+    const stay = () => v.pause();
+    v.addEventListener("play", stay);
+    return () => v.removeEventListener("play", stay);
+  }, [spoiler.hidden, path, reload]);
   const [range, setRange] = useState<[number, number]>([0, 0]);
   // Which file the player failed on. Tied to the path, so an error from the
   // previous clip can't show up on the next one.
@@ -991,6 +1006,17 @@ export function Studio({
           </span>
         )}
         <StudioNas clip={clips?.find((c) => c.path === path)} />
+        {path && onSpoiler && (
+          <button
+            className={`btn ${spoiler.marked ? "on" : ""}`}
+            aria-pressed={spoiler.marked}
+            onClick={() => onSpoiler([path], !spoiler.marked)}
+            title={spoiler.marked ? "Show it normally again" : "Blur it everywhere until clicked, and post it to Discord as a spoiler"}
+          >
+            <EyeOff size={15} strokeWidth={2} aria-hidden="true" />
+            {spoiler.marked ? "Spoiler" : "Mark as spoiler"}
+          </button>
+        )}
         {/* One button both ways, with its key, so nobody has to know about T. */}
         <button className="btn" onClick={toggleTheater} aria-pressed={theater} title={theater ? "Show the editing tools again (T)" : "Hide the editing tools for a bigger video (T)"}>
           {theater ? Icon.theaterOff : Icon.theater}
@@ -1039,6 +1065,13 @@ export function Studio({
               nudgeVolume(e.deltaY < 0 ? 0.05 : -0.05);
             }}
           >
+            {spoiler.hidden && (
+              <button className="spoiler-cover studio-spoiler" onClick={spoiler.reveal} title="Show it">
+                <EyeOff size={28} strokeWidth={2} aria-hidden="true" />
+                <b>Marked as a spoiler</b>
+                <span>Click to show it</span>
+              </button>
+            )}
             <video
               key={`${path}#${reload}`}
               ref={video}

@@ -1147,6 +1147,8 @@ fn upload_now(app: &AppHandle, path: &str, host: Option<&str>) -> Result<upload:
             streamable_password: secrets::get(&secrets_file, "streamable_password"),
             post_link_to_discord: s.post_link_to_discord,
             message: if folder.is_empty() || folder == "Desktop" { "Clip".into() } else { format!("{folder} clip") },
+            // The clip itself decides (the file sent may be a smaller copy with another name).
+            spoiler: s.is_spoiler(path),
         };
         let (a, p, h) = (app.clone(), path.to_string(), name.clone());
         let report = Box::new(move |sent: u64, total: u64| {
@@ -1429,6 +1431,12 @@ async fn edit(
             library::set_dates(std::path::Path::new(&out), d);
         }
         remember_edited(&app, &out);
+        // A copy of a spoiler is one too.
+        let mut s = settings_of(&app);
+        if s.is_spoiler(&original) && !s.is_spoiler(&out) {
+            s.spoilers.push(settings::spoiler_key(&out));
+            let _ = set_settings(app.clone(), s);
+        }
         return Ok(out);
     }
     // The edit gets the clip's dates before it goes in place, so even if that fails
@@ -1955,7 +1963,24 @@ async fn rename_clip(app: AppHandle, path: String, name: String) -> Result<Strin
     if changed {
         let _ = set_settings(app.clone(), s);
     }
-    // Its share links and "edited" mark follow it too.
+    // Its share links, "edited" and spoiler marks follow it too.
+    {
+        let mut s = settings_of(&app);
+        let mut changed = false;
+        for (from, to) in &renamed {
+            let (old, new) = (settings::spoiler_key(from), settings::spoiler_key(to));
+            if old != new && s.spoilers.contains(&old) {
+                s.spoilers.retain(|k| *k != old);
+                if !s.spoilers.contains(&new) {
+                    s.spoilers.push(new);
+                }
+                changed = true;
+            }
+        }
+        if changed {
+            let _ = set_settings(app.clone(), s);
+        }
+    }
     for (from, to) in &renamed {
         if let Ok(f) = data_file(&app, "uploads.json") {
             upload::renamed(&f, from, to);

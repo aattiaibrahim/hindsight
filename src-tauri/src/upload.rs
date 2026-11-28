@@ -84,6 +84,8 @@ pub struct Config {
     pub post_link_to_discord: bool,
     /// Shown above the clip in Discord, e.g. "VALORANT clip"
     pub message: String,
+    /// Marked as a spoiler: Discord blurs it until clicked (file named SPOILER_…, links in || ||)
+    pub spoiler: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -181,10 +183,16 @@ impl<R: Read> Read for Progress<R> {
     }
 }
 
-fn file_part(file: &Path, report: Box<dyn FnMut(u64, u64) + Send>) -> Result<reqwest::blocking::multipart::Part, String> {
+/// The name a file is sent under: Discord shows one starting "SPOILER_" blurred until clicked.
+pub fn upload_name(file: &Path, spoiler: bool) -> String {
+    let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "clip.mp4".into());
+    if spoiler { format!("SPOILER_{name}") } else { name }
+}
+
+fn file_part(file: &Path, spoiler: bool, report: Box<dyn FnMut(u64, u64) + Send>) -> Result<reqwest::blocking::multipart::Part, String> {
     let total = fs::metadata(file).map_err(|e| e.to_string())?.len();
     let f = fs::File::open(file).map_err(|e| e.to_string())?;
-    let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "clip.mp4".into());
+    let name = upload_name(file, spoiler);
     reqwest::blocking::multipart::Part::reader_with_length(Progress { inner: f, sent: 0, total, last: Instant::now(), report }, total)
         .file_name(name)
         .mime_str("video/mp4")
@@ -220,7 +228,7 @@ fn friendly(host: Host, status: reqwest::StatusCode, body: &str) -> String {
 pub fn send(host: Host, file: &Path, cfg: &Config, ep: &Endpoints, report: Box<dyn FnMut(u64, u64) + Send>) -> Result<String, String> {
     use reqwest::blocking::multipart::Form;
     let c = client()?;
-    let part = file_part(file, report)?;
+    let part = file_part(file, cfg.spoiler, report)?;
     let res = match host {
         Host::Catbox => c.post(&ep.catbox).multipart(Form::new().text("reqtype", "fileupload").part("fileToUpload", part)).send(),
         Host::Litterbox => {
@@ -262,7 +270,9 @@ pub fn send(host: Host, file: &Path, cfg: &Config, ep: &Endpoints, report: Box<d
     // Share the link in Discord too: it plays inline there, whatever the size.
     if host != Host::Discord && cfg.post_link_to_discord {
         if let Some(hook) = cfg.discord_webhook.as_deref().filter(|h| valid_webhook(h) || h.starts_with("http://127.0.0.1")) {
-            let content = if cfg.message.is_empty() { url.clone() } else { format!("{}\n{url}", cfg.message) };
+            // A spoiler's link is hidden in Discord until clicked (its preview too).
+            let link = if cfg.spoiler { format!("||{url}||") } else { url.clone() };
+            let content = if cfg.message.is_empty() { link } else { format!("{}\n{link}", cfg.message) };
             let r = c.post(hook).json(&serde_json::json!({ "content": content, "allowed_mentions": { "parse": [] } })).send();
             if let Ok(r) = r
                 && !r.status().is_success()
@@ -457,6 +467,13 @@ pub fn litterbox_expiry(t: &str, now_ms: i64) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spoilers_upload_under_a_spoiler_name() {
+        let p = Path::new(r"C:\Clips\Valorant\Ace.mp4");
+        assert_eq!(upload_name(p, true), "SPOILER_Ace.mp4");
+        assert_eq!(upload_name(p, false), "Ace.mp4");
+    }
     use std::io::{BufRead, BufReader, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;

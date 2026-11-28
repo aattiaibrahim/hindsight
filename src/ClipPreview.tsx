@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { fmtDuration, mediaSrc } from "./api";
 import { useThumb } from "./hooks";
 import { Slider } from "./Slider";
+import { useSpoiler } from "./spoiler";
 
 /**
  * A clip's thumbnail that plays a muted preview while the pointer rests on it
@@ -11,6 +12,8 @@ import { Slider } from "./Slider";
  */
 export function HoverPreview({ path, className = "", onOpen }: { path: string; className?: string; onOpen: () => void }) {
   const thumb = useThumb(path);
+  // A spoiler stays still (and blurred) until clicked; that click only shows it.
+  const spoiler = useSpoiler(path);
   const [hover, setHover] = useState(false);
   const [playing, setPlaying] = useState(false);
   const timer = useRef(0);
@@ -33,11 +36,12 @@ export function HoverPreview({ path, className = "", onOpen }: { path: string; c
       onClick={(e) => {
         e.preventDefault(); // inside a row's label: don't tick its box
         e.stopPropagation();
-        onOpen();
+        if (spoiler.hidden) spoiler.reveal();
+        else onOpen();
       }}
     >
       {thumb && <img src={thumb} alt="" />}
-      {hover && (
+      {hover && !spoiler.hidden && (
         <video
           src={mediaSrc(path)}
           muted

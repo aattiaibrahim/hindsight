@@ -19,6 +19,7 @@ import { GameSortDialog, useGameSuggestions } from "./GameSort";
 import { useNasState } from "./NasProgress";
 import type { MoveOutcome, OldFolder } from "./api";
 import { fmtSize } from "./api";
+import { hideAll, setMarked, spoilerKey } from "./spoiler";
 import { OldFolderDialog } from "./OldFolder";
 import { useAppearance, useClips, useMediaReady, useSettings, useStatus, useUpdate } from "./hooks";
 import { Library } from "./Library";
@@ -468,6 +469,29 @@ export default function App() {
       .map(([o, i]) => ({ original: byTail.get(tailOf(o)), into: byTail.get(tailOf(i)) }))
       .filter((p): p is { original: ClipFile; into: ClipFile } => !!p.original && !!p.into && p.original.path !== p.into.path);
   }, [clips, trimmedInto]);
+  // Spoilers: the marks from Settings, blurred again each time you leave a page (but
+  // not when you open a clip in Studio, so one you just showed stays shown there).
+  useEffect(() => setMarked(settings?.spoilers ?? []), [settings?.spoilers]);
+  useEffect(() => {
+    if (view !== "studio") hideAll();
+  }, [view]);
+  const markSpoiler = useCallback(
+    (paths: string[], on: boolean) => {
+      if (!settings) return;
+      const before = settings.spoilers ?? [];
+      const keys = paths.map(spoilerKey);
+      const next = on ? [...new Set([...before, ...keys])] : before.filter((k) => !keys.includes(k));
+      update({ spoilers: next });
+      const n = paths.length;
+      toast(
+        on ? (n === 1 ? "Marked as a spoiler" : `Marked ${n} clips as spoilers`) : n === 1 ? "Not a spoiler any more" : `${n} clips aren't spoilers any more`,
+        false,
+        on ? "Blurred until clicked, and posted to Discord as a spoiler." : undefined,
+        { label: "Undo", run: () => update({ spoilers: before }) },
+      );
+    },
+    [settings, update, toast],
+  );
   const keepClipsWhole = useCallback(
     (paths: string[]) => {
       if (!settings) return;
@@ -688,6 +712,7 @@ export default function App() {
             onShare={requestShare}
             health={health}
             onKeepWhole={v === "totrim" ? keepClipsWhole : undefined}
+            onSpoiler={markSpoiler}
             onMoveTo={v === "damaged" ? undefined : moveClipsTo}
             sortList={sortList}
             onSortReview={() => setSortOpen(true)}
@@ -724,6 +749,7 @@ export default function App() {
             settings={settings}
             update={update}
             onBack={backToClips}
+            onSpoiler={markSpoiler}
             uploads={uploads.progress}
             links={uploads.history}
             onShare={requestShare}

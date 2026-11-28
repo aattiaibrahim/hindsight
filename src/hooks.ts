@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { blurred, useSpoiler } from "./spoiler";
 import { forgetGone, isLeaving, leavesDone, slide, snapshot } from "./activity";
 import { api, ClipFile, Settings, Status, UpdateState, NOT_NEEDED, markOnScreen, mediaReady, whenMediaReady, want as wantThumb } from "./api";
 
@@ -185,7 +186,20 @@ export function useThumbStatus(path: string, key: string | number = "", want = t
       wantThumb(k, -1); // left the screen: a request still waiting its turn is dropped
     };
   }, [path, key, want]);
-  return { src, loading: !!path && want && !src && !failed };
+  // A clip marked as a spoiler shows a blurred copy until it's clicked; nothing at
+  // all until that copy is made, so the real picture never flashes up.
+  const { hidden } = useSpoiler(path);
+  const [blur, setBlur] = useState<{ of: string; url: string | null } | null>(null);
+  useEffect(() => {
+    if (!hidden || !src) return;
+    let alive = true;
+    blurred(src).then((url) => alive && setBlur({ of: src, url }));
+    return () => {
+      alive = false;
+    };
+  }, [hidden, src]);
+  const shown = hidden ? (blur && blur.of === src ? blur.url : null) : src;
+  return { src: shown, loading: !!path && want && !shown && !failed && !(hidden && blur?.of === src) };
 }
 
 /** Theme, accent and motion as attributes on <html>, so the CSS can switch

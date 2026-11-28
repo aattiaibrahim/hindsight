@@ -149,6 +149,9 @@ pub struct Settings {
     pub camera_fill: bool,
     /// Behind you: "off", "blur" or "remove" (only you, over the game)
     pub camera_background: String,
+    /// Clips marked as a spoiler (blurred in the app until clicked, posted to Discord as a
+    /// spoiler), by file name in lower case: the mark stays through moves and NAS copies.
+    pub spoilers: Vec<String>,
 }
 
 /// A rectangle of the screen, as fractions (0..1) of the monitor.
@@ -264,11 +267,23 @@ impl Default for Settings {
             camera_border: false,
             camera_fill: false,
             camera_background: "off".into(),
+            spoilers: Vec::new(),
         }
     }
 }
 
+/// How a clip is known in `Settings::spoilers`: its file name, lower case.
+pub fn spoiler_key(path: &str) -> String {
+    path.rsplit(['\\', '/']).next().unwrap_or(path).to_lowercase()
+}
+
 impl Settings {
+    /// Is this clip marked as a spoiler?
+    pub fn is_spoiler(&self, path: &str) -> bool {
+        let k = spoiler_key(path);
+        self.spoilers.iter().any(|s| *s == k)
+    }
+
     /// Pull every value into a range the engine can actually use.
     pub fn sanitized(mut self) -> Settings {
         let d = Settings::default();
@@ -372,6 +387,15 @@ pub fn save(path: &Path, s: &Settings) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spoilers_are_known_by_file_name_anywhere() {
+        let s = Settings { spoilers: vec![spoiler_key(r"C:\Clips\Valorant\Ace 2026-11-28 21-00-00.mp4")], ..Default::default() };
+        assert_eq!(s.spoilers[0], "ace 2026-11-28 21-00-00.mp4");
+        assert!(s.is_spoiler(r"\\nas\clips\Valorant\ACE 2026-11-28 21-00-00.mp4"), "the NAS copy, any case");
+        assert!(s.is_spoiler("D:/Moved/Ace 2026-11-28 21-00-00.mp4"), "after a move");
+        assert!(!s.is_spoiler(r"C:\Clips\Valorant\Ace 2026-11-28 21-00-00 (trim).mp4"));
+    }
 
     #[test]
     fn sanitize_clamps_bad_values() {

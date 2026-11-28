@@ -1,5 +1,6 @@
 import { Select } from "./Select";
 import { open } from "@tauri-apps/plugin-dialog";
+import { useSpoiler } from "./spoiler";
 import { listen } from "@tauri-apps/api/event";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, ClipFile, codecLabel, errText, fmtDuration, fmtSize, forDesktop, GameSuggestion, Health, Probe, Upload, UploadProgress, NOT_NEEDED, VIDEO_EXTENSIONS, want } from "./api";
@@ -20,7 +21,7 @@ import { HealReview } from "./HealReview";
 import { NasBadge, nasStatus, useNasState } from "./NasProgress";
 import { SlidingPill } from "./SlidingPill";
 import { Icon } from "./icons";
-import { AudioLines } from "lucide-react";
+import { AudioLines, EyeOff } from "lucide-react";
 
 /** Where each list (all clips, damaged clips) was scrolled to, kept while you're in Studio (the page itself unmounts). */
 const memories: Record<string, { scroll: number; folder: string; query: string; filters?: Filters }> = {};
@@ -172,9 +173,12 @@ function ClipCard({
   deleteCount = 1,
   nasOn,
   onKeepWhole,
+  onSpoiler,
   copying,
   view,
 }: {
+  /** Mark or unmark it (and the rest of the selection) as a spoiler */
+  onSpoiler?: (on: boolean) => void;
   /** Which list it's in (its NAS badge depends on it) */
   view?: string;
   /** The file the NAS sync is copying right now */
@@ -236,13 +240,18 @@ function ClipCard({
   const job = useJob(clip.path);
   // Sound but no picture: its details say there's no video stream.
   const soundOnly = !!info && info.width === 0 && info.height === 0 && info.duration > 0;
+  // Marked as a spoiler: blurred (useThumbStatus) until clicked; that first click only shows it.
+  const spoiler = useSpoiler(clip.path);
 
   return (
     <button
       ref={cardRef}
-      className={`card ${selected ? "selected" : ""} ${returned ? "returned" : ""} ${act ? `act-${act}` : ""}`}
+      className={`card ${selected ? "selected" : ""} ${returned ? "returned" : ""} ${act ? `act-${act}` : ""} ${spoiler.hidden ? "spoiler-hidden" : ""}`}
       aria-busy={act === "busy" || undefined}
-      onClick={onClick}
+      onClick={(e) => {
+        if (spoiler.hidden && !e.ctrlKey && !e.metaKey && !e.shiftKey) spoiler.reveal();
+        else onClick(e);
+      }}
       title={clip.path}
       data-path={clip.path}
     >
@@ -268,6 +277,19 @@ function ClipCard({
           {selected && <Icon name="check" size={15} strokeWidth={2.5} />}
         </span>
         {info && <span className="badge br">{fmtDuration(info.duration)}</span>}
+        {spoiler.hidden ? (
+          <span className="spoiler-cover" aria-label="Spoiler: click to show it">
+            <EyeOff size={20} strokeWidth={2} aria-hidden="true" />
+            <b>Spoiler</b>
+            <span>Click to show</span>
+          </span>
+        ) : (
+          spoiler.marked && (
+            <span className="badge tl spoiler-tag" title="Marked as a spoiler">
+              Spoiler
+            </span>
+          )
+        )}
         <div className="card-actions">
           {/* No one-click MP4 here: it sat next to the checkbox and was easy to hit by mistake. It's in Studio. */}
           <span
@@ -292,6 +314,19 @@ function ClipCard({
           >
             Share
           </span>
+          {onSpoiler && (
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={(e) => {
+                e.stopPropagation();
+                onSpoiler(!spoiler.marked);
+              }}
+              title={spoiler.marked ? "Show it normally again" : "Blur it everywhere until clicked, and post it to Discord as a spoiler"}
+            >
+              {spoiler.marked ? "Not a spoiler" : "Spoiler"}
+            </span>
+          )}
           {onKeepWhole && (
             <span
               role="button"
@@ -403,6 +438,7 @@ function LibraryView({
   mode = "clips",
   active = true,
   onKeepWhole,
+  onSpoiler,
   onMoveTo,
   sortList = [],
   onSortReview,
@@ -421,6 +457,8 @@ function LibraryView({
   active?: boolean;
   /** To trim: "Keep whole" takes clips off the list */
   onKeepWhole?: (paths: string[]) => void;
+  /** Mark (true) or unmark clips as spoilers */
+  onSpoiler?: (paths: string[], on: boolean) => void;
   health?: Record<string, Health>;
   onShare?: (r: ShareRequest) => void;
   /** The clip last opened in Studio: scrolled back to and highlighted */
@@ -956,6 +994,7 @@ clips === null ? null : clips.length === 0 && trimMode ? (
                       onShare={() => onShare?.({ path: c.path, size: c.size })}
                       returned={c.path === returnedTo}
                       onKeepWhole={onKeepWhole ? () => onKeepWhole([c.path]) : undefined}
+                      onSpoiler={onSpoiler ? (on) => onSpoiler(selected.has(c.path) ? [...selected] : [c.path], on) : undefined}
                     />
                   ))}
                 </div>
@@ -966,7 +1005,7 @@ clips === null ? null : clips.length === 0 && trimMode ? (
       )
     ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [clips, trimMode, damagedMode, hotkey, atFolderRoot, gameFolders, groups.length, activeFilters, viewMode, shownGroups, blocks, layout, range, selected, selecting, health, nasOn, nas?.copying, uploads, links, returnedTo, onKeepWhole, onDelete, onToast, onShare, onOpen, selectRange, toggle],
+    [clips, trimMode, damagedMode, hotkey, atFolderRoot, gameFolders, groups.length, activeFilters, viewMode, shownGroups, blocks, layout, range, selected, selecting, health, nasOn, nas?.copying, uploads, links, returnedTo, onKeepWhole, onSpoiler, onDelete, onToast, onShare, onOpen, selectRange, toggle],
   );
 
   return (
@@ -1160,6 +1199,18 @@ clips === null ? null : clips.length === 0 && trimMode ? (
               title="They're fine as they are: take them off this list"
             >
               Keep whole
+            </button>
+          )}
+          {onSpoiler && (
+            <button
+              className="btn small"
+              onClick={() => {
+                onSpoiler([...selected], true);
+                setSelected(new Set());
+              }}
+              title="Blur them everywhere until clicked, and post them to Discord as spoilers"
+            >
+              Mark as spoiler
             </button>
           )}
           {onMoveTo && (

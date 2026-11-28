@@ -479,6 +479,17 @@ input.slider::-moz-range-thumb { width: 12px; height: 12px; border: 0; border-ra
 .check.on { background: var(--accent); border-color: var(--accent); }
 .card.selected .thumb { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 .badge.bl { left: 8px; bottom: 8px; }
+/* A clip marked as a spoiler: its (blurred) picture covered until clicked. */
+.spoiler-cover {
+  position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  color: #fff; font-size: 12px; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); background: rgba(14, 16, 20, 0.25); z-index: 2;
+}
+.spoiler-cover b { font-size: 13px; }
+.spoiler-cover span { opacity: 0.85; font-size: 11px; }
+.card:hover .spoiler-tag { opacity: 0; }
+/* Over Studio's player: the whole picture, blurred poster underneath. */
+.studio-spoiler { border: 0; cursor: pointer; z-index: 8; background: rgba(14, 16, 20, 0.55); backdrop-filter: blur(24px); font-size: 13px; gap: 6px; }
+.studio-spoiler b { font-size: 16px; }
 /* Where a clip lives: another recorder's folder, the NAS. */
 .src-tag {
   display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 999px; font-size: 10.5px; line-height: 16px;
