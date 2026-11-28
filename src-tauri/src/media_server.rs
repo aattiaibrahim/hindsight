@@ -196,8 +196,23 @@ fn serve(mut stream: TcpStream, port: u16, token: &str) -> std::io::Result<()> {
         return Ok(());
     }
     file.seek(SeekFrom::Start(start))?;
-    // Streamed straight from the file: the player usually stops reading early.
-    std::io::copy(&mut file.take(n), &mut stream).map(|_| ())
+    // Streamed straight from the file (the player usually stops reading early), in
+    // 1 MB reads: over a network share (the NAS) each read is a round trip, and
+    // io::copy's 8 KB ones got about 13 MB/s where 1 MB ones get 65-75 MB/s.
+    stream_out(&mut file.take(n), &mut stream)
+}
+
+fn stream_out(from: &mut impl Read, to: &mut impl Write) -> std::io::Result<()> {
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let got = match from.read(&mut buf) {
+            Ok(0) => return Ok(()),
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        to.write_all(&buf[..got])?;
+    }
 }
 
 #[cfg(test)]
@@ -265,5 +280,29 @@ mod live {
         super::start();
         println!("BASE {}", super::base().unwrap());
         std::thread::sleep(std::time::Duration::from_secs(25));
+    }
+}
+
+#[cfg(test)]
+mod speed {
+    /// MEDIA_SPEED_FILE=<clip on the NAS>: 40 MB through the old 8 KB copy and the new 1 MB reads.
+    #[test]
+    #[ignore]
+    fn nas_read_speed() {
+        use std::io::{Read, Seek, SeekFrom};
+        let Ok(p) = std::env::var("MEDIA_SPEED_FILE") else { return };
+        let n = 40u64 << 20;
+        for (name, offset) in [("8 KB copy", 0u64), ("1 MB reads", 60 << 20)] {
+            let mut f = std::fs::File::open(&p).unwrap();
+            f.seek(SeekFrom::Start(offset)).unwrap();
+            let t = std::time::Instant::now();
+            let mut sink = std::io::sink();
+            if name.starts_with("8") {
+                std::io::copy(&mut f.take(n), &mut sink).unwrap();
+            } else {
+                super::stream_out(&mut f.take(n), &mut sink).unwrap();
+            }
+            eprintln!("{name}: {:.0} MB/s", 40.0 / t.elapsed().as_secs_f64());
+        }
     }
 }

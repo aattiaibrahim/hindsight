@@ -1,5 +1,5 @@
 import { Select } from "./Select";
-import { JoinStyle, RAMPS, joinedLen, sides, speedAt } from "./ramp";
+import { JoinStyle, RAMPS, joinedLen, outLen, sides, speedAt } from "./ramp";
 import { useSpoiler } from "./spoiler";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -124,6 +124,21 @@ function rulerLabel(t: number) {
   const m = Math.floor(t / 60);
   const s = Math.round(t % 60);
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/** Where a moment of the clip lands once the kept parts are joined (in a part left out:
+ *  the start of the next kept one). Inside a ramped part, spread evenly: close enough. */
+function cutTime(pieces: [number, number][], style: JoinStyle) {
+  return (t: number) => {
+    let at = 0;
+    for (let i = 0; i < pieces.length; i++) {
+      const [x, y] = pieces[i];
+      const len = style === "cut" ? y - x : outLen(sides(y - x, i > 0, i < pieces.length - 1, style));
+      if (t < y) return at + Math.max(0, t - x) * (len / Math.max(0.001, y - x));
+      at += len;
+    }
+    return at;
+  };
 }
 
 /** How the kept parts were last joined (hard cut or a speed ramp), for the next clip too. */
@@ -513,17 +528,30 @@ export function Studio({
     const un = listen<{ path: string; pct: number }>("scrub-progress", (e) => {
       if (alive && e.payload.path === path) setSmooth((s) => (s && s.for === path && !s.copy ? { ...s, pct: e.payload.pct } : s));
     });
-    api
-      .smoothCopy(path)
-      .then((copy) => {
-        if (!alive) return;
-        const v = video.current;
-        if (copy && v) resume.current = { path, time: v.currentTime, playing: !v.paused };
-        setSmooth({ for: path, copy, pct: null });
-      })
-      .catch((e) => alive && setSmooth({ for: path, copy: null, pct: null, err: errText(e) }));
+    // Only once the picture shows (or after 2 s): checking the keyframes reads up to 30 s
+    // of the clip, and making the copy reads all of it, which slowed the player's start
+    // when they ran together (the NAS most of all).
+    let started = false;
+    const go = () => {
+      if (started || !alive) return;
+      started = true;
+      api
+        .smoothCopy(path)
+        .then((copy) => {
+          if (!alive) return;
+          const v = video.current;
+          if (copy && v) resume.current = { path, time: v.currentTime, playing: !v.paused };
+          setSmooth({ for: path, copy, pct: null });
+        })
+        .catch((e) => alive && setSmooth({ for: path, copy: null, pct: null, err: errText(e) }));
+    };
+    const v = video.current;
+    v?.addEventListener("loadeddata", go);
+    const fallback = window.setTimeout(go, 2000);
     return () => {
       alive = false;
+      v?.removeEventListener("loadeddata", go);
+      window.clearTimeout(fallback);
       un.then((f) => f());
     };
   }, [path, clipModified]);
@@ -877,7 +905,8 @@ export function Studio({
     el.addEventListener("pointercancel", up);
   };
 
-  const run = async (label: string, fn: () => Promise<string>, replaces = false) => {
+  /** `mapTime`: where a moment of the clip is in the saved one (a trim starts later, a cut leaves parts out). */
+  const run = async (label: string, fn: () => Promise<string>, replaces = false, mapTime: (t: number) => number = (t) => t) => {
     const id = ++jobSeq.current;
     const from = path;
     setJob({ id, for: from, label });
@@ -903,8 +932,11 @@ export function Studio({
         return;
       }
       if (replaces) {
-        // The edit now lives where the original was: show it.
-        video.current?.pause();
+        // The edit now lives where the original was: show it, from the same moment you
+        // were watching (in the saved clip), still playing if it was.
+        const v = video.current;
+        if (v) resume.current = { path: out, time: Math.max(0, mapTime(v.currentTime)), playing: !v.paused };
+        v?.pause();
         onOpen(out);
         setReload((k) => k + 1);
         setResult({
@@ -1112,8 +1144,8 @@ export function Studio({
             cutting || ramping
               ? cutting && saveApart
                 ? run("Saving parts…", () => api.cutClip(path, keptPieces, false, false, editsForSave, cropForSave).then((made) => made[0]))
-                : run(ramping ? "Making the speed ramps…" : "Cutting…", () => api.cutClip(path, keptPieces, true, replace, editsForSave, cropForSave, ramping ? joinStyle : null).then((made) => made[0]), replace)
-              : run(wholeFile ? (cropped ? "Saving crop…" : "Saving audio changes…") : "Saving trim…", () => api.trim(path, a, b, true, replace, editsForSave, cropForSave), replace)
+                : run(ramping ? "Making the speed ramps…" : "Cutting…", () => api.cutClip(path, keptPieces, true, replace, editsForSave, cropForSave, ramping ? joinStyle : null).then((made) => made[0]), replace, cutTime(keptPieces, ramping ? joinStyle : "cut"))
+              : run(wholeFile ? (cropped ? "Saving crop…" : "Saving audio changes…") : "Saving trim…", () => api.trim(path, a, b, true, replace, editsForSave, cropForSave), replace, (t) => Math.min(Math.max(t - a, 0), b - a))
           }
         >
           {job
