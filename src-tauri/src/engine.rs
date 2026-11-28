@@ -896,6 +896,10 @@ fn supervise(
             devices,
             s.capture_area,
         );
+        // Compatibility capture draws the camera with FFmpeg at a fixed place: a new
+        // place or size (or the camera opening, which gives its shape) starts it afresh.
+        // The native engine follows such changes live.
+        let sig = if use_native { sig } else { format!("{sig}|{:?}", compat_camera(&s)) };
 
         // Native engine (default): run it and skip the FFmpeg engine entirely.
         let native_tick = if use_native {
@@ -1094,6 +1098,79 @@ fn supervise(
     }
 }
 
+/// The camera's box in Compatibility capture: on, its shape known, where it goes.
+fn compat_camera(s: &Settings) -> Option<(u64, u64, u64, u64, u64)> {
+    if !s.camera_enabled {
+        return None;
+    }
+    let a = crate::camera::aspect()?;
+    let k = |v: f64| (v * 1000.0).round() as u64;
+    Some((k(s.camera_x), k(s.camera_y), k(s.camera_size), k(a), s.camera_fill as u64))
+}
+
+/// The camera for FFmpeg: its box, BGRA with transparency, 30 times a second over a
+/// local socket (the newest picture again when there's no new one, so FFmpeg never
+/// waits). Returns the port and where the box goes on the `w` × `h` clip.
+fn camera_feed(s: &Settings, w: i32, h: i32) -> Option<(u16, u32, u32, u32, u32)> {
+    if !s.camera_enabled {
+        return None;
+    }
+    // Ask for the camera, and give it a moment to open (its shape sets the box's).
+    crate::camera::want(0, 0);
+    let t = Instant::now();
+    let aspect = loop {
+        if let Some(a) = crate::camera::aspect() {
+            break a;
+        }
+        if t.elapsed() > Duration::from_secs(3) {
+            return None; // starts without it; the camera opening restarts capture with it
+        }
+        crate::camera::want(0, 0);
+        thread::sleep(Duration::from_millis(50));
+    };
+    let l = crate::camera::layout()?;
+    let (w, h) = (w as u32, h as u32);
+    let bw = (((l.size * w as f64).round() as u32).max(16) & !1).min(w);
+    let bh = (((bw as f64 / aspect).round() as u32).max(16) & !1).min(h);
+    let bx = ((l.x * w as f64).round() as u32).min(w - bw);
+    let by = ((l.y * h as f64).round() as u32).min(h - bh);
+    let listener = TcpListener::bind("127.0.0.1:0").ok()?;
+    let port = listener.local_addr().ok()?.port();
+    let _ = listener.set_nonblocking(true);
+    thread::Builder::new()
+        .name("hindsight-camera-feed".into())
+        .spawn(move || {
+            // FFmpeg connects as it starts; give up if it never does.
+            let t = Instant::now();
+            let mut sock = loop {
+                match listener.accept() {
+                    Ok((c, _)) => break c,
+                    Err(_) if t.elapsed() < Duration::from_secs(15) => thread::sleep(Duration::from_millis(20)),
+                    Err(_) => return,
+                }
+            };
+            let _ = sock.set_nonblocking(false);
+            let _ = sock.set_nodelay(true);
+            let mut last = vec![0u8; (bw * bh * 4) as usize]; // see-through until the first picture
+            let start = Instant::now();
+            for n in 0u64.. {
+                let due = start + Duration::from_secs_f64(n as f64 / 30.0);
+                let now = Instant::now();
+                if due > now {
+                    thread::sleep(due - now);
+                }
+                if let Some(b) = crate::camera::want(bw, bh) {
+                    last.clone_from(&b.bgra);
+                }
+                if sock.write_all(&last).is_err() {
+                    return; // FFmpeg stopped
+                }
+            }
+        })
+        .ok()?;
+    Some((port, bx, by, bw, bh))
+}
+
 fn spawn(s: &Settings, m: &monitors::Monitor, generation: &Gen) -> Result<Spawned, String> {
     // RAM mode: ffmpeg sends each finished segment to us over localhost,
     // so the replay buffer never touches the disk.
@@ -1156,15 +1233,18 @@ fn spawn(s: &Settings, m: &monitors::Monitor, generation: &Gen) -> Result<Spawne
         src.push_str(&format!(":offset_x={ax}:offset_y={ay}:video_size={aw}x{ah}"));
     }
     let (w, h) = capture_size(s, m);
+    // The camera is laid over on the CPU, so with it the frames come off the GPU too.
+    let camera = camera_feed(s, w, h);
+    let to_cpu_format = if camera.is_some() { "bgra" } else { "nv12" };
     if (w, h) != (aw, ah) {
         // Native size stays 100% on the GPU. Other sizes are scaled on the CPU
         // (about 1-5% of a modern CPU): this FFmpeg's GPU scalers can't take
         // desktop-capture frames.
-        src.push_str(&format!(",hwdownload,format=bgra,scale={w}:{h}:flags=bicubic,format=nv12"));
-    } else if !nvenc {
+        src.push_str(&format!(",hwdownload,format=bgra,scale={w}:{h}:flags=bicubic,format={to_cpu_format}"));
+    } else if !nvenc || camera.is_some() {
         // AMD, Intel and Windows' encoders take ordinary frames: copy them off the GPU
         // and convert to NV12 (the format they all take) on the CPU.
-        src.push_str(",hwdownload,format=bgra,format=nv12");
+        src.push_str(&format!(",hwdownload,format=bgra,format={to_cpu_format}"));
     }
     let gop = (s.fps * SEG_SECONDS).to_string();
     let cq = s.quality.to_string();
@@ -1184,7 +1264,26 @@ fn spawn(s: &Settings, m: &monitors::Monitor, generation: &Gen) -> Result<Spawne
             .args(["-ar", &c.rate.to_string(), "-ac", &c.channels.to_string()])
             .args(["-i", &c.url]);
     }
-    cmd.args(["-map", "0:v"]);
+    match camera {
+        Some((port, bx, by, bw, bh)) => {
+            let ci = caps.len() + 1;
+            cmd.args(["-probesize", "32", "-analyzeduration", "0", "-fflags", "nobuffer"])
+                .args(["-f", "rawvideo", "-pix_fmt", "bgra", "-video_size", &format!("{bw}x{bh}"), "-framerate", "30"])
+                .args(["-i", &format!("tcp://127.0.0.1:{port}")]);
+            // Both start at 0, so the camera's frames line up with the screen's as they arrive.
+            cmd.args([
+                "-filter_complex",
+                &format!(
+                    "[0:v]setpts=PTS-STARTPTS[s];[{ci}:v]setpts=PTS-STARTPTS[c];[s][c]overlay=x={bx}:y={by}:format=auto:eof_action=repeat:repeatlast=1,format=nv12[v]"
+                ),
+                "-map",
+                "[v]",
+            ]);
+        }
+        None => {
+            cmd.args(["-map", "0:v"]);
+        }
+    }
     for (i, (_, title, bitrate, _)) in caps.iter().enumerate() {
         cmd.args(["-map", &format!("{}:a", i + 1)])
             .arg(format!("-b:a:{i}"))
@@ -1396,47 +1495,81 @@ mod tests {
         live_run("ffmpeg", false);
     }
 
-    /// The real recorder with the real camera drawn in (needs a camera): it opens, the
-    /// clip saves at full frame rate. Nothing of the picture is looked at.
+    /// The real recorder with the real camera drawn in (needs a camera), on both engines,
+    /// with the blurred background and a border: the clip keeps its frame rate and the
+    /// border is where the box goes. Only one-pixel rows along the border are read.
+    /// Prints the test folder (it holds camera footage) for removing afterwards.
     #[test]
     #[ignore]
     fn live_native_with_camera() {
+        live_camera("native");
+    }
+
+    #[test]
+    #[ignore]
+    fn live_ffmpeg_with_camera() {
+        live_camera("ffmpeg");
+    }
+
+    fn live_camera(kind: &str) {
         crate::ffmpeg::init(None);
-        let base = std::env::temp_dir().join(format!("rewind-test-camera-{}", std::process::id()));
+        crate::game_detect::init(std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join("com.rewind.app").join("ai"));
+        let base = std::env::temp_dir().join(format!("rewind-test-camera-{kind}-{}", std::process::id()));
+        println!("test folder: {}", base.display());
         let clips = base.join("clips");
         let s = Settings {
             clips_dir: clips.to_string_lossy().into(),
             buffer_seconds: 20,
+            capture_engine: kind.into(),
             camera_enabled: true,
             camera_border: true,
             camera_mirror: true,
+            camera_background: "blur".into(),
             ..Default::default()
         };
         crate::camera::apply(&s);
         let engine = Engine::start(Arc::new(Mutex::new(s)), base.join("buffer"));
         let t = Instant::now();
+        // Compatibility capture restarts once the camera has opened: wait for a buffer after that.
+        thread::sleep(Duration::from_secs(4));
         while engine.status().buffered_seconds < 6 {
-            assert!(t.elapsed() < Duration::from_secs(40), "buffer never filled: {:?}", engine.status().last_error);
+            assert!(t.elapsed() < Duration::from_secs(60), "buffer never filled: {:?}", engine.status().last_error);
             thread::sleep(Duration::from_millis(250));
         }
         assert!(crate::camera::aspect().is_some(), "camera never opened");
+        assert_eq!(engine.status().engine, kind);
+        println!("background note: {:?}", crate::camera::note());
         let clip = clips.join("Desktop").join("camera.mkv");
         engine.save_clip(4, &clip).unwrap();
         let out = crate::ffmpeg::cmd("ffprobe")
-            .args(["-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries", "stream=nb_read_frames,r_frame_rate", "-of", "csv=p=0"])
+            .args(["-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries", "stream=width,height,nb_read_frames", "-of", "csv=p=0"])
             .arg(&clip)
             .output()
             .unwrap();
+        let info = String::from_utf8_lossy(&out.stdout).trim().to_string();
         let p = crate::library::probe(&clip.to_string_lossy()).unwrap();
-        println!("camera clip: {:.2}s, frames/rate {}", p.duration, String::from_utf8_lossy(&out.stdout).trim());
-        assert!(engine.status().last_error.is_none(), "{:?}", engine.status().last_error);
+        println!("[{kind}] camera clip: {:.2}s, w,h,frames {info}", p.duration);
+        let nums: Vec<f64> = info.split(',').filter_map(|v| v.parse().ok()).collect();
+        assert!(nums[2] / p.duration > 55.0, "frame rate dropped: {info}");
+        // The box's top edge, worked out as the engines do (x 0.76, y 0.71, 22% wide).
+        let (cw, ch) = (nums[0], nums[1]);
+        let bw = (((0.22 * cw).round() as u32).max(16) & !1) as f64;
+        let bh = (((bw / crate::camera::aspect().unwrap()).round() as u32).max(16) & !1) as f64;
+        let by = (0.71 * ch).round().min(ch - bh);
+        let bx = (0.76 * cw).round().min(cw - bw);
+        let row = |y: f64| {
+            let o = crate::ffmpeg::cmd("ffmpeg")
+                .args(["-v", "error", "-ss", "2", "-i"])
+                .arg(&clip)
+                .args(["-frames:v", "1", "-vf", &format!("crop={}:1:{}:{y},format=gray", (bw * 0.5) as u32, (bx + bw * 0.25) as u32), "-f", "rawvideo", "-"])
+                .output()
+                .unwrap();
+            o.stdout.iter().map(|v| *v as f64).sum::<f64>() / o.stdout.len().max(1) as f64
+        };
+        let edge = row(by + 1.0);
+        println!("[{kind}] border row {edge:.0}");
+        assert!(edge > 150.0, "no camera border at the box's top edge ({edge:.0})");
         engine.shutdown();
-        // Left for a look at the box's edge: HINDSIGHT_KEEP_CAMERA_CLIP.
-        if std::env::var_os("HINDSIGHT_KEEP_CAMERA_CLIP").is_none() {
-            let _ = fs::remove_dir_all(&base);
-        } else {
-            println!("kept {}", clip.display());
-        }
     }
 
     fn live_run(engine_kind: &str, in_ram: bool) {

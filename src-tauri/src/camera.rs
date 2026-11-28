@@ -1,11 +1,12 @@
 //! A camera drawn into clips and recordings, like a facecam in OBS.
 //!
 //! One thread owns the camera (Windows Media Foundation) while something needs it:
-//! the recorder's capture loop, or the preview in Settings. Each new camera frame is
-//! turned here, on the CPU, into the finished box: cropped (Crop to fill), mirrored,
-//! scaled to the box's size on the clip, with rounded corners and an optional thin
-//! border. The capture loop only copies that box onto each screen frame on the GPU
-//! (native/pipeline.rs), so the game's frame rate doesn't pay for it.
+//! the recorder, or the preview in Settings. Each new camera frame is turned here, on
+//! the CPU, into the finished box: cropped (Crop to fill), mirrored, scaled to the box's
+//! size on the clip, its background blurred or removed (segment.rs finds you in it),
+//! with soft rounded corners and an optional thin border, as BGRA with transparency.
+//! The recorder only lays that over each screen frame: on the GPU in the Native engine
+//! (native/pipeline.rs), with FFmpeg's overlay in Compatibility mode (engine.rs).
 //!
 //! The camera is only open while it's used: turned off in Settings, or nothing
 //! asking for frames for a few seconds, and it's closed (its light goes off).
@@ -27,6 +28,8 @@ pub struct Layout {
     pub mirror: bool,
     pub border: bool,
     pub fill: bool,
+    /// "off" | "blur" | "remove"
+    pub background: String,
 }
 
 impl Layout {
@@ -41,19 +44,22 @@ impl Layout {
             mirror: s.camera_mirror,
             border: s.camera_border,
             fill: s.camera_fill,
+            background: s.camera_background.clone(),
         }
+    }
+
+    fn effect(&self) -> bool {
+        self.background == "blur" || self.background == "remove"
     }
 }
 
-/// The finished box, ready to copy onto the screen.
+/// The finished box: BGRA with straight (not premultiplied) transparency.
 pub struct Boxed {
     /// Changes whenever the picture does.
     pub seq: u64,
     pub w: u32,
     pub h: u32,
     pub bgra: Vec<u8>,
-    /// Corner radius in pixels: those corners are left out when it's copied.
-    pub radius: u32,
 }
 
 #[derive(Serialize, Clone)]
@@ -75,14 +81,27 @@ struct Shared {
     /// The box size the recorder wants, in screen pixels (0 = whatever the preview wants).
     size: (u32, u32),
     raw: Option<Arc<Raw>>,
+    /// Where you are in `raw` (segment::W × H), when a background effect is on.
+    mask: Option<Arc<Vec<f32>>>,
     boxed: Option<Arc<Boxed>>,
     /// Why the camera couldn't be used, if it couldn't.
     error: Option<String>,
+    /// Something to say that isn't a failure (the background effect getting ready).
+    note: Option<String>,
     running: bool,
 }
 
-static SHARED: Mutex<Shared> =
-    Mutex::new(Shared { layout: None, wanted: None, size: (0, 0), raw: None, boxed: None, error: None, running: false });
+static SHARED: Mutex<Shared> = Mutex::new(Shared {
+    layout: None,
+    wanted: None,
+    size: (0, 0),
+    raw: None,
+    mask: None,
+    boxed: None,
+    error: None,
+    note: None,
+    running: false,
+});
 static SEQ: AtomicU64 = AtomicU64::new(1);
 /// How long the camera stays open after the last request.
 const LINGER: Duration = Duration::from_secs(4);
@@ -92,9 +111,13 @@ pub fn apply(s: &crate::settings::Settings) {
     let l = Layout::of(s);
     let mut g = SHARED.lock().unwrap();
     // Moving or resizing the box keeps the picture; a new look is made from the next frame.
-    let look = |x: &Layout| (x.enabled, x.id.clone(), x.mirror, x.border, x.fill);
+    let look = |x: &Layout| (x.enabled, x.id.clone(), x.mirror, x.border, x.fill, x.background.clone());
     if g.layout.as_ref().is_none_or(|old| look(old) != look(&l)) {
         g.boxed = None;
+    }
+    if !l.effect() {
+        g.mask = None;
+        g.note = None;
     }
     g.layout = Some(l);
 }
@@ -107,10 +130,8 @@ pub fn layout() -> Option<Layout> {
 pub fn aspect() -> Option<f64> {
     let g = SHARED.lock().unwrap();
     let l = g.layout.as_ref()?;
-    if l.fill {
-        return Some(4.0 / 3.0);
-    }
-    g.raw.as_ref().map(|r| r.w as f64 / r.h.max(1) as f64)
+    let raw = g.raw.as_ref()?;
+    Some(if l.fill { 4.0 / 3.0 } else { raw.w as f64 / raw.h.max(1) as f64 })
 }
 
 /// The recorder asks for the box at this size (screen pixels), every frame.
@@ -123,31 +144,29 @@ pub fn want(w: u32, h: u32) -> Option<Arc<Boxed>> {
     g.boxed.clone().filter(|b| b.w == w && b.h == h)
 }
 
+/// For Settings: the background effect's progress or problem, if there's one to show.
+pub fn note() -> Option<String> {
+    SHARED.lock().unwrap().note.clone()
+}
+
 /// The Settings preview: the box as it looks (at a small size), as a PNG.
 pub fn preview_png() -> Result<Vec<u8>, String> {
-    let (raw, layout) = {
+    let (raw, layout, mask) = {
         let mut g = SHARED.lock().unwrap();
         g.wanted = Some(Instant::now());
         ensure_thread(&mut g);
         if let Some(e) = &g.error {
             return Err(e.clone());
         }
-        (g.raw.clone(), g.layout.clone())
+        (g.raw.clone(), g.layout.clone(), g.mask.clone())
     };
     let (Some(raw), Some(l)) = (raw, layout) else { return Err("starting".into()) };
     let aspect = if l.fill { 4.0 / 3.0 } else { raw.w as f64 / raw.h.max(1) as f64 };
     let w = 320u32;
     let h = ((w as f64 / aspect).round() as u32).max(2);
-    let b = make_box(&raw, &l, w, h);
-    // Corners outside the rounded box: see-through in the preview.
-    let mut rgba = b.bgra;
-    for y in 0..h {
-        let inset = corner_inset(y, h, b.radius);
-        for x in 0..w {
-            let i = ((y * w + x) * 4) as usize;
-            rgba.swap(i, i + 2);
-            rgba[i + 3] = if x < inset || x >= w - inset { 0 } else { 255 };
-        }
+    let mut rgba = make_box(&raw, &l, w, h, mask.as_deref().map(|m| m.as_slice())).bgra;
+    for px in rgba.chunks_exact_mut(4) {
+        px.swap(0, 2);
     }
     let mut out = Vec::new();
     {
@@ -177,20 +196,31 @@ fn still_wanted() -> Option<Layout> {
     Some(on)
 }
 
+/// The background model, loaded (and if needed downloaded) on another thread the
+/// first time an effect is on, so the camera keeps showing meanwhile.
+enum Seg {
+    None,
+    Loading(std::sync::mpsc::Receiver<Result<crate::segment::Segmenter, String>>),
+    Ready(crate::segment::Segmenter),
+    Failed(Instant),
+}
+
 fn run() {
     let mut fails = 0;
+    let mut seg = Seg::None;
     loop {
         let Some(l) = still_wanted() else { break };
         let opened_as = l.id.clone();
         let r = device::read(&l.id, &l.name, &mut |w, h, bgra| {
-            let now = still_wanted();
-            if now.as_ref().is_none_or(|n| n.id != opened_as) {
+            let Some(now) = still_wanted().filter(|n| n.id == opened_as) else {
                 return false; // turned off, unused, or another camera picked
-            }
+            };
             let raw = Arc::new(Raw { w, h, bgra });
+            let mask = if now.effect() { segment(&mut seg, &raw) } else { None };
             let (layout, size) = {
                 let mut g = SHARED.lock().unwrap();
                 g.raw = Some(raw.clone());
+                g.mask = mask.clone();
                 g.error = None;
                 (g.layout.clone(), g.size)
             };
@@ -199,7 +229,7 @@ fn run() {
                 && size.0 >= 8
                 && size.1 >= 8
             {
-                let b = Arc::new(make_box(&raw, &l, size.0, size.1));
+                let b = Arc::new(make_box(&raw, &l, size.0, size.1, mask.as_deref().map(|m| m.as_slice())));
                 SHARED.lock().unwrap().boxed = Some(b);
             }
             fails = 0;
@@ -216,7 +246,53 @@ fn run() {
     let mut g = SHARED.lock().unwrap();
     g.running = false;
     g.raw = None;
+    g.mask = None;
     g.boxed = None;
+}
+
+/// Where you are in this frame, once the model is ready (None until then: no effect yet).
+fn segment(seg: &mut Seg, raw: &Raw) -> Option<Arc<Vec<f32>>> {
+    let note = |n: Option<&str>| SHARED.lock().unwrap().note = n.map(str::to_string);
+    match seg {
+        Seg::None => {
+            note(Some("Getting the background effect ready (a one-time download of about 0.5 MB)…"));
+            let (tx, rx) = std::sync::mpsc::channel();
+            let _ = std::thread::Builder::new().name("hindsight-segment".into()).spawn(move || {
+                let _ = tx.send(crate::segment::Segmenter::new());
+            });
+            *seg = Seg::Loading(rx);
+            None
+        }
+        Seg::Loading(rx) => match rx.try_recv() {
+            Ok(Ok(s)) => {
+                note(None);
+                *seg = Seg::Ready(s);
+                segment(seg, raw)
+            }
+            Ok(Err(e)) => {
+                crate::log!("Camera background: {e}");
+                note(Some(&format!("The background effect isn't available: {e}")));
+                *seg = Seg::Failed(Instant::now());
+                None
+            }
+            Err(_) => None,
+        },
+        Seg::Ready(s) => match s.mask(&raw.bgra, raw.w, raw.h) {
+            Ok(m) => Some(Arc::new(m)),
+            Err(e) => {
+                note(Some(&format!("The background effect stopped: {e}")));
+                *seg = Seg::Failed(Instant::now());
+                None
+            }
+        },
+        // Try again a minute later (no internet at first, say).
+        Seg::Failed(at) => {
+            if at.elapsed() > Duration::from_secs(60) {
+                *seg = Seg::None;
+            }
+            None
+        }
+    }
 }
 
 pub fn list() -> Vec<CameraInfo> {
@@ -238,27 +314,49 @@ pub fn test_feed(l: Layout, w: u32, h: u32, bgra: Vec<u8>) {
 pub fn test_make() {
     let mut g = SHARED.lock().unwrap();
     let (raw, l, (w, h)) = (g.raw.clone().unwrap(), g.layout.clone().unwrap(), g.size);
-    g.boxed = Some(Arc::new(make_box(&raw, &l, w, h)));
+    g.boxed = Some(Arc::new(make_box(&raw, &l, w, h, None)));
 }
 
-/// Pixels cut off at each side of row `y` for rounded corners of `r`.
-pub fn corner_inset(y: u32, h: u32, r: u32) -> u32 {
-    let d = if y < r {
-        r - y
-    } else if y >= h.saturating_sub(r) {
-        y + 1 - (h - r)
-    } else {
-        return 0;
-    };
-    let rf = r as f64;
-    let dy = d as f64 - 0.5;
-    (rf - (rf * rf - dy * dy).max(0.0).sqrt()).round() as u32
+/// A soft step from 0 to 1 between `a` and `b`: firm edges around you, no hard stairs.
+fn smooth(a: f32, b: f32, v: f32) -> f32 {
+    let t = ((v - a) / (b - a)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// A blur of `src` (`w` × `h` BGRA, transparency left alone): three box blurs
+/// across and down, which together look like a Gaussian blur.
+fn blur(src: &[u8], w: usize, h: usize, r: usize) -> Vec<u8> {
+    let mut a = src.to_vec();
+    let mut b = src.to_vec();
+    for _ in 0..3 {
+        pass(&a, &mut b, w, h, r, true);
+        pass(&b, &mut a, w, h, r, false);
+    }
+    a
+}
+
+/// One box blur of radius `r`, across (`rows`) or down, as a running sum.
+fn pass(src: &[u8], dst: &mut [u8], w: usize, h: usize, r: usize, rows: bool) {
+    let (len, lines) = if rows { (w, h) } else { (h, w) };
+    let idx = |line: usize, i: usize| if rows { (line * w + i) * 4 } else { (i * w + line) * 4 };
+    let n = (2 * r + 1) as u32;
+    for line in 0..lines {
+        for c in 0..3 {
+            let at = |i: isize| src[idx(line, i.clamp(0, len as isize - 1) as usize) + c] as u32;
+            let mut sum: u32 = (-(r as isize)..=r as isize).map(at).sum();
+            for i in 0..len {
+                dst[idx(line, i) + c] = (sum / n) as u8;
+                sum = sum + at(i as isize + r as isize + 1) - at(i as isize - r as isize);
+            }
+        }
+    }
 }
 
 /// The finished box at `w` × `h`: the camera picture cropped to the box's shape
-/// (centred), mirrored if asked, scaled by averaging (sharp when shrinking), with
-/// a thin border along the rounded edge if asked.
-fn make_box(raw: &Raw, l: &Layout, w: u32, h: u32) -> Boxed {
+/// (centred), mirrored if asked, scaled by averaging (sharp when shrinking); with
+/// `mask` (where you are), the background blurred or made see-through; then soft
+/// rounded corners and a thin border along them if asked (not with Remove: no box then).
+fn make_box(raw: &Raw, l: &Layout, w: u32, h: u32, mask: Option<&[f32]>) -> Boxed {
     // The part of the camera picture with the box's shape.
     let want = w as f64 / h as f64;
     let have = raw.w as f64 / raw.h.max(1) as f64;
@@ -299,21 +397,52 @@ fn make_box(raw: &Raw, l: &Layout, w: u32, h: u32) -> Boxed {
             out[o + 3] = 255;
         }
     }
-    let radius = ((w.min(h) as f64) * 0.12).round() as u32;
-    if l.border {
-        let t = ((h as f64 / 110.0).round() as u32).max(2);
-        for y in 0..h {
-            for x in 0..w {
-                if edge_distance(x, y, w, h, radius) < t as f64 {
+    let remove = mask.is_some() && l.background == "remove";
+    if let Some(m) = mask {
+        // How much of each pixel is you, looked up where it came from in the camera picture.
+        let you = |x: u32, y: u32| {
+            let xo = if l.mirror { w - 1 - x } else { x };
+            let fx = (cx + (xo as f64 + 0.5) * sx) / raw.w as f64;
+            let fy = (cy + (y as f64 + 0.5) * sy) / raw.h as f64;
+            smooth(0.35, 0.65, crate::segment::at(m, fx, fy))
+        };
+        if remove {
+            for y in 0..h {
+                for x in 0..w {
+                    out[((y * w + x) * 4 + 3) as usize] = (you(x, y) * 255.0).round() as u8;
+                }
+            }
+        } else {
+            let soft = blur(&out, w as usize, h as usize, ((h as f64 / 28.0).round() as usize).max(3));
+            for y in 0..h {
+                for x in 0..w {
+                    let t = you(x, y);
                     let o = ((y * w + x) * 4) as usize;
                     for c in 0..3 {
-                        out[o + c] = ((out[o + c] as u32 + 3 * 240) / 4) as u8;
+                        out[o + c] = (out[o + c] as f32 * t + soft[o + c] as f32 * (1.0 - t)).round() as u8;
                     }
                 }
             }
         }
     }
-    Boxed { seq: SEQ.fetch_add(1, Ordering::Relaxed), w, h, bgra: out, radius }
+    if !remove {
+        let radius = ((w.min(h) as f64) * 0.12).round() as u32;
+        let t = ((h as f64 / 110.0).round() as u32).max(2) as f64;
+        for y in 0..h {
+            for x in 0..w {
+                let d = edge_distance(x, y, w, h, radius);
+                let o = ((y * w + x) * 4) as usize;
+                if l.border && d < t {
+                    for c in 0..3 {
+                        out[o + c] = ((out[o + c] as u32 + 3 * 240) / 4) as u8;
+                    }
+                }
+                // Soft corners: a pixel half outside the curve is half see-through.
+                out[o + 3] = ((d + 0.5).clamp(0.0, 1.0) * 255.0).round() as u8;
+            }
+        }
+    }
+    Boxed { seq: SEQ.fetch_add(1, Ordering::Relaxed), w, h, bgra: out }
 }
 
 /// How far a pixel is inside the rounded box's edge.
@@ -517,7 +646,7 @@ mod tests {
     use super::*;
 
     fn layout() -> Layout {
-        Layout { enabled: true, id: String::new(), name: String::new(), x: 0.7, y: 0.7, size: 0.2, mirror: false, border: false, fill: false }
+        Layout { enabled: true, id: String::new(), name: String::new(), x: 0.7, y: 0.7, size: 0.2, mirror: false, border: false, fill: false, background: "off".into() }
     }
 
     /// Left half red, right half blue.
@@ -541,34 +670,81 @@ mod tests {
     #[test]
     fn scales_and_mirrors() {
         let r = raw(1280, 720);
-        let b = make_box(&r, &layout(), 320, 180);
+        let b = make_box(&r, &layout(), 320, 180, None);
         assert_eq!((b.w, b.h), (320, 180));
         assert_eq!(px(&b, 10, 90), [0, 0, 255], "left stays red");
-        let m = make_box(&r, &Layout { mirror: true, ..layout() }, 320, 180);
+        let m = make_box(&r, &Layout { mirror: true, ..layout() }, 320, 180, None);
         assert_eq!(px(&m, 10, 90), [255, 0, 0], "mirrored: left is blue");
     }
 
     #[test]
     fn crop_to_fill_keeps_the_middle() {
         // A 4:3 box from a 16:9 picture cuts the sides, keeping both colours.
-        let b = make_box(&raw(1600, 900), &Layout { fill: true, ..layout() }, 400, 300);
+        let b = make_box(&raw(1600, 900), &Layout { fill: true, ..layout() }, 400, 300, None);
         assert_eq!(px(&b, 5, 150), [0, 0, 255]);
         assert_eq!(px(&b, 394, 150), [255, 0, 0]);
     }
 
     #[test]
     fn border_lightens_the_edge_only() {
-        let b = make_box(&raw(1280, 720), &Layout { border: true, ..layout() }, 320, 180);
+        let b = make_box(&raw(1280, 720), &Layout { border: true, ..layout() }, 320, 180, None);
         assert!(px(&b, 160, 1)[1] > 150, "edge is light");
         assert_eq!(px(&b, 100, 90), [0, 0, 255], "middle untouched");
     }
 
+    fn alpha(b: &Boxed, x: u32, y: u32) -> u8 {
+        b.bgra[((y * b.w + x) * 4 + 3) as usize]
+    }
+
     #[test]
-    fn rounded_corners() {
-        assert_eq!(corner_inset(50, 100, 10), 0);
-        assert!(corner_inset(0, 100, 10) >= 6);
-        assert_eq!(corner_inset(0, 100, 10), corner_inset(99, 100, 10));
-        assert!(corner_inset(9, 100, 10) <= 1);
+    fn soft_rounded_corners() {
+        let b = make_box(&raw(1280, 720), &layout(), 320, 180, None);
+        assert_eq!(alpha(&b, 0, 0), 0, "corner see-through");
+        assert_eq!(alpha(&b, 319, 179), 0);
+        assert_eq!(alpha(&b, 0, 90), 255, "straight edge solid");
+        assert_eq!(alpha(&b, 160, 90), 255);
+        let edge: Vec<u8> = (0..30).map(|i| alpha(&b, i, i)).collect();
+        assert!(edge.iter().any(|a| *a > 0 && *a < 255), "the curve is soft: {edge:?}");
+    }
+
+    /// You on the right half of the picture.
+    fn right_half() -> Vec<f32> {
+        use crate::segment::{H, W};
+        (0..W * H).map(|i| if i % W >= W / 2 { 1.0 } else { 0.0 }).collect()
+    }
+
+    #[test]
+    fn remove_makes_the_background_see_through() {
+        let b = make_box(&raw(1280, 720), &Layout { background: "remove".into(), border: true, ..layout() }, 320, 180, Some(&right_half()));
+        assert_eq!(alpha(&b, 20, 90), 0, "background gone");
+        assert_eq!(alpha(&b, 300, 90), 255, "you stay");
+        assert_eq!(px(&b, 300, 90), [255, 0, 0], "no border without a box");
+        // Mirrored, you move to the left with the picture.
+        let m = make_box(&raw(1280, 720), &Layout { background: "remove".into(), mirror: true, ..layout() }, 320, 180, Some(&right_half()));
+        assert_eq!(alpha(&m, 20, 90), 255);
+        assert_eq!(alpha(&m, 300, 90), 0);
+    }
+
+    #[test]
+    fn blur_softens_only_the_background() {
+        // Fine stripes everywhere; you on the right.
+        let (w, h) = (1280u32, 720u32);
+        let mut bgra = vec![255u8; (w * h * 4) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let v = if (x / 8) % 2 == 0 { 0 } else { 255 };
+                let i = ((y * w + x) * 4) as usize;
+                bgra[i..i + 3].copy_from_slice(&[v, v, v]);
+            }
+        }
+        let b = make_box(&Raw { w, h, bgra }, &Layout { background: "blur".into(), ..layout() }, 640, 360, Some(&right_half()));
+        let spread = |x0: u32| {
+            let vals: Vec<u8> = (x0..x0 + 40).map(|x| px(&b, x, 180)[0]).collect();
+            *vals.iter().max().unwrap() as i32 - *vals.iter().min().unwrap() as i32
+        };
+        assert!(spread(60) < 60, "background blurred: {}", spread(60));
+        assert!(spread(520) > 200, "you stay sharp: {}", spread(520));
+        assert_eq!(alpha(&b, 320, 180), 255, "nothing see-through with blur");
     }
 
     /// A real camera, if there is one: list it and read a few frames.

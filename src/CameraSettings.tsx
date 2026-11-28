@@ -18,7 +18,7 @@ export function CameraSettings({
 }: {
   s: Settings;
   set: (p: Partial<Settings>) => void;
-  /** The Native capture engine is in use (the camera only works with it) */
+  /** The Native capture engine is in use (Compatibility restarts capture when the camera moves) */
   native: boolean;
   Toggle: (p: { checked: boolean; onChange: (v: boolean) => void; label: string }) => React.ReactNode;
 }) {
@@ -36,9 +36,9 @@ export function CameraSettings({
         <span>
           Camera
           <small>
-            {native
-              ? "Shows your camera in clips and recordings, like a facecam in OBS. Place it on the preview below. The camera is on (its light too) while Hindsight records."
-              : "Shows your camera in clips and recordings. It needs the Native capture engine (above)."}
+            Shows your camera in clips and recordings, like a facecam in OBS. Place it on the preview below. The camera is on (its
+            light too) while Hindsight records.
+            {!native && " With Compatibility capture, moving or resizing it restarts capture (a second's gap in the replay buffer)."}
           </small>
         </span>
         <Toggle
@@ -80,18 +80,38 @@ export function CameraSettings({
           </label>
           <label className="setting">
             <span>
+              Background
+              <small>
+                {s.cameraBackground === "remove"
+                  ? "Only you, over the game: what's behind you is cut away (no box)."
+                  : s.cameraBackground === "blur"
+                    ? "What's behind you is blurred, you stay sharp."
+                    : "Blur what's behind you, or remove it so only you show. Found on this PC by a small AI model (downloaded once, about 0.5 MB); nothing leaves your PC."}
+              </small>
+              <BackgroundNote on={s.cameraBackground !== "off"} />
+            </span>
+            <Select className="select" value={s.cameraBackground} onChange={(e) => set({ cameraBackground: e.target.value as Settings["cameraBackground"] })}>
+              <option value="off">As it is</option>
+              <option value="blur">Blur</option>
+              <option value="remove">Remove</option>
+            </Select>
+          </label>
+          <label className="setting">
+            <span>
               Mirror
               <small>Flip it left to right, like a selfie.</small>
             </span>
             <Toggle label="Mirror the camera" checked={s.cameraMirror} onChange={(v) => set({ cameraMirror: v })} />
           </label>
-          <label className="setting">
-            <span>
-              Thin border
-              <small>A light outline so it stands out from the game.</small>
-            </span>
-            <Toggle label="Border around the camera" checked={s.cameraBorder} onChange={(v) => set({ cameraBorder: v })} />
-          </label>
+          {s.cameraBackground !== "remove" && (
+            <label className="setting">
+              <span>
+                Thin border
+                <small>A light outline so it stands out from the game.</small>
+              </span>
+              <Toggle label="Border around the camera" checked={s.cameraBorder} onChange={(v) => set({ cameraBorder: v })} />
+            </label>
+          )}
           <label className="setting">
             <span>
               Crop to fill
@@ -103,6 +123,30 @@ export function CameraSettings({
       )}
     </>
   );
+}
+
+/** The background effect getting ready (its one-time download), or why it can't run. */
+function BackgroundNote({ on }: { on: boolean }) {
+  const [note, setNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!on) {
+      setNote(null);
+      return;
+    }
+    let stop = false;
+    const tick = () =>
+      api
+        .cameraNote()
+        .then((n) => !stop && setNote(n))
+        .catch(() => {});
+    tick();
+    const t = window.setInterval(tick, 1000);
+    return () => {
+      stop = true;
+      clearInterval(t);
+    };
+  }, [on]);
+  return note ? <small className={note.includes("isn't available") || note.includes("stopped") ? "err-text" : "accent"}>{note}</small> : null;
 }
 
 /**

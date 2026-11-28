@@ -14,7 +14,10 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use super::capture::Capture;
-use windows::Win32::Graphics::Direct3D11::{D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_BOX, D3D11_TEXTURE2D_DESC, ID3D11Texture2D};
+use windows::Win32::Graphics::Direct3D::Fxc::D3DCompile;
+use windows::Win32::Graphics::Direct3D::{D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST, ID3DBlob};
+use windows::Win32::Graphics::Direct3D11::*;
+use windows::core::{PCSTR, s};
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use super::gpu::{self, Converter, Gpu};
 use super::nvenc::{Codec, Encoder, EncoderConfig};
@@ -340,14 +343,80 @@ impl Drop for Pipeline {
     }
 }
 
-/// The camera box drawn onto each screen frame, on the GPU: the screen frame is
-/// copied to `composed`, then the box (made by camera.rs) is copied over it row by
-/// row, leaving out its rounded corners.
+/// The camera box laid over each screen frame, on the GPU: the screen frame is copied
+/// to `composed`, then the box (made by camera.rs, with transparency for its soft
+/// corners or a removed background) is blended over it by a tiny shader.
 #[derive(Default)]
 struct CameraOverlay {
-    composed: Option<ID3D11Texture2D>,
-    picture: Option<(ID3D11Texture2D, u32, u32)>,
+    composed: Option<(ID3D11Texture2D, ID3D11RenderTargetView)>,
+    picture: Option<(ID3D11Texture2D, ID3D11ShaderResourceView, u32, u32)>,
+    blender: Option<Blender>,
     seq: u64,
+}
+
+/// Draws a texture into a rectangle, blended by its transparency.
+struct Blender {
+    vs: ID3D11VertexShader,
+    ps: ID3D11PixelShader,
+    sampler: ID3D11SamplerState,
+    blend: ID3D11BlendState,
+}
+
+const BLEND_HLSL: &str = r#"
+struct V { float4 pos : SV_Position; float2 uv : TEXCOORD0; };
+V vs(uint id : SV_VertexID) {
+    V o;
+    o.uv = float2((id << 1) & 2, id & 2);
+    o.pos = float4(o.uv * float2(2, -2) + float2(-1, 1), 0, 1);
+    return o;
+}
+Texture2D pic : register(t0);
+SamplerState smp : register(s0);
+float4 ps(V i) : SV_Target { return pic.Sample(smp, i.uv); }
+"#;
+
+fn compile(entry: PCSTR, target: PCSTR) -> windows::core::Result<Vec<u8>> {
+    unsafe {
+        let mut code: Option<ID3DBlob> = None;
+        let mut errors: Option<ID3DBlob> = None;
+        D3DCompile(BLEND_HLSL.as_ptr() as *const _, BLEND_HLSL.len(), PCSTR::null(), None, None, entry, target, 0, 0, &mut code, Some(&mut errors))?;
+        let code = code.ok_or_else(|| windows::core::Error::from(windows::Win32::Foundation::E_FAIL))?;
+        Ok(std::slice::from_raw_parts(code.GetBufferPointer() as *const u8, code.GetBufferSize()).to_vec())
+    }
+}
+
+impl Blender {
+    fn new(g: &Gpu) -> windows::core::Result<Blender> {
+        unsafe {
+            let (vsb, psb) = (compile(s!("vs"), s!("vs_4_0"))?, compile(s!("ps"), s!("ps_4_0"))?);
+            let (mut vs, mut ps, mut sampler, mut blend) = (None, None, None, None);
+            g.device.CreateVertexShader(&vsb, None, Some(&mut vs))?;
+            g.device.CreatePixelShader(&psb, None, Some(&mut ps))?;
+            let sd = D3D11_SAMPLER_DESC {
+                Filter: D3D11_FILTER_MIN_MAG_MIP_LINEAR,
+                AddressU: D3D11_TEXTURE_ADDRESS_CLAMP,
+                AddressV: D3D11_TEXTURE_ADDRESS_CLAMP,
+                AddressW: D3D11_TEXTURE_ADDRESS_CLAMP,
+                ComparisonFunc: D3D11_COMPARISON_NEVER,
+                MaxLOD: f32::MAX,
+                ..Default::default()
+            };
+            g.device.CreateSamplerState(&sd, Some(&mut sampler))?;
+            let mut bd = D3D11_BLEND_DESC::default();
+            bd.RenderTarget[0] = D3D11_RENDER_TARGET_BLEND_DESC {
+                BlendEnable: true.into(),
+                SrcBlend: D3D11_BLEND_SRC_ALPHA,
+                DestBlend: D3D11_BLEND_INV_SRC_ALPHA,
+                BlendOp: D3D11_BLEND_OP_ADD,
+                SrcBlendAlpha: D3D11_BLEND_ONE,
+                DestBlendAlpha: D3D11_BLEND_INV_SRC_ALPHA,
+                BlendOpAlpha: D3D11_BLEND_OP_ADD,
+                RenderTargetWriteMask: D3D11_COLOR_WRITE_ENABLE_ALL.0 as u8,
+            };
+            g.device.CreateBlendState(&bd, Some(&mut blend))?;
+            Ok(Blender { vs: vs.unwrap(), ps: ps.unwrap(), sampler: sampler.unwrap(), blend: blend.unwrap() })
+        }
+    }
 }
 
 impl CameraOverlay {
@@ -365,12 +434,23 @@ impl CameraOverlay {
         let by = ay + ((l.y * ah as f64).round() as u32).min(ah - bh);
         let b = crate::camera::want(bw, bh)?;
         unsafe {
-            if self.picture.as_ref().is_none_or(|p| (p.1, p.2) != (bw, bh)) {
+            if self.blender.is_none() {
+                match Blender::new(g) {
+                    Ok(x) => self.blender = Some(x),
+                    Err(e) => {
+                        crate::log!("Camera overlay: {e}");
+                        return None;
+                    }
+                }
+            }
+            if self.picture.as_ref().is_none_or(|p| (p.2, p.3) != (bw, bh)) {
                 let t = g.texture(bw, bh, DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_BIND_SHADER_RESOURCE).ok()?;
-                self.picture = Some((t, bw, bh));
+                let mut v = None;
+                g.device.CreateShaderResourceView(&t, None, Some(&mut v)).ok()?;
+                self.picture = Some((t, v?, bw, bh));
                 self.seq = 0;
             }
-            let pic = &self.picture.as_ref()?.0;
+            let (pic, view, _, _) = self.picture.as_ref()?;
             if self.seq != b.seq {
                 g.context.UpdateSubresource(pic, 0, None, b.bgra.as_ptr() as *const _, bw * 4, 0);
                 self.seq = b.seq;
@@ -378,24 +458,30 @@ impl CameraOverlay {
             if self.composed.is_none() {
                 let mut d = D3D11_TEXTURE2D_DESC::default();
                 src.GetDesc(&mut d);
-                self.composed = Some(g.texture(d.Width, d.Height, d.Format, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET).ok()?);
+                let t = g.texture(d.Width, d.Height, d.Format, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET).ok()?;
+                let mut rtv = None;
+                g.device.CreateRenderTargetView(&t, None, Some(&mut rtv)).ok()?;
+                self.composed = Some((t, rtv?));
             }
-            let out = self.composed.clone()?;
-            g.context.CopyResource(&out, src);
-            // Straight rows in one copy; the rounded rows one by one, narrower.
-            let r = b.radius.min(bh / 2);
-            let copy = |top: u32, bottom: u32, inset: u32| {
-                let bx_ = D3D11_BOX { left: inset, top, front: 0, right: bw - inset, bottom, back: 1 };
-                g.context.CopySubresourceRegion(&out, 0, bx + inset, by + top, 0, pic, 0, Some(&bx_));
-            };
-            for y in 0..r {
-                copy(y, y + 1, crate::camera::corner_inset(y, bh, r));
-            }
-            copy(r, bh - r, 0);
-            for y in bh - r..bh {
-                copy(y, y + 1, crate::camera::corner_inset(y, bh, r));
-            }
-            Some(out)
+            let (out, rtv) = self.composed.as_ref()?;
+            let bl = self.blender.as_ref()?;
+            let c = &g.context;
+            c.CopyResource(out, src);
+            c.OMSetRenderTargets(Some(&[Some(rtv.clone())]), None);
+            c.RSSetViewports(Some(&[D3D11_VIEWPORT { TopLeftX: bx as f32, TopLeftY: by as f32, Width: bw as f32, Height: bh as f32, MinDepth: 0.0, MaxDepth: 1.0 }]));
+            c.RSSetState(None);
+            c.IASetInputLayout(None);
+            c.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            c.VSSetShader(&bl.vs, None);
+            c.PSSetShader(&bl.ps, None);
+            c.PSSetShaderResources(0, Some(&[Some(view.clone())]));
+            c.PSSetSamplers(0, Some(&[Some(bl.sampler.clone())]));
+            c.OMSetBlendState(&bl.blend, Some(&[0.0; 4]), 0xffff_ffff);
+            c.Draw(3, 0);
+            // Let go of them, so the frame can go on to the scaler and the picture be updated.
+            c.OMSetRenderTargets(None, None);
+            c.PSSetShaderResources(0, Some(&[None]));
+            Some(out.clone())
         }
     }
 }
@@ -735,6 +821,7 @@ mod tests {
             mirror: false,
             border: false,
             fill: false,
+            background: "off".into(),
         };
         crate::camera::test_feed(layout, 640, 360, red);
         let mut o = CameraOverlay::default();

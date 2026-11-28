@@ -23,6 +23,7 @@ mod game_icons;
 mod duplicates;
 mod trim_match;
 mod camera;
+mod segment;
 mod montage;
 mod game_detect;
 #[macro_use]
@@ -513,6 +514,12 @@ async fn screen_preview(app: AppHandle) -> Result<tauri::ipc::Response, String> 
 #[tauri::command]
 async fn list_cameras() -> Vec<camera::CameraInfo> {
     tauri::async_runtime::spawn_blocking(camera::list).await.unwrap_or_default()
+}
+
+/// The background effect getting ready (its download) or why it can't run.
+#[tauri::command]
+fn camera_note() -> Option<String> {
+    camera::note()
 }
 
 /// The camera box as it will look, for the Settings preview (PNG). "starting" while it opens.
@@ -2772,6 +2779,7 @@ get_settings,
             screen_preview,
             list_cameras,
             camera_preview,
+            camera_note,
             nas_check,
             nas_confirm,
             nas_pair,

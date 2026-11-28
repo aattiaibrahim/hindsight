@@ -77,7 +77,7 @@ export function installDevMock() {
     clipsDir: "C:\\Users\\you\\Videos\\Hindsight", encoder: "auto", quality: 24, fps: 60, bufferSeconds: 120,
     bufferInRam: true, captureEngine: "native", monitorMode: "primary", fixedMonitor: "", fixedMonitorId: "", drawCursor: true, captureArea: new URLSearchParams(location.search).has("area") ? { x: 0, y: 0, w: 1, h: 0.952 } : null, hotkey: "Alt+F10",
     recordHotkey: "Alt+F9", recordingEnabled: true, bufferEnabled: true, launchOnStartup: false, autoUpdate: true, startMinimized: true,
-    keepOriginalAfterRemux: true, replaceOriginalOnEdit: true, detailedLog: true, cameraEnabled: false, cameraId: "", cameraName: "", cameraX: 0.76, cameraY: 0.71, cameraSize: 0.22, cameraMirror: false, cameraBorder: false, cameraFill: false, externalFiles: [], desktopAudio: true, discordTrack: true,
+    keepOriginalAfterRemux: true, replaceOriginalOnEdit: true, detailedLog: true, cameraEnabled: false, cameraId: "", cameraName: "", cameraX: 0.76, cameraY: 0.71, cameraSize: 0.22, cameraMirror: false, cameraBorder: false, cameraFill: false, cameraBackground: "off", externalFiles: [], desktopAudio: true, discordTrack: true,
     micEnabled: true, micMono: true, micDevice: "", micGainDb: 0, theme: "tinted", accent: "winblue", keepWhole: [], reduceMotion: false, sidebar: "icons",
     saveSound: true, fileNameTemplate: "{game} {date} {time}", fileNamePc: false, nasDir: "\\\\nas\\clips", nasLibraryId: "mock", nasServer: "", nasRemoveLocal: false, nasSyncWhileGaming: false, linkedFolders: [] as string[], benchmarkMode: false, uploadHost: "catbox", litterboxTime: "72h", autoUpload: false, postLinkToDiscord: false, streamableEmail: "", discordWebhookName: "", confirmUploads: true, healthCheck: true, prepareThumbnails: true, gameDetect: true, detectDismissed: [] as string[], notGameFolders: [] as string[],
     folderNames: {} as Record<string, string>, similarDismissed: [] as string[], cleanupKept: {} as Record<string, number>,
@@ -374,6 +374,7 @@ export function installDevMock() {
     list_clips: () => clips.map((c) => ({ ...c })), // fresh objects, like the real app
     list_monitors: () => [],
     screen_preview: () => fetch("/thumb-cs2a.jpg").then((r) => r.arrayBuffer()),
+    camera_note: () => null,
     list_cameras: () => [{ id: "cam1", name: "Insta360 Link 2C" }, { id: "cam2", name: "OBS Virtual Camera" }],
     // A made-up camera picture in the box's shape, rounded like the real one.
     camera_preview: async () => {
@@ -384,13 +385,15 @@ export function installDevMock() {
       g.beginPath();
       g.roundRect(0, 0, w, h, Math.min(w, h) * 0.12);
       g.clip();
-      g.fillStyle = "#35506b";
-      g.fillRect(0, 0, w, h);
+      if (settings.cameraBackground !== "remove") {
+        g.fillStyle = settings.cameraBackground === "blur" ? "#6d8399" : "#35506b";
+        g.fillRect(0, 0, w, h);
+      }
       g.fillStyle = "#e6c9a8";
       g.beginPath();
       g.arc(settings.cameraMirror ? w * 0.4 : w * 0.6, h * 0.45, h * 0.22, 0, Math.PI * 2);
       g.fill();
-      if (settings.cameraBorder) {
+      if (settings.cameraBorder && settings.cameraBackground !== "remove") {
         g.strokeStyle = "rgba(240,240,240,0.85)";
         g.lineWidth = 4;
         g.beginPath();

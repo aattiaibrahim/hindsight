@@ -147,6 +147,8 @@ pub struct Settings {
     pub camera_border: bool,
     /// Zoomed in to fill a 4:3 box (the sides cut off) instead of the whole picture
     pub camera_fill: bool,
+    /// Behind you: "off", "blur" or "remove" (only you, over the game)
+    pub camera_background: String,
 }
 
 /// A rectangle of the screen, as fractions (0..1) of the monitor.
@@ -261,6 +263,7 @@ impl Default for Settings {
             camera_mirror: false,
             camera_border: false,
             camera_fill: false,
+            camera_background: "off".into(),
         }
     }
 }
@@ -290,6 +293,9 @@ impl Settings {
         self.camera_size = if self.camera_size.is_finite() { self.camera_size.clamp(0.08, 0.5) } else { d.camera_size };
         self.camera_x = unit(self.camera_x, d.camera_x).min(1.0 - self.camera_size);
         self.camera_y = unit(self.camera_y, d.camera_y);
+        if !["off", "blur", "remove"].contains(&self.camera_background.as_str()) {
+            self.camera_background = d.camera_background.clone();
+        }
         if self.file_name_template.trim().is_empty() || self.file_name_template.chars().count() > 120 {
             self.file_name_template = d.file_name_template.clone();
         }

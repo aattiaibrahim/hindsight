@@ -134,6 +134,8 @@ export type Settings = {
   cameraBorder: boolean;
   /** Zoomed in to fill a 4:3 box */
   cameraFill: boolean;
+  /** Behind you: as it is, blurred, or removed (only you show) */
+  cameraBackground: "off" | "blur" | "remove";
   externalFiles: string[];
   desktopAudio: boolean;
   /** Discord on its own track, left out of desktop audio */
@@ -596,6 +598,8 @@ export const api = {
   listCameras: () => invoke<CameraInfo[]>("list_cameras"),
   /** The camera box as it will look (PNG); fails with "starting" while the camera opens. */
   cameraPreview: () => invoke<ArrayBuffer>("camera_preview"),
+  /** The background effect getting ready (download), or why it can't run; null = nothing to say. */
+  cameraNote: () => invoke<string | null>("camera_note"),
   saveClip: (seconds?: number) => invoke<string>("save_clip", { seconds: seconds ?? null }),
   toggleRecording: () => invoke<string | null>("toggle_recording"),
   /** Why a hotkey couldn't be used (another app has it), per hotkey; null = fine */

@@ -829,7 +829,7 @@ export function SettingsView({
                 area={s.captureArea}
                 screen={screen}
                 onSave={(a) => set({ captureArea: a })}
-                camera={s.cameraEnabled && !(enc && !enc.native) && s.captureEngine === "native" ? { s, set } : undefined}
+                camera={s.cameraEnabled ? { s, set } : undefined}
               />
             )}
           </div>

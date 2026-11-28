@@ -39,7 +39,7 @@ affiliated with Valve or Steam.
 
 ## ONNX Runtime (optional download)
 
-Used by "Find the game in unsorted clips". `onnxruntime.dll` 1.31.1, Copyright (c) Microsoft Corporation,
+Used by "Find the game in unsorted clips" and the camera's background blur. `onnxruntime.dll` 1.31.1, Copyright (c) Microsoft Corporation,
 MIT License: https://github.com/microsoft/onnxruntime/blob/main/LICENSE
 
 ## CLIP ViT-B/32 image model (optional download)
@@ -47,3 +47,9 @@ MIT License: https://github.com/microsoft/onnxruntime/blob/main/LICENSE
 Used by "Find the game in unsorted clips". The vision half of OpenAI's CLIP ViT-B/32 (MIT License,
 https://github.com/openai/CLIP/blob/main/LICENSE), as the quantized ONNX export published by Xenova
 (https://huggingface.co/Xenova/clip-vit-base-patch32).
+
+## MediaPipe Selfie Segmentation model (optional download)
+
+Used by the camera's blurred or removed background. Google's MediaPipe selfie segmentation (landscape)
+model, Copyright Google LLC, Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0), as the ONNX
+export published by onnx-community (https://huggingface.co/onnx-community/mediapipe_selfie_segmentation_landscape).

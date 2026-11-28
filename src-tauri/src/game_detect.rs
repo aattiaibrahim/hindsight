@@ -156,11 +156,11 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 /// Where the pack is published, and what each file must hash to.
-const PACK: [(&str, &str, u64); 2] = [
+pub(crate) const PACK: [(&str, &str, u64); 2] = [
     ("onnxruntime.dll", "cb2fa518b18356617f6f9f460c012501da2819ec7e5c1d80bd8f5de20492db0c", 17_253_728),
     ("clip-vision-b32-q.onnx", "583fd1110a514667812fee7d684952aaf82a99b959760c8d7dca7e0ab9839299", 89_117_001),
 ];
-const PACK_URL: &str = "https://github.com/aattiaibrahim/hindsight/releases/download/ai-pack-v1/";
+pub(crate) const PACK_URL: &str = "https://github.com/aattiaibrahim/hindsight/releases/download/ai-pack-v1/";
 
 /// Folders that don't say which game a clip is.
 pub(crate) const UNSORTED: [&str; 14] = [
@@ -261,7 +261,7 @@ pub fn init(dir: PathBuf) {
     *STATE.lock().unwrap() = Some(State { dir, model: None, prints, dirty: false });
 }
 
-fn dir() -> Option<PathBuf> {
+pub(crate) fn dir() -> Option<PathBuf> {
     STATE.lock().unwrap().as_ref().map(|s| s.dir.clone())
 }
 
@@ -269,7 +269,7 @@ pub fn installed() -> bool {
     dir().is_some_and(|d| PACK.iter().all(|(n, _, size)| std::fs::metadata(d.join(n)).is_ok_and(|m| m.len() == *size)))
 }
 
-fn sha256_file(p: &Path) -> Option<String> {
+pub(crate) fn sha256_file(p: &Path) -> Option<String> {
     use sha2::{Digest, Sha256};
     use std::io::Read;
     let mut f = std::fs::File::open(p).ok()?;
