@@ -767,6 +767,10 @@ export function Studio({
   // A cut-out part the playhead is in, while playing: where to carry on from.
   const cutRef = useRef<{ s: number; e: number }[]>([]);
   const cutPartAt = (t: number) => cutRef.current.find((p) => t >= p.s && t < p.e - 0.02)?.e ?? null;
+  const [razor, setRazor] = useState(false);
+  const razorRef = useRef(false);
+  razorRef.current = razor;
+  const [razorAt, setRazorAt] = useState<number | null>(null);
   // Keyboard: Space play, I / O set points, arrows step.
   useEffect(() => {
     if (!path) return;
@@ -774,6 +778,14 @@ export function Studio({
       if ((e.target as HTMLElement).tagName === "INPUT" || (e.target as HTMLElement).tagName === "SELECT") return;
       const v = video.current;
       if (!v) return;
+      if ((e.key === "v" || e.key === "V") && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        setRazor((r) => !r);
+        return;
+      }
+      if (e.key === "Escape" && razorRef.current) {
+        setRazor(false);
+        return;
+      }
       if (e.code === "Space") {
         e.preventDefault();
         tapToggle();
@@ -809,6 +821,12 @@ export function Studio({
     e.stopPropagation();
     const el = bar.current;
     if (!el || !duration) return;
+    if (kind === "seek" && razorRef.current) {
+      const r = el.getBoundingClientRect();
+      // The split tool (V): split where clicked, don't move the playhead.
+      splitAt(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * duration);
+      return;
+    }
     el.setPointerCapture(e.pointerId);
     const at = (x: number) => {
       const r = el.getBoundingClientRect();
@@ -929,7 +947,7 @@ export function Studio({
         if (k >= 0) {
           const [x, y] = pieces[k];
           const n = pieces.length;
-          if (k < n - 1 && t >= y - 0.004) v.currentTime = pieces[k + 1][0];
+          if (k < n - 1 && t >= y - 0.004 && pieces[k + 1][0] - y > 0.01) v.currentTime = pieces[k + 1][0];
           else {
             const r = speedRef.current * speedAt(t - x, sides(y - x, k > 0, k < n - 1, style));
             if (Math.abs(r - lastRate) > 0.01) {
@@ -991,7 +1009,8 @@ export function Studio({
     .filter(([x, y]) => y - x >= 0.1);
   const cutting = parts.some((p) => p.cut && p.e > a + 0.01 && p.s < b - 0.01);
   // Joined with speed ramps: the parts next to each join play faster, so it's a little shorter.
-  const ramping = cutting && !saveApart && joinStyle !== "cut" && keptPieces.length > 1;
+  // Ramps at every join: where a part was cut out, or at a plain split (nothing removed).
+  const ramping = !(cutting && saveApart) && joinStyle !== "cut" && keptPieces.length > 1;
   const keptLength = ramping
     ? joinedLen(keptPieces.map(([x, y]) => y - x), joinStyle)
     : keptPieces.reduce((n, [x, y]) => n + (y - x), 0);
@@ -1087,11 +1106,11 @@ export function Studio({
         <button
           className={`btn primary ${job ? "saving" : ""}`}
           style={job?.pct != null ? ({ "--pct": `${job.pct}%` } as React.CSSProperties) : undefined}
-          disabled={busy || (wholeFile && !audioEdited && !cropped && !cutting) || (cutting && keptPieces.length === 0)}
+          disabled={busy || (wholeFile && !audioEdited && !cropped && !cutting && !ramping) || (cutting && keptPieces.length === 0)}
           title="Cuts exactly at your start and end frames, with your audio changes. Only the moment before the first keyframe is re-encoded (under a second for Hindsight's clips); the rest of the video is copied untouched, so it's quick and keeps full quality."
           onClick={() =>
-            cutting
-              ? saveApart
+            cutting || ramping
+              ? cutting && saveApart
                 ? run("Saving parts…", () => api.cutClip(path, keptPieces, false, false, editsForSave, cropForSave).then((made) => made[0]))
                 : run(ramping ? "Making the speed ramps…" : "Cutting…", () => api.cutClip(path, keptPieces, true, replace, editsForSave, cropForSave, ramping ? joinStyle : null).then((made) => made[0]), replace)
               : run(wholeFile ? (cropped ? "Saving crop…" : "Saving audio changes…") : "Saving trim…", () => api.trim(path, a, b, true, replace, editsForSave, cropForSave), replace)
@@ -1099,10 +1118,12 @@ export function Studio({
         >
           {job
             ? `${job.label.replace("…", "")}${job.pct != null ? ` ${job.pct}%` : "…"}`
-            : cutting
-              ? saveApart
+            : cutting || ramping
+              ? cutting && saveApart
                 ? `Save ${keptPieces.length} part${keptPieces.length === 1 ? "" : "s"}`
-                : "Save cut"
+                : cutting
+                  ? "Save cut"
+                  : "Save with ramps"
               : wholeFile && cropped ? "Save crop" : wholeFile && audioEdited ? "Save audio changes" : "Save trim"}
         </button>
       </div>
@@ -1409,7 +1430,14 @@ export function Studio({
             {/* While cropping, the crop shapes take this space; the rest comes back after. */}
             {!cropping && (
             <span className="transport-pill">
-              <button className="btn pill" aria-label="Split" title="Split the clip at the playhead, to cut a part out (S)" onClick={() => splitAt(time)} disabled={!duration}>
+              <button
+                className={`btn pill ${razor ? "on" : ""}`}
+                aria-label="Split"
+                aria-pressed={razor}
+                title={razor ? "Split tool is on: click the timeline to split (V to stop)" : "Split at the playhead (S), or press V for the split tool: click the timeline to split anywhere"}
+                onClick={() => (razor ? setRazor(false) : splitAt(time))}
+                disabled={!duration}
+              >
                 <Scissors size={15} strokeWidth={2} aria-hidden="true" />
                 <span className="pill-label">Split</span>
               </button>
@@ -1445,7 +1473,24 @@ export function Studio({
             </span>
             )}
           </div>
-          <div className="timeline" ref={bar} onPointerDown={drag("seek")}>
+          <div
+            className={`timeline ${razor ? "razor" : ""}`}
+            ref={bar}
+            onPointerDown={drag("seek")}
+            onPointerMove={(e) => {
+              if (!razor || !duration) return;
+              const r = e.currentTarget.getBoundingClientRect();
+              setRazorAt(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * duration);
+            }}
+            onPointerLeave={() => setRazorAt(null)}
+            title={razor ? "Split tool: click to split here (V or Esc to stop)" : undefined}
+          >
+            {razor && razorAt != null && (
+              <div className="tl-razor" style={{ left: pct(razorAt) }}>
+                <span className="mono">{fmtTime(razorAt)}</span>
+              </div>
+            )}
+            {razor && <div className="tl-razor-tag">Split tool: click to split · V to stop</div>}
             <div className="tl-range" style={{ left: pct(a), width: `calc(${pct(b)} - ${pct(a)})` }}>
               <div className="tl-handle in" onPointerDown={drag("in")} />
               <div className="tl-handle out" onPointerDown={drag("out")} />
@@ -1482,15 +1527,15 @@ export function Studio({
                   </button>
                 </span>
               )}
-              {cutting && keptPieces.length > 1 && !saveApart && (
+              {keptPieces.length > 1 && !(cutting && saveApart) && (
                 <Select
                   className="select"
                   value={joinStyle}
                   aria-label="Joins"
-                  title="How the kept parts meet: a hard cut, or a speed ramp (speeds up into the join and slows back down after it). Plays as it will look."
+                  title="How the parts meet at each split: as they are, or a speed ramp (speeds up into it and slows back down after). Plays as it will look."
                   onChange={(e) => setJoinStyle(e.target.value as JoinStyle)}
                 >
-                  <option value="cut">Joins: hard cut</option>
+                  <option value="cut">{cutting ? "Joins: hard cut" : "Joins: as they are"}</option>
                   {(Object.keys(RAMPS) as (keyof typeof RAMPS)[]).map((k) => (
                     <option key={k} value={k}>
                       Joins: {RAMPS[k].label.toLowerCase()}
@@ -1521,7 +1566,7 @@ export function Studio({
             <span className="mono">
               Start {fmtTime(a)} · End {fmtTime(b)} · Length {fmtTime(Math.max(0, b - a))}
             </span>
-            <span>Space play · &lt; &gt; speed · hold the picture for fast · I / O set points · S split · Del cut out part · ← → 5 s · Shift+← → one frame · ↑ ↓ volume · M mute · C crop · T hide or show tools · F fullscreen</span>
+            <span>Space play · &lt; &gt; speed · hold the picture for fast · V split tool · I / O set points · S split · Del cut out part · ← → 5 s · Shift+← → one frame · ↑ ↓ volume · M mute · C crop · T hide or show tools · F fullscreen</span>
           </div>
           {!theater && <ClipStrip clips={(clips ?? []).slice(0, 30)} current={path} onOpen={onOpen} />}
         </div>

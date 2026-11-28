@@ -15,14 +15,16 @@ use std::f64::consts::PI;
 pub struct Shape {
     pub peak: f64,
     pub side: f64,
+    /// A slight motion blur where it's fast (strong ramps)
+    pub blur: bool,
 }
 
 /// "subtle" | "medium" | "strong"; anything else is no ramp (a hard cut).
 pub fn shape(strength: &str) -> Option<Shape> {
     match strength {
-        "subtle" => Some(Shape { peak: 3.0, side: 0.5 }),
-        "medium" => Some(Shape { peak: 5.0, side: 0.75 }),
-        "strong" => Some(Shape { peak: 8.0, side: 1.0 }),
+        "subtle" => Some(Shape { peak: 3.0, side: 0.5, blur: false }),
+        "medium" => Some(Shape { peak: 5.0, side: 0.75, blur: false }),
+        "strong" => Some(Shape { peak: 8.0, side: 1.0, blur: true }),
         _ => None,
     }
 }
@@ -36,6 +38,7 @@ pub struct Sides {
     pub a: f64,
     pub b: f64,
     pub peak: f64,
+    pub blur: bool,
 }
 
 impl Sides {
@@ -46,7 +49,7 @@ impl Sides {
             let r = if on { s.side.min(limit) } else { 0.0 };
             if r < 0.15 { 0.0 } else { r }
         };
-        Sides { len, a: each(ramp_in), b: each(ramp_out), peak: s.peak }
+        Sides { len, a: each(ramp_in), b: each(ramp_out), peak: s.peak, blur: s.blur }
     }
 
     fn k(&self) -> f64 {
@@ -94,7 +97,37 @@ impl Sides {
         if self.a <= 0.0 && self.b <= 0.0 {
             return format!("[{from}]null[{to}]");
         }
-        format!("[{from}]setpts='({})/TB',fps={fps:.5},trim=duration={:.4},setpts=PTS-STARTPTS[{to}]", self.setpts_expr(), self.out_len())
+        let src = if self.blur { format!("{to}_blurred") } else { from.to_string() };
+        let ramp = format!("[{src}]setpts='({})/TB',fps={fps:.5},trim=duration={:.4},setpts=PTS-STARTPTS[{to}]", self.setpts_expr(), self.out_len());
+        if !self.blur {
+            return ramp;
+        }
+        // Motion blur: the ramp's ends get the last few frames blended in, as much as
+        // they're sped up (none where it's normal speed, most right at the join). The
+        // part in between is left as it is.
+        const AMOUNT: f64 = 0.85;
+        let (a, b, len) = (self.a, self.b, self.len);
+        let t = format!("{to}_");
+        let mut parts = Vec::new();
+        let mut g = vec![format!("[{from}]split={}{}", 1 + (a > 0.0) as usize + (b > 0.0) as usize, [(a > 0.0, "h"), (true, "m"), (b > 0.0, "t")].iter().filter(|(on, _)| *on).map(|(_, n)| format!("[{t}{n}]")).collect::<String>())];
+        if a > 0.0 {
+            g.push(format!(
+                "[{t}h]trim=end={a:.5},setpts=PTS-STARTPTS,split[{t}h1][{t}h2];[{t}h2]tmix=frames=5[{t}hb];[{t}h1][{t}hb]blend=all_expr='A+(B-A)*{AMOUNT}*(1+cos(PI*T/{a:.5}))/2'[{t}hh]"
+            ));
+            parts.push(format!("[{t}hh]"));
+        }
+        g.push(format!("[{t}m]trim=start={a:.5}:end={:.5},setpts=PTS-STARTPTS[{t}mm]", len - b));
+        parts.push(format!("[{t}mm]"));
+        if b > 0.0 {
+            g.push(format!(
+                "[{t}t]trim=start={:.5},setpts=PTS-STARTPTS,split[{t}t1][{t}t2];[{t}t2]tmix=frames=5[{t}tb];[{t}t1][{t}tb]blend=all_expr='A+(B-A)*{AMOUNT}*(1-cos(PI*T/{b:.5}))/2'[{t}tt]",
+                len - b
+            ));
+            parts.push(format!("[{t}tt]"));
+        }
+        g.push(format!("{}concat=n={}:v=1:a=0[{src}]", parts.join(""), parts.len()));
+        g.push(ramp);
+        g.join(";")
     }
 
     /// The sound: `[from]` (a piece starting at 0) ramped as `[to]`, in steps; `tag` keeps
@@ -298,8 +331,33 @@ mod real {
         assert!(before >= 3.5, "fast into the join");
         assert!(after >= 3.5, "fast out of the join");
         assert!((at(join + 3.0) - 1.0).abs() < 0.3, "back to normal after");
-        let _ = std::fs::remove_file(&src);
         let _ = std::fs::remove_file(&out);
+        // Strong: with motion blur where it's fast. Same length; the frames right at the
+        // join are a blend (in between two brightness levels), the ones far from it aren't.
+        let strong = super::shape("strong").unwrap();
+        let t0 = std::time::Instant::now();
+        let out = crate::library::cut_ramped(&src.to_string_lossy(), &pieces, &Default::default(), None, strong).unwrap();
+        let p = crate::library::probe(&out).unwrap();
+        let want = joined_len(&[4.0, 6.0], strong);
+        eprintln!("strong: {:.3}s (expected {want:.3}) in {:?}", p.duration, t0.elapsed());
+        assert!((p.duration - want).abs() < 0.1);
+        assert_eq!(p.audio_tracks, 2);
+        let _ = std::fs::remove_file(&out);
+        let _ = std::fs::remove_file(&src);
         let _ = std::fs::remove_dir(&dir);
+    }
+}
+
+#[cfg(test)]
+mod look {
+    /// RAMP_SRC=<clip>: cut 0-4 s and 6-10 s joined with a strong ramp, timed, kept for a look.
+    #[test]
+    #[ignore]
+    fn strong_ramp_on_a_real_clip() {
+        let Ok(src) = std::env::var("RAMP_SRC") else { return };
+        crate::ffmpeg::init(None);
+        let t = std::time::Instant::now();
+        let out = crate::library::cut_ramped(&src, &[(0.0, 4.0), (6.0, 10.0)], &Default::default(), None, super::shape("strong").unwrap()).unwrap();
+        eprintln!("made {out} in {:?}", t.elapsed());
     }
 }
