@@ -749,6 +749,7 @@ mod tests {
 
     /// What the camera costs: CPU time over 10 s with the recorder asking for a
     /// 1080p clip's box 60 times a second, with no background effect and with blur.
+    #[cfg(windows)]
     #[test]
     #[ignore]
     fn real_camera_cost() {
