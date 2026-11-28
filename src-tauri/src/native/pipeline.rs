@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use super::capture::Capture;
+use windows::Win32::Graphics::Direct3D11::{D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE, D3D11_BOX, D3D11_TEXTURE2D_DESC, ID3D11Texture2D};
+use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use super::gpu::{self, Converter, Gpu};
 use super::nvenc::{Codec, Encoder, EncoderConfig};
 use crate::audio::{self, AudioRing};
@@ -166,7 +168,7 @@ impl Pipeline {
         let thread = thread::Builder::new()
             .name("rewind-capture".into())
             .spawn(move || {
-                let setup = (|| -> Result<(Gpu, Capture, Converter, Encoder), String> {
+                let setup = (|| -> Result<(Gpu, Capture, Converter, Encoder, (u32, u32, u32, u32)), String> {
                     // Look up the monitor on this thread (its handles can't cross threads).
                     let (adapter, hmon, adapter_name) =
                         gpu::find_output(&monitor_name).ok_or("Monitor not found on any GPU")?;
@@ -183,9 +185,10 @@ impl Pipeline {
                     });
                     let conv = Converter::new(&g, w, h, out_w, out_h, fps, area).map_err(|e| format!("GPU scaler: {e}"))?;
                     let enc = Encoder::new(&g, EncoderConfig { codec, width: out_w, height: out_h, fps, quality, gop: fps })?;
-                    Ok((g, cap, conv, enc))
+                    let recorded = area.unwrap_or((0, 0, w, h));
+                    Ok((g, cap, conv, enc, recorded))
                 })();
-                let (_g, cap, conv, mut enc) = match setup {
+                let (g, cap, conv, mut enc, recorded) = match setup {
                     Ok(x) => x,
                     Err(e) => {
                         let _ = ready_tx.send(Err(e));
@@ -209,6 +212,7 @@ impl Pipeline {
                 let _ = ready_tx.send(Ok(buffers.clone()));
                 let frame = Duration::from_secs_f64(1.0 / fps as f64);
                 let mut n: u64 = 0;
+                let mut camera = CameraOverlay::default();
                 while !stop2.load(Ordering::Relaxed) {
                     let due = t0 + frame * n as u32;
                     let now = Instant::now();
@@ -220,6 +224,8 @@ impl Pipeline {
                         return;
                     }
                     let src = cap.latest.lock().unwrap().texture.clone();
+                    // The camera box (if it's on) goes onto a copy of the screen frame.
+                    let src = camera.draw(&g, &src, recorded).unwrap_or(src);
                     let packet = conv
                         .convert(&src, enc.next_input())
                         .map_err(|e| format!("GPU scaler: {e}"))
@@ -330,6 +336,66 @@ impl Drop for Pipeline {
         self.stop.store(true, Ordering::Relaxed);
         if let Some(t) = self.thread.take() {
             let _ = t.join();
+        }
+    }
+}
+
+/// The camera box drawn onto each screen frame, on the GPU: the screen frame is
+/// copied to `composed`, then the box (made by camera.rs) is copied over it row by
+/// row, leaving out its rounded corners.
+#[derive(Default)]
+struct CameraOverlay {
+    composed: Option<ID3D11Texture2D>,
+    picture: Option<(ID3D11Texture2D, u32, u32)>,
+    seq: u64,
+}
+
+impl CameraOverlay {
+    /// The frame to encode with the camera on it, or None to use the screen frame as it is.
+    fn draw(&mut self, g: &Gpu, src: &ID3D11Texture2D, (ax, ay, aw, ah): (u32, u32, u32, u32)) -> Option<ID3D11Texture2D> {
+        let l = crate::camera::layout()?;
+        let Some(aspect) = crate::camera::aspect() else {
+            crate::camera::want(0, 0); // opens the camera; its shape is known once it's open
+            return None;
+        };
+        // The box in screen pixels: its size and place are fractions of the recorded part.
+        let bw = (((l.size * aw as f64).round() as u32).max(16) & !1).min(aw);
+        let bh = (((bw as f64 / aspect).round() as u32).max(16) & !1).min(ah);
+        let bx = ax + ((l.x * aw as f64).round() as u32).min(aw - bw);
+        let by = ay + ((l.y * ah as f64).round() as u32).min(ah - bh);
+        let b = crate::camera::want(bw, bh)?;
+        unsafe {
+            if self.picture.as_ref().is_none_or(|p| (p.1, p.2) != (bw, bh)) {
+                let t = g.texture(bw, bh, DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_BIND_SHADER_RESOURCE).ok()?;
+                self.picture = Some((t, bw, bh));
+                self.seq = 0;
+            }
+            let pic = &self.picture.as_ref()?.0;
+            if self.seq != b.seq {
+                g.context.UpdateSubresource(pic, 0, None, b.bgra.as_ptr() as *const _, bw * 4, 0);
+                self.seq = b.seq;
+            }
+            if self.composed.is_none() {
+                let mut d = D3D11_TEXTURE2D_DESC::default();
+                src.GetDesc(&mut d);
+                self.composed = Some(g.texture(d.Width, d.Height, d.Format, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET).ok()?);
+            }
+            let out = self.composed.clone()?;
+            g.context.CopyResource(&out, src);
+            // Straight rows in one copy; the rounded rows one by one, narrower.
+            let r = b.radius.min(bh / 2);
+            let copy = |top: u32, bottom: u32, inset: u32| {
+                let bx_ = D3D11_BOX { left: inset, top, front: 0, right: bw - inset, bottom, back: 1 };
+                g.context.CopySubresourceRegion(&out, 0, bx + inset, by + top, 0, pic, 0, Some(&bx_));
+            };
+            for y in 0..r {
+                copy(y, y + 1, crate::camera::corner_inset(y, bh, r));
+            }
+            copy(r, bh - r, 0);
+            for y in bh - r..bh {
+                copy(y, y + 1, crate::camera::corner_inset(y, bh, r));
+            }
+            Some(out)
         }
     }
 }
@@ -642,6 +708,56 @@ pub fn mux_recording_parts(dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The camera box lands where it's placed, with rounded corners, over the screen
+    /// frame (made-up camera and screen pictures; needs a GPU, not a camera).
+    #[test]
+    fn camera_box_is_drawn_onto_the_frame() {
+        if std::env::var_os("HINDSIGHT_NO_MEDIA").is_some() {
+            return; // GitHub's test machines have no GPU
+        }
+        let primary = monitors::list().into_iter().find(|m| m.primary).unwrap().name;
+        let (adapter, _, name) = gpu::find_output(&primary).unwrap();
+        let g = Gpu::new(&adapter, name).unwrap();
+        // Screen: all grey, 1000×500. Camera: all red, 640×360 (16:9).
+        let (w, h) = (1000u32, 500u32);
+        let screen = g.texture(w, h, DXGI_FORMAT_B8G8R8A8_UNORM, D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET).unwrap();
+        let grey = vec![128u8; (w * h * 4) as usize];
+        unsafe { g.context.UpdateSubresource(&screen, 0, None, grey.as_ptr() as *const _, w * 4, 0) };
+        let red: Vec<u8> = (0..640 * 360).flat_map(|_| [0u8, 0, 255, 255]).collect();
+        let layout = crate::camera::Layout {
+            enabled: true,
+            id: String::new(),
+            name: String::new(),
+            x: 0.5,
+            y: 0.2,
+            size: 0.2,
+            mirror: false,
+            border: false,
+            fill: false,
+        };
+        crate::camera::test_feed(layout, 640, 360, red);
+        let mut o = CameraOverlay::default();
+        // The first call asks for the box at its size; the camera makes it from its next frame.
+        assert!(o.draw(&g, &screen, (0, 0, w, h)).is_none());
+        crate::camera::test_make();
+        let out = o.draw(&g, &screen, (0, 0, w, h)).expect("drawn");
+        let (_, _, px) = g.read_bgra(&out).unwrap();
+        let at = |x: u32, y: u32| {
+            let i = ((y * w + x) * 4) as usize;
+            [px[i], px[i + 1], px[i + 2]]
+        };
+        // Box: 200 wide, 112 high at (500, 100).
+        assert_eq!(at(600, 150), [0, 0, 255], "middle of the box is the camera");
+        assert_eq!(at(501, 150), [0, 0, 255], "left edge, mid-height");
+        assert_eq!(at(500, 100), [128, 128, 128], "rounded corner left out");
+        assert_eq!(at(699, 211), [128, 128, 128], "bottom-right corner left out");
+        assert_eq!(at(499, 150), [128, 128, 128], "left of the box");
+        assert_eq!(at(600, 213), [128, 128, 128], "below the box");
+        // The screen frame itself is untouched (the box goes on a copy).
+        let (_, _, orig) = g.read_bgra(&screen).unwrap();
+        assert_eq!(&orig[((150 * w + 600) * 4) as usize..][..3], &[128, 128, 128]);
+    }
 
 
     /// Max loudness (dB) of one audio track of `path`, between `from` and `to` seconds.

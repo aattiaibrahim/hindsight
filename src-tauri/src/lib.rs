@@ -22,6 +22,7 @@ mod prepare;
 mod game_icons;
 mod duplicates;
 mod trim_match;
+mod camera;
 mod montage;
 mod game_detect;
 #[macro_use]
@@ -386,6 +387,8 @@ fn set_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
     if old.recording_enabled != settings.recording_enabled {
         show_tray_record(&app, settings.recording_enabled);
     }
+    // The camera box moves, changes or turns off at once, without restarting capture.
+    camera::apply(&settings);
     if old.clips_dir != settings.clips_dir {
         std::fs::create_dir_all(&settings.clips_dir)
             .map_err(|e| format!("Can't use that clips folder: {e}"))?;
@@ -504,6 +507,20 @@ async fn screen_preview(app: AppHandle) -> Result<tauri::ipc::Response, String> 
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Cameras that can be drawn into clips.
+#[tauri::command]
+async fn list_cameras() -> Vec<camera::CameraInfo> {
+    tauri::async_runtime::spawn_blocking(camera::list).await.unwrap_or_default()
+}
+
+/// The camera box as it will look, for the Settings preview (PNG). "starting" while it opens.
+#[tauri::command]
+async fn camera_preview() -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(|| camera::preview_png().map(tauri::ipc::Response::new))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -2626,6 +2643,7 @@ pub fn run() {
             session_end::start(handle.clone());
 
             apply_hotkeys(&handle, &s);
+            camera::apply(&s);
             apply_autostart(&handle, s.launch_on_startup);
 
             // Tray icon: left click opens the flyout, right click shows the menu.
@@ -2752,6 +2770,8 @@ smooth_copy,
 get_settings,
             set_settings,
             screen_preview,
+            list_cameras,
+            camera_preview,
             nas_check,
             nas_confirm,
             nas_pair,

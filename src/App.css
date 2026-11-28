@@ -1541,6 +1541,15 @@ p.small { font-size: 12px; margin: 0; }
   width: max-content; max-width: calc(100% - 24px); text-align: center; line-height: 1.4;
 }
 .rec-area-tools { max-width: 720px; flex-wrap: wrap; gap: 8px; }
+/* The camera on the recording preview: drag it, or snap it to a corner. */
+.cam-box { position: absolute; z-index: 3; cursor: grab; touch-action: none; display: flex; align-items: center; justify-content: center; }
+.cam-box.dragging { cursor: grabbing; }
+.rec-area-view .cam-box img { position: static; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
+.cam-box-wait { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; text-align: center; padding: 4px; font-size: 11px; color: #fff; background: rgba(0, 0, 0, 0.55); border: 1px dashed rgba(255, 255, 255, 0.6); border-radius: 8px; }
+.cam-box-err { position: absolute; left: 8px; bottom: 8px; z-index: 4; max-width: 70%; padding: 4px 8px; border-radius: 6px; background: rgba(0, 0, 0, 0.7); color: #fff; font-size: 11px; }
+.cam-tools { align-items: center; }
+.cam-size { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.cam-size input { width: 140px; }
 
 /* NAS folder check before syncing */
 .nas-setup { max-width: 560px; }

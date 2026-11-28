@@ -1396,6 +1396,49 @@ mod tests {
         live_run("ffmpeg", false);
     }
 
+    /// The real recorder with the real camera drawn in (needs a camera): it opens, the
+    /// clip saves at full frame rate. Nothing of the picture is looked at.
+    #[test]
+    #[ignore]
+    fn live_native_with_camera() {
+        crate::ffmpeg::init(None);
+        let base = std::env::temp_dir().join(format!("rewind-test-camera-{}", std::process::id()));
+        let clips = base.join("clips");
+        let s = Settings {
+            clips_dir: clips.to_string_lossy().into(),
+            buffer_seconds: 20,
+            camera_enabled: true,
+            camera_border: true,
+            camera_mirror: true,
+            ..Default::default()
+        };
+        crate::camera::apply(&s);
+        let engine = Engine::start(Arc::new(Mutex::new(s)), base.join("buffer"));
+        let t = Instant::now();
+        while engine.status().buffered_seconds < 6 {
+            assert!(t.elapsed() < Duration::from_secs(40), "buffer never filled: {:?}", engine.status().last_error);
+            thread::sleep(Duration::from_millis(250));
+        }
+        assert!(crate::camera::aspect().is_some(), "camera never opened");
+        let clip = clips.join("Desktop").join("camera.mkv");
+        engine.save_clip(4, &clip).unwrap();
+        let out = crate::ffmpeg::cmd("ffprobe")
+            .args(["-v", "error", "-count_frames", "-select_streams", "v:0", "-show_entries", "stream=nb_read_frames,r_frame_rate", "-of", "csv=p=0"])
+            .arg(&clip)
+            .output()
+            .unwrap();
+        let p = crate::library::probe(&clip.to_string_lossy()).unwrap();
+        println!("camera clip: {:.2}s, frames/rate {}", p.duration, String::from_utf8_lossy(&out.stdout).trim());
+        assert!(engine.status().last_error.is_none(), "{:?}", engine.status().last_error);
+        engine.shutdown();
+        // Left for a look at the box's edge: HINDSIGHT_KEEP_CAMERA_CLIP.
+        if std::env::var_os("HINDSIGHT_KEEP_CAMERA_CLIP").is_none() {
+            let _ = fs::remove_dir_all(&base);
+        } else {
+            println!("kept {}", clip.display());
+        }
+    }
+
     fn live_run(engine_kind: &str, in_ram: bool) {
         crate::ffmpeg::init(None);
         if crate::ffmpeg::skip_media_tests() {

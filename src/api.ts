@@ -49,6 +49,11 @@ export type MontagePlan = {
 export type GpuEncoders = { gpu: string; encoder: string; native: boolean; supported: Exclude<Encoder, "auto">[]; auto: Exclude<Encoder, "auto"> };
 export type MonitorMode = "primary" | "cursor" | "fixed";
 
+export interface CameraInfo {
+  id: string;
+  name: string;
+}
+
 export type Settings = {
   clipsDir: string;
   encoder: Encoder;
@@ -116,6 +121,19 @@ export type Settings = {
   keepOriginalAfterRemux: boolean;
   replaceOriginalOnEdit: boolean;
   detailedLog: boolean;
+  /** A camera drawn into clips and recordings (Native engine only) */
+  cameraEnabled: boolean;
+  /** Which camera: its device link ("" = the first one found), and its name */
+  cameraId: string;
+  cameraName: string;
+  /** The box's top-left corner and width, as fractions of the clip */
+  cameraX: number;
+  cameraY: number;
+  cameraSize: number;
+  cameraMirror: boolean;
+  cameraBorder: boolean;
+  /** Zoomed in to fill a 4:3 box */
+  cameraFill: boolean;
   externalFiles: string[];
   desktopAudio: boolean;
   /** Discord on its own track, left out of desktop audio */
@@ -575,6 +593,9 @@ export const api = {
   nasForgetLogin: (host: string) => invoke<void>("nas_forget_login", { host }),
   /** A small PNG of the screen being recorded (refused while a game runs). */
   screenPreview: () => invoke<ArrayBuffer>("screen_preview"),
+  listCameras: () => invoke<CameraInfo[]>("list_cameras"),
+  /** The camera box as it will look (PNG); fails with "starting" while the camera opens. */
+  cameraPreview: () => invoke<ArrayBuffer>("camera_preview"),
   saveClip: (seconds?: number) => invoke<string>("save_clip", { seconds: seconds ?? null }),
   toggleRecording: () => invoke<string | null>("toggle_recording"),
   /** Why a hotkey couldn't be used (another app has it), per hotkey; null = fine */

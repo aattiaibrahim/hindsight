@@ -2,6 +2,7 @@ import { Select } from "./Select";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { RecordingArea } from "./RecordingArea";
+import { CameraSettings } from "./CameraSettings";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useCallback, useEffect, useState } from "react";
 import { Accent, api, bufferEstimateMb, errText, fmtDb, GpuEncoders, Monitor, Settings, Theme } from "./api";
@@ -813,6 +814,7 @@ export function SettingsView({
               </Select>
             </label>
           )}
+          <CameraSettings s={s} set={set} native={!(enc && !enc.native) && s.captureEngine === "native"} Toggle={Toggle} />
           <div className="setting stacked">
             <span>
               Recording area
@@ -822,7 +824,14 @@ export function SettingsView({
                 {s.captureArea ? " Clips are the size of the area." : ""}
               </small>
             </span>
-            {tab === "recording" && <RecordingArea area={s.captureArea} screen={screen} onSave={(a) => set({ captureArea: a })} />}
+            {tab === "recording" && (
+              <RecordingArea
+                area={s.captureArea}
+                screen={screen}
+                onSave={(a) => set({ captureArea: a })}
+                camera={s.cameraEnabled && !(enc && !enc.native) && s.captureEngine === "native" ? { s, set } : undefined}
+              />
+            )}
           </div>
           <label className="setting">
             <span>Show mouse cursor in clips</span>

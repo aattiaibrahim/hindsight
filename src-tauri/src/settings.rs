@@ -130,6 +130,23 @@ pub struct Settings {
     /// Keep a detailed log file (logs\hindsight.log in the app's data folder): every
     /// message, error and step, kept across restarts, for finding problems
     pub detailed_log: bool,
+    /// A camera drawn into clips and recordings (like a facecam in OBS).
+    pub camera_enabled: bool,
+    /// Which camera: its device link ("" = the first one found)
+    pub camera_id: String,
+    /// Its name, to show (and to find it again if the link changes)
+    pub camera_name: String,
+    /// Where its box goes: the top-left corner as fractions of the clip's width and height
+    pub camera_x: f64,
+    pub camera_y: f64,
+    /// The box's width, as a fraction of the clip's width
+    pub camera_size: f64,
+    /// Flipped left to right, like a mirror
+    pub camera_mirror: bool,
+    /// A thin light outline around it
+    pub camera_border: bool,
+    /// Zoomed in to fill a 4:3 box (the sides cut off) instead of the whole picture
+    pub camera_fill: bool,
 }
 
 /// A rectangle of the screen, as fractions (0..1) of the monitor.
@@ -235,6 +252,15 @@ impl Default for Settings {
             keep_whole: Vec::new(),
             online_game_logos: true,
             detailed_log: true,
+            camera_enabled: false,
+            camera_id: String::new(),
+            camera_name: String::new(),
+            camera_x: 0.76,
+            camera_y: 0.71,
+            camera_size: 0.22,
+            camera_mirror: false,
+            camera_border: false,
+            camera_fill: false,
         }
     }
 }
@@ -260,6 +286,10 @@ impl Settings {
             self.output_height = 0;
         }
         self.capture_area = self.capture_area.and_then(Area::cleaned);
+        let unit = |v: f64, d: f64| if v.is_finite() { v.clamp(0.0, 1.0) } else { d };
+        self.camera_size = if self.camera_size.is_finite() { self.camera_size.clamp(0.08, 0.5) } else { d.camera_size };
+        self.camera_x = unit(self.camera_x, d.camera_x).min(1.0 - self.camera_size);
+        self.camera_y = unit(self.camera_y, d.camera_y);
         if self.file_name_template.trim().is_empty() || self.file_name_template.chars().count() > 120 {
             self.file_name_template = d.file_name_template.clone();
         }

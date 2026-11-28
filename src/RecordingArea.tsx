@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { api, CropRect, Monitor } from "./api";
+import { api, CropRect, Monitor, Settings } from "./api";
+import { CameraBox } from "./CameraSettings";
 import { CropBox, cropPixels, fitRatio, isWhole, WHOLE } from "./CropBox";
 
 /** How often the preview refreshes while it's on screen. */
@@ -22,11 +23,15 @@ export function RecordingArea({
   area,
   screen,
   onSave,
+  camera,
 }: {
   area: CropRect | null;
   screen: Monitor | undefined;
   onSave: (a: CropRect | null) => void;
+  /** The camera box to place on the preview, when the camera is on */
+  camera?: { s: Settings; set: (p: Partial<Settings>) => void };
 }) {
+  const [camTools, setCamTools] = useState<HTMLDivElement | null>(null);
   const [frame, setFrame] = useState<string | null>(null);
   const [paused, setPaused] = useState<string>(""); // "", "error" or "game:<name>"
   const [draft, setDraft] = useState<CropRect>(area ?? WHOLE);
@@ -82,6 +87,7 @@ export function RecordingArea({
       <div className="rec-area-view" style={{ aspectRatio: `${sw} / ${sh}` }}>
         {frame ? <img src={frame} alt="" draggable={false} /> : <div className="rec-area-blank" />}
         <CropBox value={draft} onChange={setDraft} ratio={ratio} videoAr={ar} editing label={isWhole(draft) ? "Whole screen" : `${pw} × ${ph}`} />
+        {camera && <CameraBox s={camera.s} set={camera.set} area={area ?? WHOLE} tools={camTools} />}
         {paused && (
           <div className="rec-area-paused">
             {paused.startsWith("game")
@@ -90,6 +96,7 @@ export function RecordingArea({
           </div>
         )}
       </div>
+      {camera && <div className="row rec-area-tools cam-tools" ref={setCamTools} />}
       <div className="row rec-area-tools">
         <span className="transport-pill crop-tools" role="group" aria-label="Area shape">
           {SHAPES.map(([name, r]) => (
