@@ -82,7 +82,11 @@ impl Segmenter {
         // Already set up by the game finder: that's fine.
         let _ = ort::init_from(runtime.to_string_lossy().to_string()).commit();
         let session = Session::builder()
-            .and_then(|b| b.with_intra_threads(2))
+            // One thread, and no busy-waiting between frames: it runs 30 times a second
+            // next to a game, so it should only use the CPU while it works (~5 ms a frame).
+            .and_then(|b| b.with_intra_threads(1))
+            .and_then(|b| b.with_intra_op_spinning(false))
+            .and_then(|b| b.with_inter_op_spinning(false))
             .and_then(|b| b.commit_from_file(model))
             .map_err(|e| format!("The background model wouldn't start: {e}"))?;
         Ok(Segmenter { session, last: None })

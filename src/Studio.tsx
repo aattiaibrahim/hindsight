@@ -21,6 +21,7 @@ import {
   Volume2,
   VolumeX,
   FastForward,
+  Eraser,
 } from "lucide-react";
 import { api, ClipFile, codecLabel, errText, fmtSize, fmtTime, Health, PreviewAudio, Probe, Settings, TrackEdit, Upload, UploadProgress, Waveform, mediaSrc } from "./api";
 import { AudioLanes, hasAudioEdits, isMutedAt } from "./AudioLanes";
@@ -120,6 +121,31 @@ function rulerLabel(t: number) {
   const m = Math.floor(t / 60);
   const s = Math.round(t % 60);
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/** Playback speeds offered, slowest first. */
+const SPEEDS = [0.25, 0.5, 1, 2, 4];
+/** The speed last picked, so the next clip opens at it too (this session). */
+let lastSpeed = 1;
+
+/** The speeds as a fixed row of buttons: always in the same place, one click each. */
+function SpeedPicker({ speed, onPick, dark = false }: { speed: number; onPick: (r: number) => void; dark?: boolean }) {
+  return (
+    <span className={`transport-pill speed-pick ${dark ? "dark" : ""}`} role="radiogroup" aria-label="Playback speed">
+      {SPEEDS.map((r) => (
+        <button
+          key={r}
+          role="radio"
+          aria-checked={speed === r}
+          className={`speed ${speed === r ? "on" : ""}`}
+          title={`Play at ${r}× (< and > change speed)`}
+          onClick={() => onPick(r)}
+        >
+          {r}×
+        </button>
+      ))}
+    </span>
+  );
 }
 
 /** Time ruler under the timeline: small ticks plus labelled bigger ones, spaced to fit the clip. */
@@ -393,6 +419,27 @@ export function Studio({
       if (!v.paused && a.paused) a.play().catch(() => {});
     });
   }, []);
+  // Playback speed (0.25× to 4×): kept while you move between clips this session.
+  const [speed, setSpeedState] = useState(() => lastSpeed);
+  const speedRef = useRef(speed);
+  const setSpeed = useCallback(
+    (r: number) => {
+      lastSpeed = r;
+      speedRef.current = r;
+      setSpeedState(r);
+      const v = video.current;
+      // While the picture is held for fast playback, the new speed takes over when it's let go.
+      if (v && !press.current?.held) {
+        v.playbackRate = r;
+        syncExtra();
+      }
+    },
+    [syncExtra],
+  );
+  const stepSpeed = useCallback((dir: number) => {
+    const i = SPEEDS.indexOf(speedRef.current);
+    setSpeed(SPEEDS[Math.max(0, Math.min(SPEEDS.length - 1, (i < 0 ? 2 : i) + dir))]);
+  }, [setSpeed]);
   const [range, setRange] = useState<[number, number]>([0, 0]);
   // Which file the player failed on. Tied to the path, so an error from the
   // previous clip can't show up on the next one.
@@ -619,7 +666,7 @@ export function Studio({
   // The picture: a click plays or pauses; holding the button down plays at 2× until
   // let go (then back as it was); two clicks only count as a double click (fullscreen)
   // when they're quick (under 250 ms) and in the same spot, so a fast pause-play doesn't.
-  const [fast, setFast] = useState(false);
+  const [fast, setFast] = useState<number | null>(null);
   const press = useRef<{ held: boolean; wasPaused: boolean; rate: number; timer: number } | null>(null);
   const lastTap = useRef<{ t: number; x: number; y: number } | null>(null);
   const pictureDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -635,10 +682,12 @@ export function Studio({
       const v = video.current;
       if (!v || press.current !== p) return;
       p.held = true;
-      v.playbackRate = 2;
+      // Twice the chosen speed: 2× normally, 4× when already at 2×.
+      const r = Math.min(4, Math.max(2, speedRef.current * 2));
+      v.playbackRate = r;
       if (v.paused) v.play().catch(() => {});
       syncExtra();
-      setFast(true);
+      setFast(r);
     }, 350);
     press.current = p;
   };
@@ -650,11 +699,12 @@ export function Studio({
     if (p.held) {
       const v = video.current;
       if (v) {
-        v.playbackRate = p.rate;
+        // Back to the chosen speed (it may have been changed while held).
+        v.playbackRate = speedRef.current;
         if (p.wasPaused) v.pause();
         syncExtra();
       }
-      setFast(false);
+      setFast(null);
       lastTap.current = null;
       return;
     }
@@ -722,10 +772,12 @@ export function Studio({
       else if ((e.key === "s" || e.key === "S") && !e.ctrlKey && !e.altKey && !e.metaKey) cutKeys.current.split(v.currentTime);
       else if ((e.key === "Delete" || e.key === "Backspace") && !document.querySelector(".modal-backdrop")) cutKeys.current.toggle();
       else if ((e.key === "z" || e.key === "Z") && (e.ctrlKey || e.metaKey) && !e.shiftKey) cutKeys.current.undo();
+      else if (e.key === ">" || (e.key === "." && e.shiftKey)) stepSpeed(1);
+      else if (e.key === "<" || (e.key === "," && e.shiftKey)) stepSpeed(-1);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [path, tapToggle, seek, nudgeVolume, toggleMute, toggleFullscreen, toggleTheater, fullscreen, onBack, cropping]);
+  }, [path, tapToggle, seek, nudgeVolume, toggleMute, toggleFullscreen, toggleTheater, fullscreen, onBack, cropping, stepSpeed]);
 
   // Dragging on the timeline: handles move in/out, anywhere else scrubs.
   const drag = (kind: "in" | "out" | "seek") => (e: React.PointerEvent) => {
@@ -1004,6 +1056,9 @@ export function Studio({
                   v.currentTime = r.time;
                   if (r.playing) v.play().catch(() => {});
                 }
+                // A new file starts at normal speed: keep the chosen one.
+                e.currentTarget.playbackRate = speedRef.current;
+                syncExtra();
                 const d = e.currentTarget.duration;
                 const { videoWidth: vw, videoHeight: vh } = e.currentTarget;
                 if (vw && vh) setAr(vw / vh);
@@ -1054,9 +1109,9 @@ export function Studio({
                 onPointerUp={(e) => pictureUp(e)}
                 onPointerCancel={(e) => pictureUp(e, true)}
               >
-                {fast && (
+                {fast != null && (
                   <div className="vid-fast" aria-live="polite">
-                    2× {Icon.faster}
+                    {fast}× {Icon.faster}
                   </div>
                 )}
                 {/* Only while paused: playing, nothing sits over the picture. */}
@@ -1131,6 +1186,7 @@ export function Studio({
                         <span className="mono vid-time">
                           {fmtTime(time)} / {fmtTime(duration)}
                         </span>
+                        <SpeedPicker speed={speed} onPick={setSpeed} dark />
                         <span style={{ flex: 1 }} />
                         <button className="vid-btn" aria-label="Exit fullscreen" title="Exit fullscreen (F or Esc)" onClick={toggleFullscreen}>
                           {Icon.exitFullscreen}
@@ -1222,6 +1278,7 @@ export function Studio({
               </span>
               </span>
             </span>
+            <SpeedPicker speed={speed} onPick={setSpeed} />
             <span className="mono time-readout">
               {fmtTime(time)} <span className="muted">/ {fmtTime(duration)}</span>
             </span>
@@ -1252,42 +1309,47 @@ export function Studio({
                 }}
               >
                 <CropIcon size={15} strokeWidth={2} aria-hidden="true" />
-                {cropped ? "Cropped" : "Crop"}
+                <span className="pill-label">{cropped ? "Cropped" : "Crop"}</span>
               </button>
             )}
+            {/* While cropping, the crop shapes take this space; the rest comes back after. */}
+            {!cropping && (
             <span className="transport-pill">
-              <button className="btn pill" title="Split the clip at the playhead, to cut a part out (S)" onClick={() => splitAt(time)} disabled={!duration}>
+              <button className="btn pill" aria-label="Split" title="Split the clip at the playhead, to cut a part out (S)" onClick={() => splitAt(time)} disabled={!duration}>
                 <Scissors size={15} strokeWidth={2} aria-hidden="true" />
-                Split
+                <span className="pill-label">Split</span>
               </button>
-              {splits.length > 0 && (
-                <button
-                  className={`btn pill ${currentPart?.cut ? "on" : ""}`}
-                  title={currentPart?.cut ? "Keep this part after all (Delete)" : "Cut out the part the playhead is in (Delete)"}
-                  onClick={toggleCut}
-                >
-                  {currentPart?.cut ? "Keep part" : "Cut out part"}
-                </button>
-              )}
-              {cutHistory.current.length > 0 && (
-                <button className="round icon" aria-label="Undo cut" title="Undo the last split or cut (Ctrl+Z)" onClick={undoCut}>
-                  <Undo2 size={15} strokeWidth={2} aria-hidden="true" />
-                </button>
-              )}
+              {/* Always here (dimmed until there's a split), so nothing moves when you split. */}
+              <button
+                className={`btn pill cut-part ${currentPart?.cut ? "on" : ""}`}
+                aria-label={currentPart?.cut ? "Keep part" : "Cut out part"}
+                title={!splits.length ? "Split the clip first, then cut out a part (Delete)" : currentPart?.cut ? "Keep this part after all (Delete)" : "Cut out the part the playhead is in (Delete)"}
+                disabled={!splits.length}
+                onClick={toggleCut}
+              >
+                <Eraser size={15} strokeWidth={2} aria-hidden="true" />
+                <span className="pill-label">{currentPart?.cut ? "Keep part" : "Cut out part"}</span>
+              </button>
+              <button className="round icon" aria-label="Undo cut" title="Undo the last split or cut (Ctrl+Z)" disabled={!cutHistory.current.length} onClick={undoCut}>
+                <Undo2 size={15} strokeWidth={2} aria-hidden="true" />
+              </button>
             </span>
+            )}
+            {!cropping && (
             <span className="transport-pill">
-              <button className="btn pill" title="Start the trim here (I)" onClick={() => setRange(([, y]) => [Math.min(time, y - 0.1), y])}>
+              <button className="btn pill" aria-label="Start" title="Start the trim here (I)" onClick={() => setRange(([, y]) => [Math.min(time, y - 0.1), y])}>
                 {Icon.markIn}
-                Start
+                <span className="pill-label">Start</span>
               </button>
-              <button className="btn pill" title="End the trim here (O)" onClick={() => setRange(([x]) => [x, Math.max(time, x + 0.1)])}>
+              <button className="btn pill" aria-label="End" title="End the trim here (O)" onClick={() => setRange(([x]) => [x, Math.max(time, x + 0.1)])}>
                 {Icon.markOut}
-                End
+                <span className="pill-label">End</span>
               </button>
               <button className="round icon" aria-label="Reset trim" title="Use the whole clip" onClick={() => setRange([0, duration])}>
                 {Icon.reset}
               </button>
             </span>
+            )}
           </div>
           <div className="timeline" ref={bar} onPointerDown={drag("seek")}>
             <div className="tl-range" style={{ left: pct(a), width: `calc(${pct(b)} - ${pct(a)})` }}>
@@ -1349,7 +1411,7 @@ export function Studio({
             <span className="mono">
               Start {fmtTime(a)} · End {fmtTime(b)} · Length {fmtTime(Math.max(0, b - a))}
             </span>
-            <span>Space play · I / O set points · S split · Del cut out part · ← → 5 s · Shift+← → one frame · ↑ ↓ volume · M mute · C crop · T hide or show tools · F fullscreen</span>
+            <span>Space play · &lt; &gt; speed · hold the picture for fast · I / O set points · S split · Del cut out part · ← → 5 s · Shift+← → one frame · ↑ ↓ volume · M mute · C crop · T hide or show tools · F fullscreen</span>
           </div>
           {!theater && <ClipStrip clips={(clips ?? []).slice(0, 30)} current={path} onOpen={onOpen} />}
         </div>

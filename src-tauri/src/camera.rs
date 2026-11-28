@@ -747,6 +747,52 @@ mod tests {
         assert_eq!(alpha(&b, 320, 180), 255, "nothing see-through with blur");
     }
 
+    /// What the camera costs: CPU time over 10 s with the recorder asking for a
+    /// 1080p clip's box 60 times a second, with no background effect and with blur.
+    #[test]
+    #[ignore]
+    fn real_camera_cost() {
+        use windows::Win32::Foundation::FILETIME;
+        use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
+        let cpu = || unsafe {
+            let (mut a, mut b, mut k, mut u) = (FILETIME::default(), FILETIME::default(), FILETIME::default(), FILETIME::default());
+            GetProcessTimes(GetCurrentProcess(), &mut a, &mut b, &mut k, &mut u).unwrap();
+            let t = |f: FILETIME| ((f.dwHighDateTime as u64) << 32 | f.dwLowDateTime as u64) as f64 / 1e7;
+            t(k) + t(u)
+        };
+        crate::game_detect::init(std::path::PathBuf::from(std::env::var("APPDATA").unwrap()).join("com.rewind.app").join("ai"));
+        for bg in ["off", "blur", "remove"] {
+            let s = crate::settings::Settings { camera_enabled: true, camera_background: bg.into(), camera_border: true, ..Default::default() };
+            apply(&s);
+            let t = Instant::now();
+            while t.elapsed() < Duration::from_secs(6) {
+                want(422, 236);
+                std::thread::sleep(Duration::from_millis(16));
+            }
+            let (c0, t0) = (cpu(), Instant::now());
+            let mut frames = 0u64;
+            let mut last = 0;
+            while t0.elapsed() < Duration::from_secs(10) {
+                if let Some(b) = want(422, 236)
+                    && b.seq != last
+                {
+                    last = b.seq;
+                    frames += 1;
+                }
+                std::thread::sleep(Duration::from_millis(16));
+            }
+            let used = cpu() - c0;
+            let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+            eprintln!(
+                "{bg}: {:.0}% of one core ({:.1}% of all {cores}), {:.1} camera frames/s, note {:?}",
+                used / 10.0 * 100.0,
+                used / 10.0 * 100.0 / cores as f64,
+                frames as f64 / 10.0,
+                note()
+            );
+        }
+    }
+
     /// A real camera, if there is one: list it and read a few frames.
     #[test]
     #[ignore]
