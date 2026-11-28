@@ -24,6 +24,7 @@ mod duplicates;
 mod trim_match;
 mod camera;
 mod segment;
+mod ramp;
 mod montage;
 mod game_detect;
 #[macro_use]
@@ -1509,10 +1510,19 @@ async fn cut_clip(
     replace: bool,
     audio: Option<audio_edit::AudioEdit>,
     crop: Option<library::Crop>,
+    ramp: Option<String>,
 ) -> Result<Vec<String>, String> {
     let audio = audio.unwrap_or_default();
     let total: f64 = pieces.iter().map(|(a, b)| (b - a).max(0.0)).sum();
     if join {
+        // Joins as speed ramps ("subtle" / "medium" / "strong"): a little shorter than the pieces.
+        if let Some(shape) = ramp.as_deref().and_then(ramp::shape)
+            && pieces.len() > 1
+        {
+            let lens: Vec<f64> = pieces.iter().map(|(a, b)| (b - a).max(0.0)).collect();
+            let out = edit(app, path, replace, Some(ramp::joined_len(&lens, shape)), move |p| library::cut_ramped(p, &pieces, &audio, crop, shape)).await?;
+            return Ok(vec![out]);
+        }
         let out = edit(app, path, replace, Some(total), move |p| library::cut_joined(p, &pieces, &audio, crop)).await?;
         return Ok(vec![out]);
     }

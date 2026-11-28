@@ -14,7 +14,8 @@ import { Music } from "lucide-react";
 
 /** One piece of the montage: part of a clip. */
 type Piece = { id: number; clip: ClipFile; start: number; end: number; length: number; volumeDb?: number };
-type Transition = "cut" | "fade" | "crossfade";
+type Transition = "cut" | "fade" | "crossfade" | "ramp";
+type RampStrength = "subtle" | "medium" | "strong";
 type Source = "random" | "range" | "edited" | "unedited";
 type Take = "end" | "middle" | "start";
 
@@ -304,6 +305,7 @@ function Editor({
   const [fps, setFps] = useState(60);
   const [transition, setTransition] = useState<Transition>("cut");
   const [transitionSecs, setTransitionSecs] = useState(0.5);
+  const [rampStrength, setRampStrength] = useState<RampStrength>("medium");
   const [render, setRender] = useState<{ progress: number; out?: string; err?: string } | null>(null);
   const [binQuery, setBinQuery] = useState("");
   const [picking, setPicking] = useState(false);
@@ -559,6 +561,7 @@ function Editor({
         fps,
         transition,
         transitionSecs,
+        ramp: rampStrength,
       });
       setRender({ progress: 1, out });
     } catch (e) {
@@ -671,8 +674,16 @@ function Editor({
               <option value="cut">Cut</option>
               <option value="fade">Fade through black</option>
               <option value="crossfade">Crossfade</option>
+              <option value="ramp">Speed ramp</option>
             </Select>
-            {transition !== "cut" && (
+            {transition === "ramp" && (
+              <Select className="select" value={rampStrength} onChange={(e) => setRampStrength(e.target.value as RampStrength)} aria-label="Speed ramp strength">
+                <option value="subtle">Subtle</option>
+                <option value="medium">Medium</option>
+                <option value="strong">Strong</option>
+              </Select>
+            )}
+            {transition !== "cut" && transition !== "ramp" && (
               <Select className="select" value={transitionSecs} onChange={(e) => setTransitionSecs(Number(e.target.value))} aria-label="Transition length">
                 <option value={0.3}>0.3 s</option>
                 <option value={0.5}>0.5 s</option>
@@ -680,7 +691,17 @@ function Editor({
               </Select>
             )}
           </div>
-          {transition !== "cut" && <small className="muted">Shows in the exported video{transition === "crossfade" ? "; each join overlaps, so it's a little shorter" : ""}.</small>}
+          {transition !== "cut" && (
+            <small className="muted">
+              Shows in the exported video
+              {transition === "crossfade"
+                ? "; each join overlaps, so it's a little shorter"
+                : transition === "ramp"
+                  ? ": each clip speeds up into the join and the next slows back down from it (sound too), so it's a little shorter"
+                  : ""}
+              .
+            </small>
+          )}
           <div className="label">Export</div>
           <div className="row">
             <Select className="select" value={height} onChange={(e) => setHeight(Number(e.target.value))} aria-label="Size">

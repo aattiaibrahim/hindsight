@@ -1,4 +1,5 @@
 import { Select } from "./Select";
+import { JoinStyle, RAMPS, joinedLen, sides, speedAt } from "./ramp";
 import { useSpoiler } from "./spoiler";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -124,6 +125,9 @@ function rulerLabel(t: number) {
   const s = Math.round(t % 60);
   return `${m}:${String(s).padStart(2, "0")}`;
 }
+
+/** How the kept parts were last joined (hard cut or a speed ramp), for the next clip too. */
+let lastJoin: JoinStyle = "cut";
 
 /** Playback speeds offered, slowest first. */
 const SPEEDS = [0.25, 0.5, 1, 2, 4];
@@ -487,6 +491,12 @@ export function Studio({
   const [cutOut, setCutOut] = useState<number[]>([]);
   const cutHistory = useRef<[number[], number[]][]>([]);
   const [saveApart, setSaveApart] = useState(false);
+  // The kept parts joined with hard cuts, or with speed ramps (ramp.ts).
+  const [joinStyle, setJoinStyleState] = useState<JoinStyle>(() => lastJoin);
+  const setJoinStyle = (j: JoinStyle) => {
+    lastJoin = j;
+    setJoinStyleState(j);
+  };
 
   // Where you were in the clip, for when it carries on from its NAS copy.
   const snap = useRef<{ path: string | null; time: number; playing: boolean; range: [number, number]; edits: TrackEdit[]; crop: Crop | null } | null>(null);
@@ -897,6 +907,52 @@ export function Studio({
     }
   };
 
+  // While playing, the ramps play as they'll be saved: the speed follows the curve next to
+  // each join, and the jump over a cut part happens on the frame (not at the next time update).
+  const rampPlay = useRef({ on: false, pieces: [] as [number, number][], style: "cut" as JoinStyle });
+  useEffect(() => {
+    if (!playing) return;
+    let raf = 0;
+    let lastRate = 0;
+    const tick = () => {
+      const v = video.current;
+      const { on, pieces, style } = rampPlay.current;
+      if (v && !on && lastRate) {
+        // Ramps turned off while playing: back to the chosen speed.
+        v.playbackRate = speedRef.current;
+        lastRate = 0;
+        syncExtra();
+      }
+      if (v && on && !v.paused && !press.current?.held) {
+        const t = v.currentTime;
+        const k = pieces.findIndex(([x, y]) => t >= x - 0.001 && t < y);
+        if (k >= 0) {
+          const [x, y] = pieces[k];
+          const n = pieces.length;
+          if (k < n - 1 && t >= y - 0.004) v.currentTime = pieces[k + 1][0];
+          else {
+            const r = speedRef.current * speedAt(t - x, sides(y - x, k > 0, k < n - 1, style));
+            if (Math.abs(r - lastRate) > 0.01) {
+              v.playbackRate = Math.min(16, r);
+              lastRate = r;
+              syncExtra();
+            }
+          }
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(raf);
+      const v = video.current;
+      if (v && lastRate && !press.current?.held) {
+        v.playbackRate = speedRef.current;
+        syncExtra();
+      }
+    };
+  }, [playing, syncExtra]);
+
   if (!path) {
     const recent = (clips ?? []).slice(0, 12);
     return (
@@ -934,7 +990,12 @@ export function Studio({
     .map((p): [number, number] => [Math.max(p.s, a), Math.min(p.e, b)])
     .filter(([x, y]) => y - x >= 0.1);
   const cutting = parts.some((p) => p.cut && p.e > a + 0.01 && p.s < b - 0.01);
-  const keptLength = keptPieces.reduce((n, [x, y]) => n + (y - x), 0);
+  // Joined with speed ramps: the parts next to each join play faster, so it's a little shorter.
+  const ramping = cutting && !saveApart && joinStyle !== "cut" && keptPieces.length > 1;
+  const keptLength = ramping
+    ? joinedLen(keptPieces.map(([x, y]) => y - x), joinStyle)
+    : keptPieces.reduce((n, [x, y]) => n + (y - x), 0);
+  rampPlay.current = { on: ramping, pieces: keptPieces, style: joinStyle };
   const currentPart = parts[partIndexAt(time)];
   cutRef.current = parts.filter((p) => p.cut);
   const remember = () => {
@@ -1032,7 +1093,7 @@ export function Studio({
             cutting
               ? saveApart
                 ? run("Saving parts…", () => api.cutClip(path, keptPieces, false, false, editsForSave, cropForSave).then((made) => made[0]))
-                : run("Cutting…", () => api.cutClip(path, keptPieces, true, replace, editsForSave, cropForSave).then((made) => made[0]), replace)
+                : run(ramping ? "Making the speed ramps…" : "Cutting…", () => api.cutClip(path, keptPieces, true, replace, editsForSave, cropForSave, ramping ? joinStyle : null).then((made) => made[0]), replace)
               : run(wholeFile ? (cropped ? "Saving crop…" : "Saving audio changes…") : "Saving trim…", () => api.trim(path, a, b, true, replace, editsForSave, cropForSave), replace)
           }
         >
@@ -1420,6 +1481,22 @@ export function Studio({
                     Each part on its own
                   </button>
                 </span>
+              )}
+              {cutting && keptPieces.length > 1 && !saveApart && (
+                <Select
+                  className="select"
+                  value={joinStyle}
+                  aria-label="Joins"
+                  title="How the kept parts meet: a hard cut, or a speed ramp (speeds up into the join and slows back down after it). Plays as it will look."
+                  onChange={(e) => setJoinStyle(e.target.value as JoinStyle)}
+                >
+                  <option value="cut">Joins: hard cut</option>
+                  {(Object.keys(RAMPS) as (keyof typeof RAMPS)[]).map((k) => (
+                    <option key={k} value={k}>
+                      Joins: {RAMPS[k].label.toLowerCase()}
+                    </option>
+                  ))}
+                </Select>
               )}
               <button className="btn small" onClick={clearCuts} title="Remove every split and cut">
                 Clear cuts

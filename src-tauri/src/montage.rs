@@ -7,8 +7,9 @@
 //! - The song loops if it's shorter than the montage, is cut to its length,
 //!   and fades out over the last two seconds. Clip sound and song each get
 //!   their own volume.
-//! - Between clips: a cut, a fade through black, or a crossfade (the two clips
-//!   overlap, so the montage is a little shorter). Each clip has its own volume
+//! - Between clips: a cut, a fade through black, a crossfade (the two clips
+//!   overlap, so the montage is a little shorter), or a speed ramp (ramp.rs: the end
+//!   of one clip speeds up into the join, the next slows back down from it). Each clip has its own volume
 //!   on top of the clips' overall one.
 //! - Encoded as H.264 on the GPU (plays everywhere), saved to
 //!   `<clips>/Montages/Montage <date time>.mp4`. Progress comes from ffmpeg's
@@ -56,9 +57,12 @@ pub struct Montage {
     pub height: u32,
     #[serde(default = "default_fps")]
     pub fps: u32,
-    /// Between clips: "cut", "fade" (through black) or "crossfade"
+    /// Between clips: "cut", "fade" (through black), "crossfade" or "ramp" (speed ramp)
     #[serde(default)]
     pub transition: String,
+    /// A speed ramp's strength: "subtle", "medium" or "strong"
+    #[serde(default)]
+    pub ramp: String,
     /// How long a transition takes (seconds)
     #[serde(default = "default_transition_secs")]
     pub transition_secs: f64,
@@ -147,7 +151,20 @@ pub fn args(m: &Montage, audio_tracks: &[Vec<usize>]) -> Result<(Vec<std::ffi::O
             }
         }
     }
-    if kind == "crossfade" {
+    if kind == "ramp" {
+        // Speed ramps: each clip's ends next to a join play faster, so it's a little shorter.
+        let shape = crate::ramp::shape(&m.ramp).or(crate::ramp::shape("medium")).ok_or("no ramp")?;
+        total = 0.0;
+        let mut pairs = String::new();
+        for (i, len) in lens.iter().enumerate() {
+            let s = crate::ramp::Sides::new(*len, i > 0, i < last, shape);
+            total += s.out_len();
+            g.push(s.video(&format!("v{i}"), &format!("vr{i}"), fps as f64));
+            g.extend(s.audio(&format!("a{i}"), &format!("ar{i}"), &format!("m{i}")));
+            pairs += &format!("[vr{i}][ar{i}]");
+        }
+        g.push(format!("{pairs}concat=n={}:v=1:a=1[vout][aclips]", m.pieces.len()));
+    } else if kind == "crossfade" {
         // Each clip dissolves into the next: they overlap by `d`, so the montage is
         // that much shorter for every join.
         let mut vprev = "v0".to_string();
@@ -298,6 +315,7 @@ mod tests {
             fps: 30,
             transition: "cut".into(),
             transition_secs: 0.5,
+            ramp: "medium".into(),
         };
         let out = d.join("montage.mp4");
         let mut last = 0.0;
@@ -306,8 +324,10 @@ mod tests {
         assert_eq!((p.codec.as_str(), p.width, p.height, p.audio_tracks), ("h264", 1280, 720, 1));
         assert!((p.duration - 5.5).abs() < 0.3, "{}", p.duration);
         assert_eq!(last, 1.0);
-        // A fade through black keeps the length; a crossfade overlaps each join.
-        for (kind, want) in [("fade", 5.5), ("crossfade", 5.5 - 2.0 * 0.5)] {
+        // A fade through black keeps the length; a crossfade overlaps each join; a
+        // speed ramp plays the ends next to each join faster.
+        let ramped = crate::ramp::joined_len(&[2.0, 1.5, 2.0], crate::ramp::shape("medium").unwrap());
+        for (kind, want) in [("fade", 5.5), ("crossfade", 5.5 - 2.0 * 0.5), ("ramp", ramped)] {
             let m2 = Montage { transition: kind.into(), ..m.clone() };
             let out2 = d.join(format!("montage-{kind}.mp4"));
             render(&m2, &out2, |_| {}).unwrap();
@@ -319,7 +339,7 @@ mod tests {
 
     #[test]
     fn empty_montage_is_an_error() {
-        let m = Montage { pieces: vec![], music: None, clip_volume_db: 0.0, height: 1080, fps: 60, transition: String::new(), transition_secs: 0.5 };
+        let m = Montage { pieces: vec![], music: None, clip_volume_db: 0.0, height: 1080, fps: 60, transition: String::new(), transition_secs: 0.5, ramp: String::new() };
         assert!(args(&m, &[]).is_err());
     }
 }

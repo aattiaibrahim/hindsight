@@ -40,9 +40,11 @@ export type MontagePlan = {
   clipVolumeDb: number;
   height: number;
   fps: number;
-  /** Between clips: a cut, a fade through black, or a crossfade */
-  transition: "cut" | "fade" | "crossfade";
+  /** Between clips: a cut, a fade through black, a crossfade, or a speed ramp */
+  transition: "cut" | "fade" | "crossfade" | "ramp";
   transitionSecs: number;
+  /** A speed ramp's strength */
+  ramp?: "subtle" | "medium" | "strong";
 };
 /** What this PC's NVIDIA GPU can encode. */
 /** encoder: "NVIDIA NVENC" | "AMD AMF" | "Intel Quick Sync" | "Windows Media Foundation" | "OpenH264 (CPU)"; native: the native engine works here (NVIDIA only). */
@@ -645,8 +647,9 @@ export const api = {
   trim: (path: string, start: number, end: number, exact: boolean, replace = false, audio?: TrackEdit[], crop?: CropRect) =>
     invoke<string>("trim_clip", { path, start, end, exact, replace, audio: audio ?? null, crop: crop ?? null }),
   /** Cut parts out: `pieces` are the parts kept. `join`: one clip; else each piece on its own. */
-  cutClip: (path: string, pieces: [number, number][], join: boolean, replace = false, audio?: TrackEdit[], crop?: CropRect) =>
-    invoke<string[]>("cut_clip", { path, pieces, join, replace, audio: audio ?? null, crop: crop ?? null }),
+  /** `ramp`: join the pieces with speed ramps ("subtle" / "medium" / "strong") instead of hard cuts. */
+  cutClip: (path: string, pieces: [number, number][], join: boolean, replace = false, audio?: TrackEdit[], crop?: CropRect, ramp?: string | null) =>
+    invoke<string[]>("cut_clip", { path, pieces, join, replace, audio: audio ?? null, crop: crop ?? null, ramp: ramp ?? null }),
   clipWaveforms: (path: string) => invoke<Waveform[]>("clip_waveforms", { path }),
   exportH264: (path: string, replace = false, audio?: TrackEdit[], crop?: CropRect) =>
     invoke<string>("export_h264", { path, replace, audio: audio ?? null, crop: crop ?? null }),

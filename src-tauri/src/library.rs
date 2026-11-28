@@ -1537,6 +1537,77 @@ pub fn cut_joined(path: &str, pieces: &[(f64, f64)], audio: &AudioEdit, crop: Op
     joined
 }
 
+/// Like `cut_joined`, but each join is a speed ramp (ramp.rs) instead of a hard cut:
+/// the pieces are cut as usual, then one pass ramps the sides next to each join and
+/// joins them, every sound track kept (with its name). Re-encoded in the clip's codec.
+pub fn cut_ramped(path: &str, pieces: &[(f64, f64)], audio: &AudioEdit, crop: Option<Crop>, shape: crate::ramp::Shape) -> Result<String, String> {
+    let pieces = check_pieces(path, pieces)?;
+    if pieces.len() == 1 {
+        return cut_piece(path, pieces[0].0, pieces[0].1, audio, crop);
+    }
+    let src = Path::new(path);
+    let mut parts: Vec<String> = Vec::new();
+    let made = (|| {
+        for &(a, b) in &pieces {
+            parts.push(cut_piece(path, a, b, audio, crop)?);
+        }
+        let info = probe(&parts[0])?;
+        let titles = track_titles(&parts[0]);
+        let tracks = info.audio_tracks as usize;
+        let fps = if info.fps > 1.0 { info.fps } else { 60.0 };
+        let n = parts.len();
+        let mut args = ffmpeg::args(&["-hide_banner", "-loglevel", "error", "-y"]);
+        for p in &parts {
+            args.push("-i".into());
+            args.push(p.into());
+        }
+        let mut g = Vec::new();
+        let mut total = 0.0;
+        for (i, p) in parts.iter().enumerate() {
+            let len = probe(p).map(|x| x.duration).unwrap_or(pieces[i].1 - pieces[i].0);
+            let s = crate::ramp::Sides::new(len, i > 0, i + 1 < n, shape);
+            total += s.out_len();
+            g.push(format!("[{i}:v:0]setpts=PTS-STARTPTS[pv{i}]"));
+            g.push(s.video(&format!("pv{i}"), &format!("v{i}"), fps));
+            for t in 0..tracks {
+                g.push(format!("[{i}:a:{t}]asetpts=PTS-STARTPTS[pa{i}x{t}]"));
+                g.extend(s.audio(&format!("pa{i}x{t}"), &format!("a{i}x{t}"), &format!("p{i}t{t}")));
+            }
+        }
+        let ins: String = (0..n).map(|i| format!("[v{i}]") + &(0..tracks).map(|t| format!("[a{i}x{t}]")).collect::<String>()).collect();
+        let outs: String = "[vout]".to_string() + &(0..tracks).map(|t| format!("[aout{t}]")).collect::<String>();
+        g.push(format!("{ins}concat=n={n}:v=1:a={tracks}{outs}"));
+        args.extend(ffmpeg::args(&["-filter_complex", &g.join(";"), "-map", "[vout]"]));
+        for t in 0..tracks {
+            args.extend(ffmpeg::args(&["-map", &format!("[aout{t}]")]));
+        }
+        let codec = if ["h264", "hevc", "av1"].contains(&info.codec.as_str()) { info.codec.clone() } else { "h264".into() };
+        args.extend(venc(&codec, crate::encoders::Rate::Quality(21), &["-preset", "p5", "-cq", "21", "-b:v", "0"]));
+        if tracks > 0 {
+            args.extend(ffmpeg::args(&["-c:a", "aac", "-b:a", "192k"]));
+        }
+        for (t, title) in titles.iter().enumerate().take(tracks) {
+            if !title.is_empty() {
+                args.push(format!("-metadata:s:a:{t}").into());
+                args.push(format!("title={title}").into());
+            }
+        }
+        let out = unique(src, " (cut)", &ext_of(Path::new(&parts[0])));
+        let part = part_of(&out);
+        args.push(part.clone().into());
+        ffmpeg::run("ffmpeg", &args).map_err(|e| format!("The speed ramps couldn't be made: {e}"))?;
+        if let Err(e) = verify_output(&part, Some(total)) {
+            let _ = fs::remove_file(&part);
+            return Err(e);
+        }
+        publish(&part, &out)
+    })();
+    for p in &parts {
+        let _ = fs::remove_file(p);
+    }
+    made
+}
+
 /// Each kept piece as a clip of its own: "… (part 1).ext", "… (part 2).ext"…
 pub fn cut_separately(path: &str, pieces: &[(f64, f64)], audio: &AudioEdit, crop: Option<Crop>) -> Result<Vec<String>, String> {
     let pieces = check_pieces(path, pieces)?;
